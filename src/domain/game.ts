@@ -69,6 +69,10 @@ export function candidateAt(round: Round, side: Side): Candidate {
   return side === "left" ? round.leftCandidate : round.rightCandidate;
 }
 
+export function isSelectionBoundWait(state: GameState): boolean {
+  return state.round.status === "generating" && Boolean(state.pendingSelection);
+}
+
 export function beginSelection(
   state: GameState,
   winnerSide: Side,

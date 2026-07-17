@@ -4,6 +4,7 @@ import {
   beginSelection,
   completeSelection,
   failSelection,
+  isSelectionBoundWait,
   mergeServerResult,
   recentConcepts,
   recoverInterruptedSelection,
@@ -71,6 +72,19 @@ describe("round transitions", () => {
     });
     expect(next.round.leftCandidate).toBe(winner);
     expect(next.round.rightCandidate).toBe(challenger);
+  });
+
+  it("distinguishes a selection-bound wait from idle and retryable states", () => {
+    const initial = game();
+    const pending = beginBufferedSelection(
+      initial,
+      "left",
+      "2026-07-16T00:01:00.000Z",
+    )!;
+
+    expect(isSelectionBoundWait(initial)).toBe(false);
+    expect(isSelectionBoundWait(pending)).toBe(true);
+    expect(isSelectionBoundWait(failSelection(pending, "retry"))).toBe(false);
   });
 
   it("rejects a generation job ID that cannot be used as a mailbox filename", () => {
