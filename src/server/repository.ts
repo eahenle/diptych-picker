@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { migrateRoundStreakState, type GameState } from "@/domain/game";
+import { migrateGameState, type GameState } from "@/domain/game";
 
 export interface GameRepository {
   load(): Promise<GameState | null>;
@@ -42,7 +42,7 @@ export class JsonGameRepository implements GameRepository {
       const state = JSON.parse(
         await readFile(this.filePath, "utf8"),
       ) as GameState | null;
-      return state ? migrateRoundStreakState(state) : null;
+      return state ? migrateGameState(state) : null;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -174,7 +174,7 @@ export class MemoryGameRepository implements GameRepository {
 
   async load(): Promise<GameState | null> {
     if (!this.state) return null;
-    this.state = migrateRoundStreakState(this.state);
+    this.state = migrateGameState(this.state);
     return this.state;
   }
 

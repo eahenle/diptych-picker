@@ -85,6 +85,7 @@ function challengerState(
     sessionId: "session-1",
     ready,
     refillJobs: [],
+    pendingComparison: null,
     ratings: [
       rating(game.round.leftCandidate),
       rating(game.round.rightCandidate),
@@ -263,6 +264,7 @@ describe("GameService challenger buffer", () => {
           jobId: "refill-1",
           pinnedWinnerId: originalWinner.id,
           enqueuedAt: NOW,
+          expectedJob: context.queue.enqueue.mock.calls[0][0],
         },
       ]);
       expect(context.queue.enqueue).toHaveBeenCalledTimes(1);
@@ -310,27 +312,6 @@ describe("GameService challenger buffer", () => {
         enqueuedAt: "2026-07-15T23:01:00.000Z",
       },
     ];
-    const challengers = challengerState(game, {
-      ready: staleReady,
-      refillJobs: [
-        {
-          jobId: "old-refill",
-          pinnedWinnerId: "old-winner",
-          enqueuedAt: "2026-07-15T23:02:00.000Z",
-        },
-      ],
-      ratings: [
-        rating(game.round.leftCandidate),
-        rating(game.round.rightCandidate, {
-          source: "generated",
-          poolMember: false,
-        }),
-        ...staleReady.map(({ candidate: item }) =>
-          rating(item, { source: "generated", poolMember: false }),
-        ),
-      ],
-    });
-    const queue = mailbox();
     const staleJob = {
       id: "old-refill",
       kind: "refill" as const,
@@ -345,6 +326,28 @@ describe("GameService challenger buffer", () => {
       sessionId: "session-1",
       pinnedWinnerId: "old-winner",
     };
+    const challengers = challengerState(game, {
+      ready: staleReady,
+      refillJobs: [
+        {
+          jobId: "old-refill",
+          pinnedWinnerId: "old-winner",
+          enqueuedAt: "2026-07-15T23:02:00.000Z",
+          expectedJob: staleJob,
+        },
+      ],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate, {
+          source: "generated",
+          poolMember: false,
+        }),
+        ...staleReady.map(({ candidate: item }) =>
+          rating(item, { source: "generated", poolMember: false }),
+        ),
+      ],
+    });
+    const queue = mailbox();
     queue.setWork(staleJob);
     const context = serviceFor({
       game,
@@ -357,6 +360,7 @@ describe("GameService challenger buffer", () => {
     await context.service.select("right", 3);
 
     const persisted = await context.challengerRepository.load();
+    const enqueuedJobs = context.queue.enqueue.mock.calls.map(([job]) => job);
     expect(persisted?.ready).toEqual([staleReady[1]]);
     expect(persisted?.refillJobs).toEqual([
       challengers.refillJobs[0],
@@ -364,11 +368,13 @@ describe("GameService challenger buffer", () => {
         jobId: "new-refill-1",
         pinnedWinnerId: "right",
         enqueuedAt: NOW,
+        expectedJob: enqueuedJobs[0],
       },
       {
         jobId: "new-refill-2",
         pinnedWinnerId: "right",
         enqueuedAt: NOW,
+        expectedJob: enqueuedJobs[1],
       },
     ]);
     expect(await queue.readWork("old-refill")).toEqual(staleJob);
@@ -518,8 +524,7 @@ describe("GameService challenger buffer", () => {
     let failComparisonSave = true;
     const challengerRepository: ChallengerRepository = {
       load: () => backingChallengers.load(),
-      clearSession: (sessionId) =>
-        backingChallengers.clearSession(sessionId),
+      clearSession: (sessionId) => backingChallengers.clearSession(sessionId),
       withLock: (operation) => backingChallengers.withLock(operation),
       save: async (state) => {
         if (failComparisonSave) {
@@ -718,18 +723,29 @@ describe("GameService challenger buffer", () => {
         winStreak: 1,
       },
     });
-    const records = [
-      {
-        jobId: "slow-refill",
-        pinnedWinnerId: "left",
-        enqueuedAt: NOW,
-      },
-      {
-        jobId: "fast-refill",
-        pinnedWinnerId: "left",
-        enqueuedAt: NOW,
-      },
-    ];
+    const jobs: Extract<GenerationJob, { kind: "refill" }>[] = [
+      "slow-refill",
+      "fast-refill",
+    ].map((id) => ({
+      id,
+      kind: "refill",
+      createdAt: NOW,
+      roundNumber: 3,
+      winnerSide: "left",
+      retainedWinner: game.round.leftCandidate,
+      rejectedCandidate: game.round.rightCandidate,
+      selectionHistory: game.history,
+      recentConcepts: [],
+      preferenceSeed: game.preferenceSeed,
+      sessionId: "session-1",
+      pinnedWinnerId: "left",
+    }));
+    const records = jobs.map((expectedJob) => ({
+      jobId: expectedJob.id,
+      pinnedWinnerId: expectedJob.pinnedWinnerId,
+      enqueuedAt: expectedJob.createdAt,
+      expectedJob,
+    }));
     const challengers = challengerState(game, {
       ready: [],
       refillJobs: records,
@@ -739,22 +755,7 @@ describe("GameService challenger buffer", () => {
       ],
     });
     const queue = mailbox();
-    for (const record of records) {
-      queue.setWork({
-        id: record.jobId,
-        kind: "refill",
-        createdAt: record.enqueuedAt,
-        roundNumber: 3,
-        winnerSide: "left",
-        retainedWinner: game.round.leftCandidate,
-        rejectedCandidate: game.round.rightCandidate,
-        selectionHistory: game.history,
-        recentConcepts: [],
-        preferenceSeed: game.preferenceSeed,
-        sessionId: "session-1",
-        pinnedWinnerId: "left",
-      });
-    }
+    for (const job of jobs) queue.setWork(job);
     queue.setResult(completedResult("slow-refill", "2026-07-16T01:04:00.000Z"));
     queue.setResult(completedResult("fast-refill", "2026-07-16T01:02:00.000Z"));
     const context = serviceFor({
@@ -871,45 +872,42 @@ describe("GameService challenger buffer", () => {
       "preference seed",
       (job: GenerationJob) => ({ ...job, preferenceSeed: "tampered seed" }),
     ],
-  ])(
-    "rejects tampered %s after service restart",
-    async (_label, tamper) => {
-      const game = gameState();
-      const gameRepository = new MemoryGameRepository(game);
-      const challengerRepository = new MemoryChallengerRepository(
-        challengerState(game),
-      );
-      const queue = mailbox();
-      const first = serviceFor({
-        gameRepository,
-        challengerRepository,
-        queue,
-        createId: ids("restart-tamper", "replacement-refill"),
-      });
-      await first.service.select("left", 3);
-      const expected = queue.enqueue.mock.calls[0][0];
-      queue.setWork(tamper(expected) as GenerationJob);
-      queue.setResult(completedResult("restart-tamper"));
-      const restartedAssets = verifier();
-      const restarted = serviceFor({
-        gameRepository,
-        challengerRepository,
-        queue,
-        assets: restartedAssets,
-        createId: ids("replacement-refill"),
-      });
+  ])("rejects tampered %s after service restart", async (_label, tamper) => {
+    const game = gameState();
+    const gameRepository = new MemoryGameRepository(game);
+    const challengerRepository = new MemoryChallengerRepository(
+      challengerState(game),
+    );
+    const queue = mailbox();
+    const first = serviceFor({
+      gameRepository,
+      challengerRepository,
+      queue,
+      createId: ids("restart-tamper", "replacement-refill"),
+    });
+    await first.service.select("left", 3);
+    const expected = queue.enqueue.mock.calls[0][0];
+    queue.setWork(tamper(expected) as GenerationJob);
+    queue.setResult(completedResult("restart-tamper"));
+    const restartedAssets = verifier();
+    const restarted = serviceFor({
+      gameRepository,
+      challengerRepository,
+      queue,
+      assets: restartedAssets,
+      createId: ids("replacement-refill"),
+    });
 
-      await restarted.service.reconcile();
+    await restarted.service.reconcile();
 
-      expect(restartedAssets.verify).not.toHaveBeenCalled();
-      expect(queue.archive).toHaveBeenCalledWith("restart-tamper");
-      expect(
-        (await challengerRepository.load())?.ratings.some(
-          ({ candidate: item }) => item.id === "challenger-restart-tamper",
-        ),
-      ).toBe(false);
-    },
-  );
+    expect(restartedAssets.verify).not.toHaveBeenCalled();
+    expect(queue.archive).toHaveBeenCalledWith("restart-tamper");
+    expect(
+      (await challengerRepository.load())?.ratings.some(
+        ({ candidate: item }) => item.id === "challenger-restart-tamper",
+      ),
+    ).toBe(false);
+  });
 
   it("re-enqueues the exact persisted refill after restart when publication never happened", async () => {
     const game = gameState();

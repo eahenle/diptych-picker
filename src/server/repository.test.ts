@@ -65,6 +65,34 @@ describe("JsonGameRepository", () => {
     expect(restored?.round.leftCandidate.winCount).toBe(2);
   });
 
+  it("migrates pending selections that predate the generation discriminator", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-picker-legacy-"));
+    const file = join(directory, "game.json");
+    const legacy = {
+      ...structuredClone(state),
+      round: {
+        ...structuredClone(state.round),
+        status: "generating",
+        replacingSide: "right",
+      },
+      pendingSelection: {
+        winnerSide: "left",
+        selectedAt: "2026-07-17T04:31:14.240Z",
+        generationJobId: "legacy-job",
+      },
+    };
+    await writeFile(file, JSON.stringify(legacy));
+
+    const restored = await new JsonGameRepository(file).load();
+
+    expect(restored?.pendingSelection).toEqual({
+      kind: "generation",
+      winnerSide: "left",
+      selectedAt: "2026-07-17T04:31:14.240Z",
+      generationJobId: "legacy-job",
+    });
+  });
+
   it("restores a cleared repository as empty", async () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-picker-clear-"));
     const file = join(directory, "game.json");

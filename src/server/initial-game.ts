@@ -1,5 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
-import type { ChallengerState } from "@/domain/challenger-state";
+import type {
+  CandidateRating,
+  ChallengerState,
+} from "@/domain/challenger-state";
 import type { Candidate, GameStartState, GameState } from "@/domain/game";
 import type {
   GenerationJob,
@@ -46,6 +49,7 @@ export class InitialGameService {
       const game = await this.options.gameRepository.load();
       if (game) {
         await this.cleanupBootstrap();
+        await this.ensureChallengerStateForGame(game, this.now());
         return { status: "ready", game };
       }
 
@@ -103,6 +107,15 @@ export class InitialGameService {
     }
     const seeded = await this.options.seedState(createdAt);
     if (seeded) {
+      await this.options.challengerRepository.save(
+        this.challengerState(
+          createdAt,
+          [],
+          previous,
+          [seeded.round.leftCandidate, seeded.round.rightCandidate],
+          "auto",
+        ),
+      );
       await this.options.gameRepository.save(seeded);
       return { status: "ready", game: seeded };
     }
@@ -146,21 +159,30 @@ export class InitialGameService {
     readyCandidates: readonly Candidate[],
     previous: ChallengerState | null,
     ratedCandidates: readonly Candidate[] = [],
+    ratedSource: CandidateRating["source"] | "auto" = "curated",
   ): ChallengerState {
     const ratedIds = new Set(
       previous?.ratings.map(({ candidate }) => candidate.id) ?? [],
     );
     const newRatings = ratedCandidates
       .filter((candidate) => !ratedIds.has(candidate.id))
-      .map((candidate) => ({
-        candidate,
-        rating: challengerConfig.initialRating,
-        wins: 0,
-        losses: 0,
-        source: "curated" as const,
-        poolMember: true,
-        lastServedAt: null,
-      }));
+      .map((candidate) => {
+        const source =
+          ratedSource === "auto"
+            ? candidate.imageUrl.startsWith("/seed-assets/")
+              ? "curated"
+              : "generated"
+            : ratedSource;
+        return {
+          candidate,
+          rating: challengerConfig.initialRating,
+          wins: 0,
+          losses: 0,
+          source,
+          poolMember: source === "curated",
+          lastServedAt: null,
+        };
+      });
 
     return {
       version: 1,
@@ -172,6 +194,7 @@ export class InitialGameService {
         enqueuedAt: createdAt,
       })),
       refillJobs: [],
+      pendingComparison: null,
       ratings: [...(previous?.ratings ?? []), ...newRatings],
       generationTurnaroundEmaMs:
         previous?.generationTurnaroundEmaMs ??
@@ -179,6 +202,24 @@ export class InitialGameService {
       consecutiveFallbackDraws: 0,
       nextFallbackAt: null,
     };
+  }
+
+  private async ensureChallengerStateForGame(
+    game: GameState,
+    createdAt: string,
+  ): Promise<void> {
+    await this.options.challengerRepository.withLock(async () => {
+      if (await this.options.challengerRepository.load()) return;
+      await this.options.challengerRepository.save(
+        this.challengerState(
+          createdAt,
+          [],
+          null,
+          [game.round.leftCandidate, game.round.rightCandidate],
+          "auto",
+        ),
+      );
+    });
   }
 
   private selectSeven(candidates: readonly Candidate[]): Candidate[] {
@@ -312,6 +353,16 @@ export class InitialGameService {
       history: [],
       preferenceSeed: bootstrap.preferenceSeed,
     };
+    const previous = await this.options.challengerRepository.load();
+    await this.options.challengerRepository.save(
+      this.challengerState(
+        bootstrap.createdAt,
+        [],
+        previous,
+        [game.round.leftCandidate, game.round.rightCandidate],
+        "generated",
+      ),
+    );
     await this.options.gameRepository.save(game);
     await this.cleanupBootstrap();
     return { status: "ready", game };

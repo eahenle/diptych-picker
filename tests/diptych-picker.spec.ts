@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 
 test.beforeEach(async ({ page, request }) => {
+  await rm(join(process.cwd(), ".local-data", "test"), {
+    recursive: true,
+    force: true,
+  });
   await request.post("/api/game/start", { data: { reset: true } });
   await expect
     .poll(async () => {
@@ -228,7 +234,7 @@ test("a stale tab adopts the authoritative completed round without posting a sta
   await stalePage.close();
 });
 
-test("real mock mailbox failure preserves both images and retries once", async ({
+test("a failed refill preserves the winner and recovers without a manual retry", async ({
   page,
 }) => {
   const images = page.getByTestId("candidate-image");
@@ -244,22 +250,15 @@ test("real mock mailbox failure preserves both images and retries once", async (
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.getByTestId("candidate-card-left").click();
-  await expect(
-    page.getByRole("alert").filter({ hasText: "[mock:fail-once]" }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(page.getByTestId("loading-right")).toBeVisible();
   expect(
     await images.evaluateAll((items) =>
       items.map((item) => (item as HTMLImageElement).getAttribute("src")),
     ),
   ).toEqual(originalUrls);
 
-  await page.getByRole("button", { name: "Preferences" }).click();
-  await page.getByRole("textbox").fill("Prefer deterministic test scenes.");
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await page.getByRole("button", { name: "Retry" }).click();
-
   await expect(page.getByText("Round 2")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   const completedUrls = await images.evaluateAll((items) =>
     items.map((item) => (item as HTMLImageElement).getAttribute("src")),
   );

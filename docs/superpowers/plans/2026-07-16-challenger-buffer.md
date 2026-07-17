@@ -47,7 +47,9 @@ it("loads seven distinct curated candidates", async () => {
   const candidates = await loadCuratedCandidates(NOW);
   expect(candidates).toHaveLength(7);
   expect(new Set(candidates.map(({ id }) => id)).size).toBe(7);
-  expect(candidates.every(({ imageUrl }) => imageUrl.startsWith("/seed-assets/"))).toBe(true);
+  expect(
+    candidates.every(({ imageUrl }) => imageUrl.startsWith("/seed-assets/")),
+  ).toBe(true);
 });
 ```
 
@@ -73,7 +75,9 @@ Define a strict manifest schema and return fresh candidates with the supplied ti
 
 ```ts
 export async function loadCuratedCandidates(now: string): Promise<Candidate[]> {
-  const manifest = curatedManifestSchema.parse(JSON.parse(await readFile(MANIFEST_PATH, "utf8")));
+  const manifest = curatedManifestSchema.parse(
+    JSON.parse(await readFile(MANIFEST_PATH, "utf8")),
+  );
   await Promise.all(manifest.candidates.map(verifySeedPng));
   return manifest.candidates.map(({ file, ...candidate }) => ({
     ...candidate,
@@ -156,7 +160,12 @@ Replace the single-shape pending selection with an explicit union:
 
 ```ts
 export type PendingSelection =
-  | { kind: "generation"; winnerSide: Side; selectedAt: string; generationJobId: string }
+  | {
+      kind: "generation";
+      winnerSide: Side;
+      selectedAt: string;
+      generationJobId: string;
+    }
   | { kind: "buffer"; winnerSide: Side; selectedAt: string };
 ```
 
@@ -261,7 +270,9 @@ Commit: `git commit -m "feat: persist challenger queue and pool"`
 Prove a new game chooses seven distinct candidates, keeps learned ratings, replaces the previous session ID, and restores the same FIFO after refresh.
 
 ```ts
-expect(start.game.round.leftCandidate.id).not.toBe(start.game.round.rightCandidate.id);
+expect(start.game.round.leftCandidate.id).not.toBe(
+  start.game.round.rightCandidate.id,
+);
 expect((await challengerRepository.load())?.ready).toHaveLength(5);
 expect(new Set(allSevenIds).size).toBe(7);
 ```
@@ -327,12 +338,14 @@ Expected: FAIL because `refill` is not a valid job kind.
 Add:
 
 ```ts
-const refillGenerationJobSchema = z.object({
-  ...generationJobFields,
-  kind: z.literal("refill"),
-  sessionId: jobIdSchema,
-  pinnedWinnerId: nonBlankStringSchema,
-}).strict();
+const refillGenerationJobSchema = z
+  .object({
+    ...generationJobFields,
+    kind: z.literal("refill"),
+    sessionId: jobIdSchema,
+    pinnedWinnerId: nonBlankStringSchema,
+  })
+  .strict();
 ```
 
 Require `pinnedWinnerId === retainedWinner.id` through schema refinement. Keep existing initial and legacy challenger records readable.
@@ -375,7 +388,9 @@ const selected = await service.select("left", 3);
 expect(selected.round.leftCandidate).toBe(originalLeft);
 expect(selected.round.rightCandidate.id).toBe(bufferHead.candidate.id);
 expect(selected.round.status).toBe("idle");
-expect(mailbox.enqueue).toHaveBeenCalledWith(expect.objectContaining({ kind: "refill" }));
+expect(mailbox.enqueue).toHaveBeenCalledWith(
+  expect.objectContaining({ kind: "refill" }),
+);
 ```
 
 - [ ] **Step 2: Write failing stale rollover and concurrency tests**
@@ -414,7 +429,10 @@ For each durable refill record, verify work metadata and terminal result. On suc
 Calculate:
 
 ```ts
-const deficit = Math.max(0, bufferTarget - state.ready.length - state.refillJobs.length);
+const deficit = Math.max(
+  0,
+  bufferTarget - state.ready.length - state.refillJobs.length,
+);
 ```
 
 Create exactly `deficit` durable records using the latest winner/rejected/history/preferences snapshot. Do not cancel old-winner work; every new record pins to the current winner.

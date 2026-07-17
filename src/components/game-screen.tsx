@@ -90,11 +90,18 @@ function matchingPendingSelection(
   server: GameState,
   selection: ActiveSelection,
 ): boolean {
+  const pending = server.pendingSelection;
+  if (
+    server.round.roundNumber !== selection.expectedRound ||
+    !pending ||
+    pending.winnerSide !== selection.winnerSide
+  ) {
+    return false;
+  }
+  if (pending.kind === "buffer") return selection.generationJobId === null;
   return (
     selection.generationJobId !== null &&
-    server.round.roundNumber === selection.expectedRound &&
-    server.pendingSelection?.kind === "generation" &&
-    server.pendingSelection?.generationJobId === selection.generationJobId
+    pending.generationJobId === selection.generationJobId
   );
 }
 
@@ -379,7 +386,6 @@ export function GameScreen() {
     if (
       game?.round.status !== "generating" ||
       !game.pendingSelection ||
-      game.pendingSelection.kind !== "generation" ||
       activeSelectionRef.current
     ) {
       return;
@@ -389,7 +395,10 @@ export function GameScreen() {
       original: game,
       winnerSide: game.pendingSelection.winnerSide,
       expectedRound: game.round.roundNumber,
-      generationJobId: game.pendingSelection.generationJobId,
+      generationJobId:
+        game.pendingSelection.kind === "generation"
+          ? game.pendingSelection.generationJobId
+          : null,
       controller: new AbortController(),
       polling: false,
       retryAttempt: 0,
@@ -516,16 +525,16 @@ export function GameScreen() {
         setConnectionStatus(null);
         setLocalError(null);
 
-        if (
-          server.round.status === "generating" &&
-          server.pendingSelection?.kind === "generation"
-        ) {
+        if (server.round.status === "generating" && server.pendingSelection) {
           const selection: ActiveSelection = {
             token: crypto.randomUUID(),
             original: server,
             winnerSide: server.pendingSelection.winnerSide,
             expectedRound: server.round.roundNumber,
-            generationJobId: server.pendingSelection.generationJobId,
+            generationJobId:
+              server.pendingSelection.kind === "generation"
+                ? server.pendingSelection.generationJobId
+                : null,
             controller: new AbortController(),
             polling: false,
             retryAttempt: 0,

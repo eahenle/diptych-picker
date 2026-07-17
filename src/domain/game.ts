@@ -241,3 +241,36 @@ export function migrateRoundStreakState(state: GameState): GameState {
     },
   };
 }
+
+export function migratePendingSelectionState(state: GameState): GameState {
+  const pending = state.pendingSelection as
+    | PendingSelection
+    | {
+        winnerSide: Side;
+        selectedAt: string;
+        generationJobId: string;
+      }
+    | undefined;
+
+  if (
+    !pending ||
+    "kind" in pending ||
+    typeof pending.generationJobId !== "string"
+  ) {
+    return state;
+  }
+
+  return {
+    ...state,
+    pendingSelection: {
+      kind: "generation",
+      winnerSide: pending.winnerSide,
+      selectedAt: pending.selectedAt,
+      generationJobId: pending.generationJobId,
+    },
+  };
+}
+
+export function migrateGameState(state: GameState): GameState {
+  return migratePendingSelectionState(migrateRoundStreakState(state));
+}

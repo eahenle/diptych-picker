@@ -21,6 +21,21 @@ const candidate = (id: string) => ({
   winCount: 0,
 });
 
+const expectedRefillJob: GenerationJob = {
+  id: "job-1",
+  kind: "refill",
+  createdAt: "2026-07-16T20:02:00.000Z",
+  roundNumber: 3,
+  winnerSide: "left",
+  retainedWinner: candidate("winner-1"),
+  rejectedCandidate: candidate("loser-1"),
+  selectionHistory: [],
+  recentConcepts: ["older concept"],
+  preferenceSeed: "industrial and strange",
+  sessionId: "session-1",
+  pinnedWinnerId: "winner-1",
+};
+
 const populatedState: ChallengerState = {
   version: 1,
   sessionId: "session-1",
@@ -37,8 +52,10 @@ const populatedState: ChallengerState = {
       jobId: "job-1",
       pinnedWinnerId: "winner-1",
       enqueuedAt: "2026-07-16T20:02:00.000Z",
+      expectedJob: expectedRefillJob,
     },
   ],
+  pendingComparison: null,
   ratings: [
     {
       candidate: candidate("winner-1"),
@@ -53,21 +70,6 @@ const populatedState: ChallengerState = {
   generationTurnaroundEmaMs: 240_000,
   consecutiveFallbackDraws: 2,
   nextFallbackAt: "2026-07-16T20:05:00.000Z",
-};
-
-const expectedRefillJob: GenerationJob = {
-  id: "job-1",
-  kind: "refill",
-  createdAt: "2026-07-16T20:02:00.000Z",
-  roundNumber: 3,
-  winnerSide: "left",
-  retainedWinner: candidate("winner-1"),
-  rejectedCandidate: candidate("loser-1"),
-  selectionHistory: [],
-  recentConcepts: ["older concept"],
-  preferenceSeed: "industrial and strange",
-  sessionId: "session-1",
-  pinnedWinnerId: "winner-1",
 };
 
 async function expectSessionReset(

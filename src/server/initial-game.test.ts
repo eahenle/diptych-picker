@@ -97,6 +97,7 @@ function challengerState(
     sessionId: "old-session",
     ready: [],
     refillJobs: [],
+    pendingComparison: null,
     ratings: [],
     generationTurnaroundEmaMs: 42_000,
     consecutiveFallbackDraws: 0,
@@ -170,16 +171,45 @@ function harness({
 describe("InitialGameService", () => {
   it("keeps the immediate seeded GameState path unchanged", async () => {
     const seeded = seededGame();
-    const { service, bootstrapRepository, generation } = harness({
-      seedState: seeded,
-    });
+    const { service, bootstrapRepository, challengerRepository, generation } =
+      harness({
+        seedState: seeded,
+      });
 
     await expect(service.getOrCreate()).resolves.toEqual({
       status: "ready",
       game: seeded,
     });
     await expect(bootstrapRepository.load()).resolves.toBeNull();
+    await expect(challengerRepository.load()).resolves.toMatchObject({
+      ready: [],
+      pendingComparison: null,
+      ratings: [
+        { candidate: seeded.round.leftCandidate, source: "generated" },
+        { candidate: seeded.round.rightCandidate, source: "generated" },
+      ],
+    });
     expect(generation.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("backfills challenger state for a persisted pre-buffer game", async () => {
+    const seeded = seededGame();
+    const { service, gameRepository, challengerRepository } = harness();
+    await gameRepository.save(seeded);
+
+    await expect(service.getOrCreate()).resolves.toEqual({
+      status: "ready",
+      game: seeded,
+    });
+    await expect(challengerRepository.load()).resolves.toMatchObject({
+      ready: [],
+      refillJobs: [],
+      pendingComparison: null,
+      ratings: [
+        { candidate: seeded.round.leftCandidate, source: "generated" },
+        { candidate: seeded.round.rightCandidate, source: "generated" },
+      ],
+    });
   });
 
   it("starts from seven distinct curated candidates and restores the FIFO on refresh", async () => {
@@ -240,6 +270,20 @@ describe("InitialGameService", () => {
           jobId: "old-refill",
           pinnedWinnerId: "old-winner",
           enqueuedAt: "2026-07-15T12:00:00.000Z",
+          expectedJob: {
+            id: "old-refill",
+            kind: "refill",
+            createdAt: "2026-07-15T12:00:00.000Z",
+            roundNumber: 1,
+            winnerSide: "left",
+            retainedWinner: candidate("old-winner", "old winner"),
+            rejectedCandidate: candidate("old-loser", "old loser"),
+            selectionHistory: [],
+            recentConcepts: [],
+            preferenceSeed: "prefer carefully made unfamiliar scenes",
+            sessionId: "old-session",
+            pinnedWinnerId: "old-winner",
+          },
         },
       ],
       ratings: [learned],
@@ -333,8 +377,14 @@ describe("InitialGameService", () => {
   });
 
   it("reconciles only after both immutable PNG results complete", async () => {
-    const { service, gameRepository, bootstrapRepository, generation, verify } =
-      harness();
+    const {
+      service,
+      gameRepository,
+      challengerRepository,
+      bootstrapRepository,
+      generation,
+      verify,
+    } = harness();
     await service.getOrCreate();
     generation.results.set(
       "initial-left-1",
@@ -371,6 +421,22 @@ describe("InitialGameService", () => {
     await expect(gameRepository.load()).resolves.toEqual(
       ready.status === "ready" ? ready.game : null,
     );
+    await expect(challengerRepository.load()).resolves.toMatchObject({
+      ready: [],
+      pendingComparison: null,
+      ratings: [
+        {
+          candidate: { id: "challenger-initial-left-1" },
+          source: "generated",
+          poolMember: false,
+        },
+        {
+          candidate: { id: "challenger-initial-right-1" },
+          source: "generated",
+          poolMember: false,
+        },
+      ],
+    });
   });
 
   it("preserves a successful result on partner failure and retry creates a fresh pair", async () => {

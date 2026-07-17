@@ -49,6 +49,7 @@ const state = (overrides: Partial<ChallengerState> = {}): ChallengerState => ({
   sessionId: "session-1",
   ready: [],
   refillJobs: [],
+  pendingComparison: null,
   ratings: [],
   generationTurnaroundEmaMs: 300_000,
   consecutiveFallbackDraws: 0,

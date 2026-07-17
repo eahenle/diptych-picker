@@ -9,6 +9,7 @@ import {
   type BufferedCandidate,
   type CandidateRating,
   type ChallengerState,
+  type PendingComparisonReceipt,
   type RefillJobRecord,
 } from "@/domain/challenger-state";
 import {
@@ -68,7 +69,6 @@ interface RefillObservation {
 
 export class GameService {
   private reconciliation: Promise<GameState | null> | null = null;
-  private readonly expectedRefillJobs = new Map<string, GenerationJob>();
 
   constructor(
     private readonly gameRepository: GameRepository,
@@ -148,6 +148,7 @@ export class GameService {
         challengerState,
         retainedWinner,
         rejectedCandidate,
+        this.comparisonReceipt(current, winnerSide, selectedAt),
       );
       let preparedReadyHead: BufferedCandidate | null = null;
       let draw = popReady(nextChallengers);
@@ -181,8 +182,11 @@ export class GameService {
       await this.gameRepository.save(inFlight);
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
-      if (preparedReadyHead) {
-        await this.challengerRepository.save(capacity.state);
+      if (nextGame.round.status === "idle") {
+        await this.challengerRepository.save({
+          ...capacity.state,
+          pendingComparison: null,
+        });
       }
       await this.ensureJobsEnqueued(capacity.jobs);
       return nextGame;
@@ -238,6 +242,8 @@ export class GameService {
     let challengers = await this.challengerRepository.load();
     if (!challengers) return game;
 
+    challengers = await this.prepareComparison(game, challengers);
+
     const prepared = await this.completePreparedSelection(game, challengers);
     game = prepared.game;
     challengers = await this.removeDisplayedCandidatesFromReady(
@@ -286,8 +292,9 @@ export class GameService {
       challengers = draw.state;
       if (draw.candidate) {
         game = completeSelection(game, draw.candidate);
-        await this.challengerRepository.save(challengers);
         await this.gameRepository.save(game);
+        challengers = { ...challengers, pendingComparison: null };
+        await this.challengerRepository.save(challengers);
       }
     }
 
@@ -310,19 +317,16 @@ export class GameService {
     observation: RefillObservation,
   ): Promise<{ game: GameState; challengers: ChallengerState }> {
     const { record, work, result } = observation;
-    const expected = this.expectedRefillJobs.get(record.jobId);
+    const expected = record.expectedJob;
 
     if (!result) {
       if (!work) {
-        await this.mailbox.archive(record.jobId);
-        const next = this.withoutRefillRecord(challengers, record.jobId);
-        await this.challengerRepository.save(next);
-        this.expectedRefillJobs.delete(record.jobId);
-        return { game, challengers: next };
+        await this.ensureEnqueued(expected);
+        return { game, challengers };
       }
       if (
         !this.validRefillWork(work, record, challengers.sessionId) ||
-        (expected !== undefined && !this.sameJob(work, expected))
+        !this.sameJob(work, expected)
       ) {
         return {
           game,
@@ -336,7 +340,7 @@ export class GameService {
       result.jobId !== record.jobId ||
       !work ||
       !this.validRefillWork(work, record, challengers.sessionId) ||
-      (expected !== undefined && !this.sameJob(work, expected))
+      !this.sameJob(work, expected)
     ) {
       return {
         game,
@@ -391,7 +395,6 @@ export class GameService {
       await this.mailbox.archive(record.jobId);
       const cleaned = this.withoutRefillRecord(challengers, record.jobId);
       await this.challengerRepository.save(cleaned);
-      this.expectedRefillJobs.delete(record.jobId);
       return { game, challengers: cleaned };
     }
 
@@ -442,7 +445,6 @@ export class GameService {
     await this.mailbox.archive(record.jobId);
     const cleaned = this.withoutRefillRecord(applied, record.jobId);
     await this.challengerRepository.save(cleaned);
-    this.expectedRefillJobs.delete(record.jobId);
     return { game, challengers: cleaned };
   }
 
@@ -453,7 +455,6 @@ export class GameService {
     await this.mailbox.archive(record.jobId);
     const cleaned = this.withoutRefillRecord(state, record.jobId);
     await this.challengerRepository.save(cleaned);
-    this.expectedRefillJobs.delete(record.jobId);
     return cleaned;
   }
 
@@ -493,8 +494,8 @@ export class GameService {
         jobId: id,
         pinnedWinnerId: context.retainedWinner.id,
         enqueuedAt: createdAt,
+        expectedJob: job,
       });
-      this.expectedRefillJobs.set(id, job);
     }
 
     return {
@@ -510,6 +511,7 @@ export class GameService {
     state: ChallengerState,
     winner: Candidate,
     loser: Candidate,
+    receipt: PendingComparisonReceipt,
   ): ChallengerState {
     let ratings = state.ratings;
     const winnerItem = ratings.find(
@@ -546,6 +548,7 @@ export class GameService {
     );
     const updated: ChallengerState = {
       ...state,
+      pendingComparison: receipt,
       ratings: ratings.map((item) => {
         if (item === ratedWinner) {
           return {
@@ -565,6 +568,58 @@ export class GameService {
       }),
     };
     return promoteWinner(updated, winner.id, this.config.poolMaximum);
+  }
+
+  private comparisonReceipt(
+    game: GameState,
+    winnerSide: Side,
+    selectedAt: string,
+  ): PendingComparisonReceipt {
+    return {
+      selectedAt,
+      roundNumber: game.round.roundNumber,
+      winnerSide,
+      winnerId: candidateAt(game.round, winnerSide).id,
+      loserId: candidateAt(game.round, oppositeSide(winnerSide)).id,
+    };
+  }
+
+  private async prepareComparison(
+    game: GameState,
+    challengers: ChallengerState,
+  ): Promise<ChallengerState> {
+    if (
+      game.round.status !== "generating" ||
+      game.pendingSelection?.kind !== "buffer"
+    ) {
+      if (challengers.pendingComparison === null) return challengers;
+      const cleaned = { ...challengers, pendingComparison: null };
+      await this.challengerRepository.save(cleaned);
+      return cleaned;
+    }
+
+    const receipt = this.comparisonReceipt(
+      game,
+      game.pendingSelection.winnerSide,
+      game.pendingSelection.selectedAt,
+    );
+    if (isDeepStrictEqual(challengers.pendingComparison, receipt)) {
+      return challengers;
+    }
+    if (challengers.pendingComparison !== null) {
+      throw new Error(
+        "Persisted comparison receipt does not match the pending selection",
+      );
+    }
+
+    const compared = this.recordComparison(
+      challengers,
+      candidateAt(game.round, game.pendingSelection.winnerSide),
+      candidateAt(game.round, oppositeSide(game.pendingSelection.winnerSide)),
+      receipt,
+    );
+    await this.challengerRepository.save(compared);
+    return compared;
   }
 
   private refillContext(
@@ -636,10 +691,11 @@ export class GameService {
 
     const completed = completeSelection(game, draw.candidate);
     await this.gameRepository.save(completed);
-    if (draw.state !== challengers) {
-      await this.challengerRepository.save(draw.state);
+    const finalized = { ...draw.state, pendingComparison: null };
+    if (draw.state !== challengers || challengers.pendingComparison !== null) {
+      await this.challengerRepository.save(finalized);
     }
-    return { game: completed, challengers: draw.state };
+    return { game: completed, challengers: finalized };
   }
 
   private async removeDisplayedCandidatesFromReady(

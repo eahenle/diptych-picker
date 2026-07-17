@@ -69,6 +69,20 @@ function generatingGame(
   return game;
 }
 
+function bufferedGeneratingGame(
+  winnerSide: "left" | "right" = "left",
+): GameState {
+  const game = cloneGame();
+  game.round.status = "generating";
+  game.round.replacingSide = winnerSide === "left" ? "right" : "left";
+  game.pendingSelection = {
+    kind: "buffer",
+    winnerSide,
+    selectedAt: "2026-07-16T12:00:01.000Z",
+  };
+  return game;
+}
+
 function bufferedErrorGame(): GameState {
   const game = cloneGame();
   game.round.status = "error";
@@ -351,7 +365,7 @@ describe("GameScreen challenger reconciliation", () => {
     let pollRequests = 0;
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (init?.method === "POST") return json(generatingGame(), 202);
+        if (init?.method === "POST") return json(bufferedGeneratingGame(), 202);
         if (
           String(input).endsWith("/api/game") &&
           fetchMock.mock.calls.length === 1
@@ -390,6 +404,30 @@ describe("GameScreen challenger reconciliation", () => {
       { timeout: 2_000 },
     );
     expect(pollRequests).toBeGreaterThanOrEqual(2);
+  });
+
+  it("resumes polling a buffered selection restored on refresh", async () => {
+    installSuccessfulImagePreload();
+    let getRequests = 0;
+    const fetchMock = vi.fn(async () => {
+      getRequests += 1;
+      return json({
+        status: "ready",
+        game: getRequests === 1 ? bufferedGeneratingGame() : completedGame(),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+
+    await waitFor(
+      () =>
+        expect(screen.getByLabelText("Game status")).toHaveTextContent(
+          "Round 2",
+        ),
+      { timeout: 2_000 },
+    );
+    expect(getRequests).toBeGreaterThanOrEqual(2);
   });
 
   it("retries polling when preloading the completed challenger fails transiently", async () => {
