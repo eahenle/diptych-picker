@@ -1,0 +1,41 @@
+{
+  "name": "diptych-picker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "agent:next": "node .agents/skills/run-diptych-picker/scripts/next-job.mjs",
+    "agent:complete": "node .agents/skills/run-diptych-picker/scripts/complete-job.mjs",
+    "agent:fail": "node .agents/skills/run-diptych-picker/scripts/fail-job.mjs",
+    "agent:heartbeat": "node .agents/skills/run-diptych-picker/scripts/heartbeat.mjs"
+  },
+  "dependencies": {
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "sharp": "^0.35.3",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "@testing-library/jest-dom": "latest",
+    "@testing-library/react": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "jsdom": "latest",
+    "prettier": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}

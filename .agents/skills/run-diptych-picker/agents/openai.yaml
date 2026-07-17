@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Diptych Picker"
+  short_description: "Run the persistent Diptych Picker coordinator"
+  default_prompt: "Use $run-diptych-picker to start and continuously run the local preference game."
