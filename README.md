@@ -35,7 +35,7 @@ If Codex closes during a job, the current images, ready queue, pool, and mailbox
 
 Seven standalone curated PNGs and their strict manifest live under `public/seed-assets/`. A normal new game shuffles seven distinct eligible candidates: two are displayed and five fill the ready FIFO. Curated files are immutable at runtime.
 
-Every comparison updates both candidates with Elo K=32. A generated candidate that wins becomes eligible for the learned pool. The effective curated-plus-learned pool is bounded by `CANDIDATE_POOL_SIZE` (50 by default); a new winner displaces only a strictly lower-rated lowest member, while rating history and immutable assets remain durable.
+Every comparison updates both candidates with Elo K=32. Generated candidates become eligible for the learned pool after comparison even when they have no wins, so a small pool preserves breadth instead of discarding useful alternatives prematurely. The effective curated-plus-learned pool is bounded by `CANDIDATE_POOL_SIZE` (50 by default); once full, a stronger candidate displaces only a strictly lower-rated lowest member, while rating history and immutable assets remain durable. Existing sessions backfill eligible rated candidates into available pool capacity.
 
 If `GENERATE_INITIAL_CANDIDATES=true`, the browser instead shows an initializing screen with no candidate `<img>` elements. The app enqueues two jobs sharing one batch ID. The coordinator claims both sides and delegates exactly two image workers in parallel, then the app verifies both immutable assets before presenting round 1. Refreshing does not enqueue duplicates, and a failed pair offers a retry.
 

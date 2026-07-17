@@ -153,7 +153,7 @@ test("persists a fine-grained preference profile and composes generation context
   await page
     .getByLabel("Color palette")
     .fill("ultraviolet, copper, and oxblood");
-  await page.getByLabel("Content range").selectOption("adult-allowed");
+  await page.getByRole("radio", { name: /adult themes/i }).check();
   await page
     .getByLabel("Avoid or de-emphasize")
     .fill("readable text and cute mascots");
@@ -172,7 +172,9 @@ test("persists a fine-grained preference profile and composes generation context
   await expect(page.getByLabel("Preferred media")).toHaveValue(
     "large-format photography, linocut",
   );
-  await expect(page.getByLabel("Content range")).toHaveValue("adult-allowed");
+  await expect(
+    page.getByRole("radio", { name: /adult themes/i }),
+  ).toBeChecked();
 
   const state = await (await request.get("/api/game")).json();
   expect(state.game.preferenceProfile).toMatchObject({

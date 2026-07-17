@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Candidate } from "./game";
 import {
+  admitGeneratedCandidate,
+  backfillGeneratedPool,
   drawFallback,
   popReady,
-  promoteWinner,
   recordGenerationTurnaround,
   refillDeficit,
   updateElo,
@@ -93,7 +94,7 @@ describe("challenger state", () => {
     const winner = rating("winner", 1016, { poolMember: false, wins: 1 });
     const initial = state({ ratings: [rating("incumbent", 1000), winner] });
 
-    const next = promoteWinner(initial, "winner");
+    const next = admitGeneratedCandidate(initial, "winner");
 
     expect(
       next.ratings.filter((item) => item.candidate.id === "winner"),
@@ -101,6 +102,79 @@ describe("challenger state", () => {
     expect(
       next.ratings.find((item) => item.candidate.id === "winner")?.poolMember,
     ).toBe(true);
+  });
+
+  it("admits a zero-win generated candidate while the pool has room", () => {
+    const loser = rating("loser", 984, {
+      poolMember: false,
+      losses: 1,
+    });
+
+    const next = admitGeneratedCandidate(
+      state({ ratings: [rating("incumbent", 1000), loser] }),
+      "loser",
+    );
+
+    expect(
+      next.ratings.find((item) => item.candidate.id === "loser"),
+    ).toMatchObject({ wins: 0, losses: 1, poolMember: true });
+  });
+
+  it("eventually evicts a weak zero-win member for a better candidate", () => {
+    const weak = rating("weak", 984, { losses: 1 });
+    const established = Array.from({ length: 49 }, (_, index) =>
+      rating(`established-${index}`, 1000 + index),
+    );
+    const better = rating("better", 1100, {
+      poolMember: false,
+      wins: 1,
+    });
+
+    const next = admitGeneratedCandidate(
+      state({ ratings: [weak, ...established, better] }),
+      "better",
+    );
+
+    expect(next.ratings.filter((item) => item.poolMember)).toHaveLength(50);
+    expect(
+      next.ratings.find((item) => item.candidate.id === "weak")?.poolMember,
+    ).toBe(false);
+    expect(
+      next.ratings.find((item) => item.candidate.id === "better")?.poolMember,
+    ).toBe(true);
+  });
+
+  it("backfills a small pool with the strongest generated candidates regardless of wins", () => {
+    const initial = state({
+      ratings: [
+        rating("incumbent", 1000),
+        rating("weak", 900, {
+          poolMember: false,
+          losses: 2,
+        }),
+        rating("middle", 950, {
+          poolMember: false,
+          losses: 1,
+        }),
+        rating("strong", 1050, {
+          poolMember: false,
+          wins: 1,
+        }),
+      ],
+    });
+
+    const next = backfillGeneratedPool(initial, 3);
+    const poolIds = next.ratings
+      .filter((item) => item.poolMember)
+      .map((item) => item.candidate.id);
+
+    expect(poolIds).toEqual(["incumbent", "middle", "strong"]);
+    expect(
+      next.ratings.find((item) => item.candidate.id === "middle"),
+    ).toMatchObject({ wins: 0, losses: 1, poolMember: true });
+    expect(
+      next.ratings.find((item) => item.candidate.id === "weak")?.poolMember,
+    ).toBe(false);
   });
 
   it("displaces only the lowest-rated member when a full pool has a strict-higher winner", () => {
@@ -114,7 +188,7 @@ describe("challenger state", () => {
       ],
     });
 
-    const next = promoteWinner(initial, "winner");
+    const next = admitGeneratedCandidate(initial, "winner");
     const pool = next.ratings.filter((item) => item.poolMember);
 
     expect(pool).toHaveLength(50);
@@ -133,7 +207,7 @@ describe("challenger state", () => {
       ],
     });
 
-    const next = promoteWinner(initial, "winner");
+    const next = admitGeneratedCandidate(initial, "winner");
 
     expect(next.ratings.filter((item) => item.poolMember)).toHaveLength(50);
     expect(
@@ -156,7 +230,7 @@ describe("challenger state", () => {
     });
 
     expect(
-      promoteWinner(initial, "winner").ratings.filter(
+      admitGeneratedCandidate(initial, "winner").ratings.filter(
         (item) => item.poolMember,
       ),
     ).toHaveLength(50);
@@ -173,7 +247,7 @@ describe("challenger state", () => {
       ],
     });
 
-    const next = promoteWinner(initial, "winner", 51);
+    const next = admitGeneratedCandidate(initial, "winner", 51);
     const pool = next.ratings.filter((item) => item.poolMember);
 
     expect(pool).toHaveLength(50);
@@ -186,7 +260,7 @@ describe("challenger state", () => {
       rating(`member-${index}`, 900 + Math.floor(index / 2)),
     );
 
-    const next = promoteWinner(
+    const next = admitGeneratedCandidate(
       state({
         ratings: [
           ...oversized,

@@ -2,7 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import {
   drawFallback,
   popReady,
-  promoteWinner,
+  admitGeneratedCandidate,
+  backfillGeneratedPool,
   recordGenerationTurnaround,
   refillDeficit,
   updateElo,
@@ -248,6 +249,15 @@ export class GameService {
 
     let challengers = await this.challengerRepository.load();
     if (!challengers) return game;
+
+    const backfilled = backfillGeneratedPool(
+      challengers,
+      this.config.poolMaximum,
+    );
+    if (backfilled !== challengers) {
+      challengers = backfilled;
+      await this.challengerRepository.save(challengers);
+    }
 
     challengers = await this.prepareComparison(game, challengers);
 
@@ -574,7 +584,16 @@ export class GameService {
         return item;
       }),
     };
-    return promoteWinner(updated, winner.id, this.config.poolMaximum);
+    const withLoser = admitGeneratedCandidate(
+      updated,
+      loser.id,
+      this.config.poolMaximum,
+    );
+    return admitGeneratedCandidate(
+      withLoser,
+      winner.id,
+      this.config.poolMaximum,
+    );
   }
 
   private comparisonReceipt(

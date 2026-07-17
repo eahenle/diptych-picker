@@ -399,9 +399,7 @@ describe("GameScreen challenger reconciliation", () => {
     fireEvent.change(screen.getByLabelText("Color palette"), {
       target: { value: "copper and ultraviolet" },
     });
-    fireEvent.change(screen.getByLabelText("Content range"), {
-      target: { value: "adult-allowed" },
-    });
+    fireEvent.click(screen.getByRole("radio", { name: /adult themes/i }));
     fireEvent.change(screen.getByLabelText("Avoid or de-emphasize"), {
       target: { value: "readable text" },
     });

@@ -326,9 +326,68 @@
   color: #817b77;
   font-size: 11px;
 }
+.contentField {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.contentField legend {
+  margin-bottom: 7px;
+  padding: 0;
+  color: #d9d2cb;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+}
+.contentChoices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.contentChoice {
+  position: relative;
+  min-width: 0;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid #403b3e;
+  border-radius: 2px;
+  background: #090b0d;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+.contentChoice:has(input:checked) {
+  border-color: var(--copper-bright);
+  background: rgba(180, 104, 73, 0.1);
+}
+.contentChoice:has(input:focus-visible) {
+  border-color: var(--ultraviolet);
+  box-shadow: 0 0 0 2px rgba(167, 107, 239, 0.16);
+}
+.contentChoice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.contentChoice span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  line-height: 1.25;
+}
+.contentChoice small {
+  color: #817b77;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
 .preferencesModal textarea,
-.preferencesModal input,
-.preferencesModal select {
+.preferencesModal input:not([type="radio"]) {
   width: 100%;
   min-height: 44px;
   padding: 11px 12px;
@@ -343,12 +402,8 @@
 .preferencesModal textarea {
   resize: vertical;
 }
-.preferencesModal select {
-  color-scheme: dark;
-}
 .preferencesModal textarea:focus,
-.preferencesModal input:focus,
-.preferencesModal select:focus {
+.preferencesModal input:not([type="radio"]):focus {
   border-color: var(--ultraviolet);
   box-shadow: 0 0 0 2px rgba(167, 107, 239, 0.16);
 }
@@ -434,6 +489,9 @@
   }
   .headerActions button {
     flex: 1;
+  }
+  .contentChoices {
+    grid-template-columns: 1fr;
   }
 }
 

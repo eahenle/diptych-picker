@@ -893,23 +893,43 @@ export function GameScreen() {
                   placeholder="Oxblood, copper, ultraviolet…"
                 />
               </label>
-              <label className={styles.field}>
-                <span>Content range</span>
-                <select
-                  value={preferenceDraft.contentLevel}
-                  onChange={(event) =>
-                    setPreferenceField(
-                      "contentLevel",
-                      event.target.value as PreferenceProfile["contentLevel"],
-                    )
-                  }
-                >
-                  <option value="family-friendly">Family-friendly</option>
-                  <option value="adult-allowed">
-                    Adult themes allowed (non-explicit)
-                  </option>
-                </select>
-              </label>
+              <fieldset className={`${styles.field} ${styles.contentField}`}>
+                <legend>Content range</legend>
+                <div className={styles.contentChoices}>
+                  <label className={styles.contentChoice}>
+                    <input
+                      type="radio"
+                      name="content-range"
+                      value="family-friendly"
+                      checked={
+                        preferenceDraft.contentLevel === "family-friendly"
+                      }
+                      onChange={() =>
+                        setPreferenceField("contentLevel", "family-friendly")
+                      }
+                    />
+                    <span>
+                      Family-friendly
+                      <small>Broadly suitable imagery</small>
+                    </span>
+                  </label>
+                  <label className={styles.contentChoice}>
+                    <input
+                      type="radio"
+                      name="content-range"
+                      value="adult-allowed"
+                      checked={preferenceDraft.contentLevel === "adult-allowed"}
+                      onChange={() =>
+                        setPreferenceField("contentLevel", "adult-allowed")
+                      }
+                    />
+                    <span>
+                      Adult themes
+                      <small>Mature, never explicit</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
               <label className={styles.fieldWide}>
                 <span>Avoid or de-emphasize</span>
                 <textarea
