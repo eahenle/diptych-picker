@@ -3,7 +3,12 @@ import type {
   CandidateRating,
   ChallengerState,
 } from "@/domain/challenger-state";
-import type { Candidate, GameStartState, GameState } from "@/domain/game";
+import {
+  preferenceProfileFromSeed,
+  type Candidate,
+  type GameStartState,
+  type GameState,
+} from "@/domain/game";
 import type {
   GenerationJob,
   GenerationMailbox,
@@ -141,6 +146,7 @@ export class InitialGameService {
       },
       history: [],
       preferenceSeed: this.options.preferenceSeed,
+      preferenceProfile: preferenceProfileFromSeed(this.options.preferenceSeed),
     };
     const challengerState = this.challengerState(
       createdAt,
@@ -352,6 +358,7 @@ export class InitialGameService {
       },
       history: [],
       preferenceSeed: bootstrap.preferenceSeed,
+      preferenceProfile: preferenceProfileFromSeed(bootstrap.preferenceSeed),
     };
     const previous = await this.options.challengerRepository.load();
     await this.options.challengerRepository.save(

@@ -1,6 +1,16 @@
 export type Side = "left" | "right";
 export type RoundStatus = "idle" | "generating" | "error";
+export type PreferenceContentLevel = "family-friendly" | "adult-allowed";
 export const GENERATION_JOB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+
+export interface PreferenceProfile {
+  themes: string;
+  mediaTypes: string;
+  visualStyle: string;
+  colorPalette: string;
+  contentLevel: PreferenceContentLevel;
+  avoid: string;
+}
 
 export interface Candidate {
   id: string;
@@ -46,9 +56,44 @@ export interface GameState {
   round: Round;
   history: SelectionHistory[];
   preferenceSeed: string;
+  preferenceProfile?: PreferenceProfile;
   pendingSelection?: PendingSelection;
   mailboxCleanupJobId?: string;
   errorMessage?: string;
+}
+
+export function preferenceProfileFromSeed(
+  preferenceSeed: string,
+): PreferenceProfile {
+  return {
+    themes: preferenceSeed,
+    mediaTypes: "",
+    visualStyle: "",
+    colorPalette: "",
+    contentLevel: "family-friendly",
+    avoid: "",
+  };
+}
+
+export function composePreferenceSeed(profile: PreferenceProfile): string {
+  const sections = [
+    ["Themes and subjects", profile.themes],
+    ["Preferred media", profile.mediaTypes],
+    ["Visual style and mood", profile.visualStyle],
+    ["Color palette", profile.colorPalette],
+    [
+      "Content range",
+      profile.contentLevel === "adult-allowed"
+        ? "Adult themes may be used when relevant; keep content non-explicit and depict only clearly adult people."
+        : "Keep the imagery family-friendly.",
+    ],
+    ["Avoid or de-emphasize", profile.avoid],
+  ] as const;
+
+  return sections
+    .filter(([, value]) => value.trim().length > 0)
+    .map(([label, value]) => `${label}: ${value.trim()}`)
+    .join("\n");
 }
 
 export type GameStartState =
@@ -275,6 +320,16 @@ export function migratePendingSelectionState(state: GameState): GameState {
   };
 }
 
+export function migratePreferenceProfileState(state: GameState): GameState {
+  if (state.preferenceProfile) return state;
+  return {
+    ...state,
+    preferenceProfile: preferenceProfileFromSeed(state.preferenceSeed),
+  };
+}
+
 export function migrateGameState(state: GameState): GameState {
-  return migratePendingSelectionState(migrateRoundStreakState(state));
+  return migratePreferenceProfileState(
+    migratePendingSelectionState(migrateRoundStreakState(state)),
+  );
 }

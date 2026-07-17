@@ -1,5 +1,9 @@
 import { join } from "node:path";
-import type { GameStartState, GameState } from "@/domain/game";
+import type {
+  GameStartState,
+  GameState,
+  PreferenceProfile,
+} from "@/domain/game";
 import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
 import { JsonChallengerRepository } from "./challenger-repository";
@@ -96,6 +100,7 @@ export async function getOrCreateGame(): Promise<GameStartState> {
 
 export async function updatePreferenceSeed(
   preferenceSeed: string,
+  preferenceProfile?: PreferenceProfile,
 ): Promise<GameState> {
   const start = await getOrCreateGame();
   if (start.status !== "ready") {
@@ -103,5 +108,5 @@ export async function updatePreferenceSeed(
       "Wait for the initial candidates before editing preferences",
     );
   }
-  return gameService.updatePreferenceSeed(preferenceSeed);
+  return gameService.updatePreferenceSeed(preferenceSeed, preferenceProfile);
 }

@@ -90,7 +90,7 @@ test.afterEach(async ({ request }) => {
   await reconcileAllRefills(request);
 });
 
-test("starts with five durable challengers and exactly two independent side-by-side images", async ({
+test("starts with five durable challengers and adapts two independent images to the viewport", async ({
   page,
 }) => {
   const images = page.getByTestId("candidate-image");
@@ -129,8 +129,65 @@ test("starts with five durable challengers and exactly two independent side-by-s
     images.nth(0).boundingBox(),
     images.nth(1).boundingBox(),
   ]);
-  expect(Math.abs(mobile[0]!.y - mobile[1]!.y)).toBeLessThan(2);
-  expect(mobile[0]!.x).toBeLessThan(mobile[1]!.x);
+  expect(mobile[1]!.y).toBeGreaterThan(mobile[0]!.y + mobile[0]!.height);
+  expect(Math.abs(mobile[0]!.x - mobile[1]!.x)).toBeLessThan(2);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+});
+
+test("persists a fine-grained preference profile and composes generation context", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page
+    .getByLabel("Themes & subjects")
+    .fill("mythic engineering and strange nocturnal ecosystems");
+  await page
+    .getByLabel("Preferred media")
+    .fill("large-format photography, linocut");
+  await page
+    .getByLabel("Visual style & mood")
+    .fill("cinematic, tactile, and austere");
+  await page
+    .getByLabel("Color palette")
+    .fill("ultraviolet, copper, and oxblood");
+  await page.getByRole("radio", { name: /adult themes/i }).check();
+  await page
+    .getByLabel("Avoid or de-emphasize")
+    .fill("readable text and cute mascots");
+
+  const saveResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game") &&
+      response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Save profile" }).click();
+  expect((await saveResponse).status()).toBe(200);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await expect(page.getByLabel("Preferred media")).toHaveValue(
+    "large-format photography, linocut",
+  );
+  await expect(
+    page.getByRole("radio", { name: /adult themes/i }),
+  ).toBeChecked();
+
+  const state = await (await request.get("/api/game")).json();
+  expect(state.game.preferenceProfile).toMatchObject({
+    themes: "mythic engineering and strange nocturnal ecosystems",
+    contentLevel: "adult-allowed",
+    avoid: "readable text and cute mascots",
+  });
+  expect(state.game.preferenceSeed).toContain(
+    "Preferred media: large-format photography, linocut",
+  );
+  expect(state.game.preferenceSeed).toContain(
+    "Content range: Adult themes may be used when relevant",
+  );
 });
 
 test("serves five instant FIFO swaps while preserving the winner node and URL", async ({

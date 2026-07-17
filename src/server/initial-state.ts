@@ -2,7 +2,11 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import { z } from "zod";
-import type { Candidate, GameState } from "@/domain/game";
+import {
+  preferenceProfileFromSeed,
+  type Candidate,
+  type GameState,
+} from "@/domain/game";
 
 export const DEFAULT_PREFERENCE_SEED = `Favor genuine novelty informed by gothic and industrial aesthetics; science fiction and retrofuturism; Pacific Northwest landscapes; engineering, fabrication, chemistry, computers, and 3D printing; foxes, mushrooms, strange ecosystems, and mythic imagery; metal and industrial music aesthetics; confident, highly competent adult characters; dark purple, ultraviolet, oxblood, copper, black, and cinematic blue palettes; and occasional warmth, humor, or parent-child wonder. These are inspiration, not a checklist.`;
 
@@ -148,6 +152,7 @@ export async function gameFromSeedAssets(
     },
     history: [],
     preferenceSeed: DEFAULT_PREFERENCE_SEED,
+    preferenceProfile: preferenceProfileFromSeed(DEFAULT_PREFERENCE_SEED),
   };
 }
 

@@ -2,7 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import {
   drawFallback,
   popReady,
-  promoteWinner,
+  admitGeneratedCandidate,
+  backfillGeneratedPool,
   recordGenerationTurnaround,
   refillDeficit,
   updateElo,
@@ -19,8 +20,10 @@ import {
   failSelection,
   oppositeSide,
   recentConcepts,
+  preferenceProfileFromSeed,
   type Candidate,
   type GameState,
+  type PreferenceProfile,
   type Side,
 } from "@/domain/game";
 import type {
@@ -91,7 +94,12 @@ export class GameService {
     });
   }
 
-  async updatePreferenceSeed(preferenceSeed: string): Promise<GameState> {
+  async updatePreferenceSeed(
+    preferenceSeed: string,
+    preferenceProfile: PreferenceProfile = preferenceProfileFromSeed(
+      preferenceSeed,
+    ),
+  ): Promise<GameState> {
     return this.gameRepository.withLock(async () => {
       const current = await this.gameRepository.load();
       if (!current) {
@@ -103,7 +111,7 @@ export class GameService {
         );
       }
 
-      const updated = { ...current, preferenceSeed };
+      const updated = { ...current, preferenceSeed, preferenceProfile };
       await this.gameRepository.save(updated);
       return updated;
     });
@@ -241,6 +249,15 @@ export class GameService {
 
     let challengers = await this.challengerRepository.load();
     if (!challengers) return game;
+
+    const backfilled = backfillGeneratedPool(
+      challengers,
+      this.config.poolMaximum,
+    );
+    if (backfilled !== challengers) {
+      challengers = backfilled;
+      await this.challengerRepository.save(challengers);
+    }
 
     challengers = await this.prepareComparison(game, challengers);
 
@@ -567,7 +584,16 @@ export class GameService {
         return item;
       }),
     };
-    return promoteWinner(updated, winner.id, this.config.poolMaximum);
+    const withLoser = admitGeneratedCandidate(
+      updated,
+      loser.id,
+      this.config.poolMaximum,
+    );
+    return admitGeneratedCandidate(
+      withLoser,
+      winner.id,
+      this.config.poolMaximum,
+    );
   }
 
   private comparisonReceipt(

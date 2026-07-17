@@ -222,6 +222,30 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("backfills existing zero-win generated candidates during reconciliation", async () => {
+    const game = gameState();
+    const overlooked = candidate("overlooked");
+    const challengers = challengerState(game, {
+      ratings: [
+        ...challengerState(game).ratings,
+        rating(overlooked, {
+          source: "generated",
+          poolMember: false,
+          losses: 2,
+        }),
+      ],
+    });
+    const context = serviceFor({ game, challengers });
+
+    await context.service.reconcile();
+
+    expect(
+      (await context.challengerRepository.load())?.ratings.find(
+        ({ candidate: item }) => item.id === overlooked.id,
+      ),
+    ).toMatchObject({ wins: 0, losses: 2, poolMember: true });
+  });
+
   it.each(["left", "right"] as const)(
     "preserves the exact %s winner and immediately consumes one FIFO head",
     async (winnerSide) => {
@@ -389,7 +413,7 @@ describe("GameService challenger buffer", () => {
     ).toMatchObject({ wins: 1, poolMember: true });
   });
 
-  it("does not admit an unrated generated loser into the reusable pool", async () => {
+  it("admits an unrated generated loser into a non-full reusable pool", async () => {
     const game = gameState();
     game.round.leftCandidate = {
       ...game.round.leftCandidate,
@@ -411,7 +435,7 @@ describe("GameService challenger buffer", () => {
       (await context.challengerRepository.load())?.ratings.find(
         ({ candidate: item }) => item.id === "right",
       ),
-    ).toMatchObject({ source: "generated", poolMember: false, losses: 1 });
+    ).toMatchObject({ source: "generated", poolMember: true, losses: 1 });
   });
 
   it("serializes concurrent selections so only one consumes the FIFO head", async () => {

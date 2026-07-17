@@ -5,8 +5,10 @@ import {
   beginSelection,
   isSelectionBoundWait,
   mergeServerResult,
+  preferenceProfileFromSeed,
   type GameStartState,
   type GameState,
+  type PreferenceProfile,
   type Side,
 } from "@/domain/game";
 import { CandidateCard } from "./candidate-card";
@@ -133,7 +135,10 @@ export function GameScreen() {
   const [startState, setStartState] = useState<GameStartState | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [preferenceDraft, setPreferenceDraft] = useState("");
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferenceDraft, setPreferenceDraft] = useState<PreferenceProfile>(
+    () => preferenceProfileFromSeed(""),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [reconcilingRetry, setReconcilingRetry] = useState(false);
@@ -157,11 +162,14 @@ export function GameScreen() {
       setStartState(next);
       if (next.status === "ready") {
         commitGame(next.game);
-        setPreferenceDraft(next.game.preferenceSeed);
+        setPreferenceDraft(
+          next.game.preferenceProfile ??
+            preferenceProfileFromSeed(next.game.preferenceSeed),
+        );
       } else {
         gameRef.current = null;
         setGame(null);
-        setPreferenceDraft(next.preferenceSeed);
+        setPreferenceDraft(preferenceProfileFromSeed(next.preferenceSeed));
       }
     },
     [commitGame],
@@ -598,7 +606,7 @@ export function GameScreen() {
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat)
         return;
       const target = event.target as HTMLElement | null;
-      if (target?.matches("textarea, input, button")) return;
+      if (target?.matches("textarea, input, select, button")) return;
       const key = event.key.toLowerCase();
       if (key === "a" || key === "1") void select("left");
       if (key === "b" || key === "2") void select("right");
@@ -653,12 +661,13 @@ export function GameScreen() {
   };
 
   const savePreferences = async () => {
+    setPreferencesSaving(true);
     try {
       const state = await readJson<GameState>(
         await fetch("/api/game", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ preferenceSeed: preferenceDraft }),
+          body: JSON.stringify({ preferenceProfile: preferenceDraft }),
         }),
       );
       commitGame(state);
@@ -668,7 +677,24 @@ export function GameScreen() {
       setLocalError(
         error instanceof Error ? error.message : "Could not save preferences",
       );
+    } finally {
+      setPreferencesSaving(false);
     }
+  };
+
+  const openPreferences = () => {
+    if (!game) return;
+    setPreferenceDraft(
+      game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed),
+    );
+    setPreferencesOpen(true);
+  };
+
+  const setPreferenceField = <Key extends keyof PreferenceProfile>(
+    key: Key,
+    value: PreferenceProfile[Key],
+  ) => {
+    setPreferenceDraft((current) => ({ ...current, [key]: value }));
   };
 
   const retryAvailable =
@@ -688,7 +714,7 @@ export function GameScreen() {
             type="button"
             className={styles.utilityButton}
             disabled={!game || reconcilingRetry || initializing}
-            onClick={() => setPreferencesOpen(true)}
+            onClick={openPreferences}
           >
             Preferences
           </button>
@@ -811,14 +837,112 @@ export function GameScreen() {
           >
             <h2 id="preferences-title">Preference profile</h2>
             <p id="preferences-description">
-              Inspiration for future challengers. Novelty rules still take
-              priority.
+              Shape future challengers with as much or as little detail as you
+              like. Novelty rules still take priority.
             </p>
-            <textarea
-              value={preferenceDraft}
-              onChange={(event) => setPreferenceDraft(event.target.value)}
-              rows={9}
-            />
+            <div className={styles.preferenceGrid}>
+              <div className={styles.fieldWide}>
+                <label htmlFor="preference-themes">
+                  <span>Themes &amp; subjects</span>
+                </label>
+                <textarea
+                  id="preference-themes"
+                  value={preferenceDraft.themes}
+                  onChange={(event) =>
+                    setPreferenceField("themes", event.target.value)
+                  }
+                  rows={4}
+                  minLength={20}
+                  maxLength={2000}
+                  placeholder="What worlds, subjects, or ideas should the game explore?"
+                  aria-describedby="preference-themes-hint"
+                  autoFocus
+                />
+                <small id="preference-themes-hint">20–2,000 characters.</small>
+              </div>
+              <label className={styles.field}>
+                <span>Preferred media</span>
+                <input
+                  value={preferenceDraft.mediaTypes}
+                  maxLength={500}
+                  onChange={(event) =>
+                    setPreferenceField("mediaTypes", event.target.value)
+                  }
+                  placeholder="Photography, oil paint, linocut…"
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Visual style &amp; mood</span>
+                <input
+                  value={preferenceDraft.visualStyle}
+                  maxLength={500}
+                  onChange={(event) =>
+                    setPreferenceField("visualStyle", event.target.value)
+                  }
+                  placeholder="Cinematic, eerie, playful…"
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Color palette</span>
+                <input
+                  value={preferenceDraft.colorPalette}
+                  maxLength={500}
+                  onChange={(event) =>
+                    setPreferenceField("colorPalette", event.target.value)
+                  }
+                  placeholder="Oxblood, copper, ultraviolet…"
+                />
+              </label>
+              <fieldset className={`${styles.field} ${styles.contentField}`}>
+                <legend>Content range</legend>
+                <div className={styles.contentChoices}>
+                  <label className={styles.contentChoice}>
+                    <input
+                      type="radio"
+                      name="content-range"
+                      value="family-friendly"
+                      checked={
+                        preferenceDraft.contentLevel === "family-friendly"
+                      }
+                      onChange={() =>
+                        setPreferenceField("contentLevel", "family-friendly")
+                      }
+                    />
+                    <span>
+                      Family-friendly
+                      <small>Broadly suitable imagery</small>
+                    </span>
+                  </label>
+                  <label className={styles.contentChoice}>
+                    <input
+                      type="radio"
+                      name="content-range"
+                      value="adult-allowed"
+                      checked={preferenceDraft.contentLevel === "adult-allowed"}
+                      onChange={() =>
+                        setPreferenceField("contentLevel", "adult-allowed")
+                      }
+                    />
+                    <span>
+                      Adult themes
+                      <small>Mature, never explicit</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+              <label className={styles.fieldWide}>
+                <span>Avoid or de-emphasize</span>
+                <textarea
+                  value={preferenceDraft.avoid}
+                  maxLength={800}
+                  onChange={(event) =>
+                    setPreferenceField("avoid", event.target.value)
+                  }
+                  rows={2}
+                  placeholder="Subjects, clichés, media, or colors you would rather see less often"
+                />
+              </label>
+            </div>
             {selectionBoundWait ? (
               <p
                 id="preferences-wait-note"
@@ -839,10 +963,14 @@ export function GameScreen() {
               <button
                 type="button"
                 className={styles.newGameButton}
-                disabled={selectionBoundWait}
-                onClick={savePreferences}
+                disabled={
+                  selectionBoundWait ||
+                  preferencesSaving ||
+                  preferenceDraft.themes.trim().length < 20
+                }
+                onClick={() => void savePreferences()}
               >
-                Save profile
+                {preferencesSaving ? "Saving…" : "Save profile"}
               </button>
             </div>
           </section>

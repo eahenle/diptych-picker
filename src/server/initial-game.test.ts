@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChallengerState } from "@/domain/challenger-state";
-import type { Candidate, GameState } from "@/domain/game";
+import {
+  preferenceProfileFromSeed,
+  type Candidate,
+  type GameState,
+} from "@/domain/game";
 import type {
   GenerationJob,
   GenerationMailbox,
@@ -199,7 +203,10 @@ describe("InitialGameService", () => {
 
     await expect(service.getOrCreate()).resolves.toEqual({
       status: "ready",
-      game: seeded,
+      game: {
+        ...seeded,
+        preferenceProfile: preferenceProfileFromSeed(seeded.preferenceSeed),
+      },
     });
     await expect(challengerRepository.load()).resolves.toMatchObject({
       ready: [],

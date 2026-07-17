@@ -104,9 +104,9 @@ export function updateElo(
   };
 }
 
-export function promoteWinner(
+export function admitGeneratedCandidate(
   state: ChallengerState,
-  winnerId: string,
+  candidateId: string,
   poolMaximum = DEFAULT_POOL_MAXIMUM,
 ): ChallengerState {
   const configuredMaximum = Number.isFinite(poolMaximum)
@@ -137,8 +137,10 @@ export function promoteWinner(
     repairedRatings === state.ratings
       ? state
       : { ...state, ratings: repairedRatings };
-  const winner = repairedRatings.find((item) => item.candidate.id === winnerId);
-  if (!winner || winner.source !== "generated" || winner.poolMember) {
+  const candidate = repairedRatings.find(
+    (item) => item.candidate.id === candidateId,
+  );
+  if (!candidate || candidate.source !== "generated" || candidate.poolMember) {
     return repairedState;
   }
 
@@ -147,7 +149,7 @@ export function promoteWinner(
     return {
       ...repairedState,
       ratings: repairedRatings.map((item) =>
-        item === winner ? { ...item, poolMember: true } : item,
+        item === candidate ? { ...item, poolMember: true } : item,
       ),
     };
   }
@@ -157,16 +159,34 @@ export function promoteWinner(
   const lowestRated = poolMembers.reduce((lowest, item) =>
     item.rating < lowest.rating ? item : lowest,
   );
-  if (winner.rating <= lowestRated.rating) return repairedState;
+  if (candidate.rating <= lowestRated.rating) return repairedState;
 
   return {
     ...repairedState,
     ratings: repairedRatings.map((item) => {
-      if (item === winner) return { ...item, poolMember: true };
+      if (item === candidate) return { ...item, poolMember: true };
       if (item === lowestRated) return { ...item, poolMember: false };
       return item;
     }),
   };
+}
+
+export function backfillGeneratedPool(
+  state: ChallengerState,
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): ChallengerState {
+  return state.ratings
+    .filter((item) => item.source === "generated" && !item.poolMember)
+    .map((item, index) => ({ item, index }))
+    .sort(
+      (left, right) =>
+        right.item.rating - left.item.rating || left.index - right.index,
+    )
+    .reduce(
+      (current, { item }) =>
+        admitGeneratedCandidate(current, item.candidate.id, poolMaximum),
+      state,
+    );
 }
 
 export function popReady(state: ChallengerState): CandidateDraw {
