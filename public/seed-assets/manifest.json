@@ -1,0 +1,82 @@
+{
+  "candidates": [
+    {
+      "id": "seed-coastal-observatory",
+      "file": "coastal-observatory.png",
+      "prompt": "Pacific Northwest coastal radio observatory at blue hour",
+      "concept": "Coastal radio observatory",
+      "style": ["cinematic landscape", "retrofuturism", "Pacific Northwest"]
+    },
+    {
+      "id": "seed-crystal-synthesizer",
+      "file": "crystal-synthesizer.png",
+      "prompt": "Crystalline analog synthesizer scientific still life",
+      "concept": "Crystal-grown synthesizer",
+      "style": ["macro photography", "fabrication", "strange ecosystem"]
+    },
+    {
+      "id": "seed-mushroom-maestro",
+      "file": "mushroom-maestro.png",
+      "prompt": "Use case: stylized-concept\nAsset type: standalone square challenger artwork for an image preference game\nScene/backdrop: an intimate, decaying opera rehearsal room with oxblood velvet curtains, scuffed black floorboards, copper footlights, and deep ultraviolet shadows\nSubject: a formidable middle-aged woman conductor in a sharply tailored black tailcoat, caught mid-gesture as she confidently directs a tiny chorus of luminous mushroom marionettes performing on the floor around her; the mushrooms have expressive carved wooden limbs and silk-thread joints, whimsical but slightly uncanny\nStyle/medium: richly layered hand-painted gouache and linocut printmaking, visible dry-brush grain, imperfect ink edges, theatrical poster energy without any typography; emphatically illustrative, not photographic, not cinematic landscape art\nComposition/framing: square format, low three-quarter viewpoint, conductor dominating the upper center with one hand raised, the miniature mushroom chorus forming a loose spiral below; dynamic diagonal gestures, dense theatrical depth, no panels or divided composition\nLighting/mood: copper footlights cast warm upward glow against ultraviolet and black shadows; commanding, mythic, mischievous, and unexpectedly tender\nColor palette: oxblood, ultraviolet, soot black, tarnished copper, parchment cream, restrained bioluminescent chartreuse accents\nMaterials/textures: velvet nap, scratched wood, rough gouache pigment, carved puppet wood, fine silk threads, oxidized copper\nConstraints: exactly one standalone square image; one unified scene; no diptych, no split-screen, no side-by-side comparison, no A/B labels, no border, no caption, no watermark, no logos, no readable text\nAvoid: coastal landscapes, observatories, radio dishes, science-fiction architecture, crystalline objects, synthesizers, macro product still life, photorealism",
+      "concept": "The Mushroom Maestro",
+      "style": [
+        "gouache",
+        "linocut",
+        "gothic theater",
+        "mythic whimsy",
+        "ultraviolet and oxblood"
+      ]
+    },
+    {
+      "id": "seed-night-shift-derby",
+      "file": "night-shift-derby.png",
+      "prompt": "Use case: photorealistic-natural\nAsset type: standalone square challenger artwork for an image preference game\nPrimary request: capture an exuberant all-women senior roller derby team, ages roughly 60 to 75, executing a perfectly coordinated whip maneuver at full speed in a converted factory rink during a late-night bout\nScene/backdrop: a cavernous repurposed factory interior with worn concrete, exposed roof trusses, hazy air, and a polished oval track; abstract ultraviolet and amber practical lights glow in the distance without forming any words\nSubject: five visibly older, formidable adult skaters in distinctive unbranded black, oxblood, copper, and deep-purple gear; powerful athletic stances, expressive lined faces, silver and gray hair moving with speed, one lead skater slingshotting around the pack while teammates lock into a precise formation; camaraderie, mastery, and sly humor rather than parody\nStyle/medium: candid 35mm documentary sports photography with hard direct flash, authentic film grain, slight halation, tactile realism, and controlled directional motion blur; emphatically photographic, kinetic, and unposed\nComposition/framing: square format, track-level wide-angle viewpoint close to the curve, the team sweeping diagonally from lower left toward upper right; one unified scene with layered depth and bodies fully readable, energetic but coherent\nLighting/mood: sharp flash freezes faces and gear against long streaks of ultraviolet and amber ambient light; rebellious, joyful, formidable, and warm\nColor palette: soot black, oxblood, tarnished copper, ultraviolet, warm amber, and natural skin tones\nMaterials/textures: scuffed leather, scratched helmets, worn concrete, steel trusses, sweat, fabric weave, realistic skin texture, fine film grain\nConstraints: exactly one standalone square image; one unified scene; no diptych, no split-screen, no side-by-side comparison, no A/B labels, no border, no caption, no watermark, no logos, no readable text, no legible jersey names or numbers\nAvoid: coastal scenery, observatories, radio dishes, blue-hour landscapes, science-fiction architecture, crystalline objects, synthesizers, product still life, mushrooms, marionettes, conductors, theater stages, gouache, linocut, illustration, fantasy creatures",
+      "concept": "The Night Shift Derby",
+      "style": [
+        "documentary sports photography",
+        "35mm film grain",
+        "hard direct flash",
+        "kinetic realism",
+        "industrial ultraviolet"
+      ]
+    },
+    {
+      "id": "seed-pool-sized-circuit",
+      "file": "pool-sized-circuit.png",
+      "prompt": "Use case: stylized-concept\nAsset type: standalone square challenger artwork for an image preference game\nPrimary request: create a monumental overhead view of a drained 1970s public swimming pool being transformed into a gigantic working copper circuit board by a small precision fabrication crew\nScene/backdrop: a sun-bleached municipal pool complex in an arid inland town at high noon; faded apricot concrete, turquoise tile remnants, empty diving platforms, and crisp geometric shadows; the deep pool basin is filled with meter-wide copper traces, ceramic components, braided cables, and tiny work platforms\nSubject: six highly skilled adult fabricators in cobalt-blue coveralls and protective visors methodically soldering, riveting, testing, and polishing the enormous circuit inside the pool; their teamwork reads clearly from above, with one worker standing on the diving board operating a compact diagnostic instrument that emits only abstract colored indicator lights\nStyle/medium: meticulously crafted layered paper relief and screen-printed collage, photographed as a tactile physical artwork; visible cut-paper edges, embossed fibers, metallic copper foil, slightly imperfect ink registration, bold editorial graphic design, not photorealistic and not a conventional landscape painting\nComposition/framing: exactly square, near-vertical bird's-eye view centered on the pool's strong rectangular geometry; the circuit traces create an elegant asymmetrical maze while the tiny crew provides scale; one continuous unified scene with no panels or divisions\nLighting/mood: hard white midday light with sharp shadows; ingenious, industrious, playful, calm, and quietly monumental\nColor palette: sun-faded apricot, swimming-pool turquoise, cobalt blue, bright copper foil, warm cream, and small vermilion accents\nMaterials/textures: fibrous cut paper, matte screen-print ink, oxidized and polished copper foil, chipped ceramic tile, braided cord, embossed concrete grain\nConstraints: exactly one standalone square PNG composition; one unified scene; no diptych, no split-screen, no side-by-side comparison, no A/B labels, no border, no caption, no watermark, no logos, no readable text, no legible numbers, no coastal scenery, no observatory, no radio dishes\nAvoid: blue-hour landscapes, Pacific Northwest scenery, retrofuturist architecture, crystalline instruments, synthesizers, product still life, mushrooms, marionettes, conductors, theater stages, roller derby, sports photography, ultraviolet nightclub lighting, gothic fantasy, cute animals, photorealism",
+      "concept": "The Pool-Sized Circuit",
+      "style": [
+        "layered paper relief",
+        "screen-printed collage",
+        "overhead geometry",
+        "copper foil",
+        "sun-bleached modernism"
+      ]
+    },
+    {
+      "id": "seed-midnight-laundry-tide",
+      "file": "midnight-laundry-tide.png",
+      "prompt": "Use case: illustration-story\nAsset type: standalone square challenger artwork for an image preference game\nPrimary request: depict a deserted late-night laundromat resting impossibly beneath a dark urban flood, where a poised veteran attendant calmly folds a sheet that glows like captured moonlight while an immense translucent manta-like leviathan drifts past the glass storefront\nScene/backdrop: an ordinary narrow neighborhood laundromat with pale ceramic tiles, chrome-front washing machines, plastic baskets, a wet terrazzo floor, and large front windows; beyond the glass, a completely submerged city street dissolves into deep indigo water, floating leaves, bubbles, and distant traffic lights reduced to abstract colored glows\nSubject: one confident middle-aged woman attendant with cropped silver hair, rolled dark sleeves, an oxblood apron, and practical rubber boots; she stands at a folding table with serene concentration, shaping the luminous fabric into a precise square; outside, the enormous gentle creature passes close to the windows, its translucent fins carrying faint bioluminescent constellations and small drifting fish\nStyle/medium: richly hand-painted cel animation on acetate with airbrushed watercolor backgrounds, visible analog paint edges, subtle film dust, restrained linework, broad graphic shadow shapes, and luminous layered color; emphatically illustrative, not photographic, not collage, not paper relief\nComposition/framing: exactly square, intimate eye-level medium-wide view from between two rows of machines; the attendant is slightly below center and fully readable, the leviathan arcs across the upper background behind the glass, and the glowing folded sheet forms the quiet focal point; one continuous unified scene with depth, no panels or divisions\nLighting/mood: cool failing fluorescent light inside mixed with deep underwater ultramarine, violet, and soft bioluminescent mint from outside; uncanny, tender, self-possessed, hushed, and gently humorous\nColor palette: midnight indigo, ultraviolet, pale mint, oxblood, smoky chrome, muted ivory, and tiny coral-pink accents\nMaterials/textures: wet terrazzo, fogged glass, brushed chrome, cotton fabric, painted acetate, suspended bubbles, soft translucent fins\nConstraints: exactly one standalone square PNG composition; one unified scene; no diptych, no split-screen, no side-by-side comparison, no A/B labels, no border, no caption, no watermark, no logos, no readable text, no legible numbers, no signs, no posters\nAvoid: swimming pools, circuit boards, fabrication crews, overhead views, hard midday sunlight, cut paper, screen printing, copper foil, coastal observatories, radio dishes, blue-hour landscapes, crystalline instruments, synthesizers, product still life, mushrooms, marionettes, conductors, theater stages, roller derby, sports photography, gothic fantasy, cute animals",
+      "concept": "The Midnight Laundry Tide",
+      "style": [
+        "hand-painted cel animation",
+        "airbrushed watercolor",
+        "underwater urban surrealism",
+        "bioluminescent night",
+        "intimate eye-level composition"
+      ]
+    },
+    {
+      "id": "seed-fogline-glassworks",
+      "file": "fogline-glassworks.png",
+      "prompt": "One standalone square image of an adult glassblower operating a rain-soaked hilltop furnace at dawn, confident and technically precise, with pale fog, blackened steel, molten amber glass, and restrained cinematic blue. Use an etched colored-pencil and watercolor medium with one coherent composition. No diptych, split screen, A/B label, border, caption, watermark, logo, or readable text.",
+      "concept": "Fogline Glassworks",
+      "style": [
+        "etched colored-pencil",
+        "watercolor",
+        "industrial craft",
+        "cinematic dawn"
+      ]
+    }
+  ]
+}
