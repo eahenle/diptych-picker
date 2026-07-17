@@ -8,6 +8,7 @@ import { SelectionConflictError } from "@/server/game-service";
 import {
   generationProvider,
   getBufferHealth,
+  getDisplayedEloRatings,
   getOrCreateGame,
   updatePreferenceSeed,
 } from "@/server/runtime";
@@ -49,7 +50,11 @@ export async function GET() {
   const state = await getOrCreateGame();
   const response =
     state.status === "ready"
-      ? { ...state, bufferHealth: await getBufferHealth() }
+      ? {
+          ...state,
+          bufferHealth: await getBufferHealth(),
+          eloRatings: await getDisplayedEloRatings(state.game),
+        }
       : state;
   return NextResponse.json(response, {
     headers: { "X-Diptych-Generation-Provider": generationProvider },

@@ -23,6 +23,14 @@ Additional useful guidance includes content to avoid, clear field examples, and 
 
 Show a quiet, continuously refreshed Queue and Pool readout beside the round metrics. The readout reports ready challengers, in-flight refill work, and reusable-pool capacity through a narrow stats-only endpoint; it must not expose prompts, candidate metadata, or mailbox internals.
 
+### Depleted-buffer pool cadence
+
+When generation falls behind, keep the selected winner fixed, wait three seconds after each empty-queue selection, and draw a random eligible pool image for the losing panel. Permit up to ten consecutive paced pool draws before requiring a generated or seed-buffer candidate; consuming one resets the allowance.
+
+### Visible Elo
+
+Show each candidate's current rounded Elo score in a compact lower-left image overlay. Keep it visually subordinate to the artwork, expose the same value in the card's accessible name, and refresh it after every comparison.
+
 ## Future feature ideas
 
 Exploration only; these are not yet roadmap commitments.

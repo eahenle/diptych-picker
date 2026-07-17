@@ -46,8 +46,7 @@ export interface GameServiceConfig {
   eloKFactor: number;
   turnaroundEmaAlpha: number;
   initialTurnaroundMs: number;
-  fallbackMinimumMs: number;
-  fallbackMaximumMs: number;
+  fallbackDelayMs: number;
   fallbackMaximumConsecutive: number;
 }
 
@@ -757,8 +756,7 @@ export class GameService {
       ],
       recentCandidateIds,
       random: this.random,
-      minimumCooldownMs: this.config.fallbackMinimumMs,
-      maximumCooldownMs: this.config.fallbackMaximumMs,
+      delayMs: this.config.fallbackDelayMs,
       maximumConsecutiveDraws: this.config.fallbackMaximumConsecutive,
     });
   }

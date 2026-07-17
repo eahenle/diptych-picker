@@ -7,6 +7,7 @@ import {
   mergeServerResult,
   preferenceProfileFromSeed,
   type BufferHealth,
+  type DisplayedEloRatings,
   type GameStartState,
   type GameState,
   type PreferenceProfile,
@@ -36,6 +37,8 @@ interface ActiveSelection {
   polling: boolean;
   retryAttempt: number;
 }
+
+type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
 
 function reconnectDelay(attempt: number): number {
   return Math.min(
@@ -144,6 +147,9 @@ export function GameScreen() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [bufferHealth, setBufferHealth] = useState<BufferHealth | null>(null);
+  const [eloRatings, setEloRatings] = useState<DisplayedEloRatings | null>(
+    null,
+  );
   const [reconcilingRetry, setReconcilingRetry] = useState(false);
   const healthPollingEnabled = game !== null && bufferHealth !== null;
   const healthRound = game?.round.roundNumber ?? null;
@@ -168,6 +174,7 @@ export function GameScreen() {
       if (next.status === "ready") {
         commitGame(next.game);
         setBufferHealth(next.bufferHealth ?? null);
+        setEloRatings(next.eloRatings ?? null);
         setPreferenceDraft(
           next.game.preferenceProfile ??
             preferenceProfileFromSeed(next.game.preferenceSeed),
@@ -176,6 +183,7 @@ export function GameScreen() {
         gameRef.current = null;
         setGame(null);
         setBufferHealth(null);
+        setEloRatings(null);
         setPreferenceDraft(preferenceProfileFromSeed(next.preferenceSeed));
       }
     },
@@ -244,6 +252,7 @@ export function GameScreen() {
               setLocalError(null);
               return;
             }
+            setEloRatings(response.eloRatings ?? null);
             server = response.game;
           }
           if (!isCurrent()) return;
@@ -486,8 +495,9 @@ export function GameScreen() {
           }),
           signal: selection.controller.signal,
         });
-        const server = await readJson<GameState>(response);
+        const server = await readJson<RatedGameState>(response);
         if (activeSelectionRef.current?.token !== selection.token) return;
+        setEloRatings(server.eloRatings ?? null);
         if (
           server.round.roundNumber === selection.expectedRound &&
           server.pendingSelection?.kind === "generation"
@@ -571,6 +581,7 @@ export function GameScreen() {
         }
 
         const server = response.game;
+        setEloRatings(response.eloRatings ?? null);
         await preloadChangedAssets(
           gameRef.current ?? failed,
           server,
@@ -853,6 +864,7 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
+                eloRating={eloRatings?.left}
               />
               <CandidateCard
                 candidate={game.round.rightCandidate}
@@ -864,6 +876,7 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
+                eloRating={eloRatings?.right}
               />
             </section>
           </div>

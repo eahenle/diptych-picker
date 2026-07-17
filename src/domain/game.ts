@@ -70,6 +70,11 @@ export interface BufferHealth {
   poolMaximum: number;
 }
 
+export interface DisplayedEloRatings {
+  left: number;
+  right: number;
+}
+
 export function preferenceProfileFromSeed(
   preferenceSeed: string,
 ): PreferenceProfile {
@@ -105,7 +110,12 @@ export function composePreferenceSeed(profile: PreferenceProfile): string {
 }
 
 export type GameStartState =
-  | { status: "ready"; game: GameState; bufferHealth?: BufferHealth }
+  | {
+      status: "ready";
+      game: GameState;
+      bufferHealth?: BufferHealth;
+      eloRatings?: DisplayedEloRatings;
+    }
   | { status: "initializing"; batchId: string; preferenceSeed: string }
   | {
       status: "initialization-error";

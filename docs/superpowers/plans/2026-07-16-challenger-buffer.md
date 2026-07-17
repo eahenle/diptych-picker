@@ -14,7 +14,7 @@
 - Never generate a diptych, split screen, A/B label, border, caption, watermark, or unintended readable text.
 - Never edit, clone, re-encode, or regenerate the retained winner.
 - Keep all model work in the interactive Codex CLI session; the web process must not invoke `codex`, an SDK, or an external API.
-- Ready buffer target is `5`; effective local pool maximum is `50`; fallback maximum is `2` consecutive draws.
+- Ready buffer target is `5`; effective local pool maximum is `50`; fallbacks wait `3000` ms and permit at most `10` consecutive draws.
 - Automated tests use only the deterministic mock provider.
 - All behavior changes follow red-green-refactor: run each named test and observe the expected failure before implementation.
 
@@ -152,7 +152,7 @@ export interface ChallengerState {
 }
 ```
 
-`drawFallback` must accept an injected `random: () => number` and return no candidate when the cooldown is active, two fallbacks have already been served, or no candidate survives current/recent exclusions.
+`drawFallback` must accept an injected `random: () => number` and return no candidate before the delay, after ten fallbacks have been served, or when no candidate survives current/recent exclusions.
 
 - [ ] **Step 4: Add pending-buffer round transitions**
 
@@ -235,9 +235,8 @@ export const challengerConfig = {
   eloKFactor: 32,
   turnaroundEmaAlpha: 0.25,
   initialTurnaroundMs: 300_000,
-  fallbackMinimumMs: 30_000,
-  fallbackMaximumMs: 300_000,
-  fallbackMaximumConsecutive: 2,
+  fallbackDelayMs: 3_000,
+  fallbackMaximumConsecutive: 10,
 } as const;
 ```
 
@@ -399,7 +398,7 @@ Prove a challenger win does not remove stale ready/in-flight entries, new jobs p
 
 - [ ] **Step 3: Write failing fallback/EMA tests**
 
-Cover immediate first random draw, recent/current exclusions, half-EMA cooldown, delayed second draw during reconciliation, hard stop after two, generated-result reset, and failed-result exclusion from EMA.
+Cover the delayed first random draw, recent/current exclusions, three-second cadence, allowed tenth draw, blocked eleventh draw, generated-result reset, and failed-result exclusion from EMA.
 
 - [ ] **Step 4: Run the focused tests and verify RED**
 
@@ -565,7 +564,7 @@ Commit: `git commit -m "feat: surface instant buffered rounds"`
 
 - [ ] **Step 1: Write failing Playwright scenarios**
 
-Add scenarios for five instant buffered swaps, stale queue after a challenger win, refresh persistence, double-click protection, depletion fallback pacing with a test-only short EMA, loser-only loading after two fallbacks, exactly two independent images, mobile side-by-side layout, and Preferences feedback during a wait.
+Add scenarios for five instant buffered swaps, stale queue after a challenger win, refresh persistence, double-click protection, depletion fallback pacing with a test-only short delay, loser-only loading after ten fallbacks, exactly two independent images, mobile vertical stacking, and Preferences feedback during a wait.
 
 - [ ] **Step 2: Run the new browser scenarios and verify RED**
 
@@ -620,7 +619,7 @@ Start the app through `$run-diptych-picker`, verify the provider header is `agen
 - stale candidates continue after a challenger wins;
 - native refill workers repopulate in the background;
 - Preferences explains selection-bound save deferral;
-- after depletion, fallback pacing never permits a third consecutive local-pool draw.
+- after depletion, fallback pacing permits ten consecutive local-pool draws but never an eleventh.
 
 - [ ] **Step 7: Commit and update the existing PR**
 

@@ -321,6 +321,7 @@ describe("GameScreen challenger reconciliation", () => {
             pool: 30,
             poolMaximum: 50,
           },
+          eloRatings: { left: 1017, right: 983 },
         }),
       ),
     );
@@ -333,6 +334,17 @@ describe("GameScreen challenger reconciliation", () => {
     expect(
       screen.getByLabelText("Reusable image pool 30 of 50"),
     ).toHaveTextContent("Pool30/50");
+    expect(screen.getByTestId("candidate-card-left")).toHaveTextContent(
+      /Elo\s*1017/,
+    );
+    expect(screen.getByTestId("candidate-card-right")).toHaveTextContent(
+      /Elo\s*983/,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Choose image A: left concept. Elo rating 1017",
+      }),
+    ).toBeVisible();
   });
 
   it("commits an instant buffered round after preloading only the losing asset", async () => {
@@ -342,8 +354,12 @@ describe("GameScreen challenger reconciliation", () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, init?: RequestInit) =>
         init?.method === "POST"
-          ? json(completed)
-          : json({ status: "ready", game: initializedGame }),
+          ? json({ ...completed, eloRatings: { left: 1016, right: 1000 } })
+          : json({
+              status: "ready",
+              game: initializedGame,
+              eloRatings: { left: 1000, right: 1000 },
+            }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -359,6 +375,12 @@ describe("GameScreen challenger reconciliation", () => {
     const updatedImages = screen.getAllByTestId("candidate-image");
     expect(updatedImages[0]).toBe(winnerImage);
     expect(updatedImages[1]).not.toBe(losingImage);
+    expect(screen.getByTestId("candidate-card-left")).toHaveTextContent(
+      /Elo\s*1016/,
+    );
+    expect(screen.getByTestId("candidate-card-right")).toHaveTextContent(
+      /Elo\s*1000/,
+    );
     expect(preloadedUrls).toEqual(["/api/assets/challenger-job-1.png"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -376,6 +398,8 @@ describe("GameScreen challenger reconciliation", () => {
     await screen.findAllByTestId("candidate-image");
     fireEvent.click(screen.getByTestId("candidate-card-left"));
     await screen.findByTestId("loading-right");
+    expect(screen.getByText("Loading")).toBeVisible();
+    expect(screen.queryByText("Creating challenger")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
 
     expect(screen.getByRole("dialog")).toBeVisible();

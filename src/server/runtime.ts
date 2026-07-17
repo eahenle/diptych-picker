@@ -5,7 +5,10 @@ import type {
   GameState,
   PreferenceProfile,
 } from "@/domain/game";
-import { summarizeBufferHealth } from "@/domain/challenger-state";
+import {
+  summarizeBufferHealth,
+  summarizeDisplayedEloRatings,
+} from "@/domain/challenger-state";
 import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
 import { JsonChallengerRepository } from "./challenger-repository";
@@ -112,6 +115,15 @@ export async function getBufferHealth(): Promise<BufferHealth> {
 export async function refreshBufferHealth(): Promise<BufferHealth> {
   await gameService.reconcile();
   return getBufferHealth();
+}
+
+export async function getDisplayedEloRatings(game: GameState) {
+  return summarizeDisplayedEloRatings(
+    await challengerRepository.load(),
+    game.round.leftCandidate.id,
+    game.round.rightCandidate.id,
+    challengerConfig.initialRating,
+  );
 }
 
 export async function updatePreferenceSeed(

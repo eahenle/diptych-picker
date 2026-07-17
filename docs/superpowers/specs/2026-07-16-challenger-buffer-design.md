@@ -24,7 +24,8 @@ Defaults are configurable in one server-side configuration module:
 - Elo K-factor: `32`
 - generation-turnaround EMA alpha: `0.25`
 - initial generation-turnaround estimate: `300000` ms
-- maximum consecutive fallback draws: `2`
+- fallback draw delay: `3000` ms
+- maximum consecutive fallback draws: `10`
 
 ## Persistent Data Model
 
@@ -107,23 +108,17 @@ winnerRating' = winnerRating + 32 * (1 - expectedWinner)
 loserRating' = loserRating + 32 * (0 - (1 - expectedWinner))
 ```
 
-Ratings are persisted as rounded numbers with enough precision to make deterministic comparisons. A generated candidate becomes eligible for learned-pool membership after winning a round. If the pool has room, it is added. If the pool is full, it replaces the lowest-rated member only when its new rating is strictly higher. Ties do not displace an existing member. Candidate IDs prevent duplicate membership.
+Ratings are persisted as rounded numbers with enough precision to make deterministic comparisons. A generated candidate becomes eligible for learned-pool membership after comparison, even with no victories. If the pool has room, it is added. If the pool is full, it replaces the lowest-rated member only when its new rating is strictly higher. Ties do not displace an existing member. Candidate IDs prevent duplicate membership.
 
 Displacement removes membership, not the immutable asset or rating record. Checked-in curated files remain available on disk even when their effective membership is displaced. The maximum effective pool size is 50.
 
 ## Depleted-Buffer Fallback
 
-The first time a selection finds the ready buffer empty, the service may immediately draw one random eligible local-pool candidate. Eligibility excludes both currently displayed candidates and candidates in the recent-history exclusion window. The draw is uniform across eligible members.
+The first time a selection finds the ready buffer empty, the service arms a three-second delay. Once the delay expires, it draws one random eligible local-pool candidate. Eligibility excludes both currently displayed candidates and candidates in the recent-history exclusion window. The draw is uniform across eligible members.
 
-After a fallback draw, the next fallback becomes eligible at:
+If the queue remains empty, each later selection starts its own three-second delay before another fallback may be drawn. Up to ten consecutive fallbacks may be served while generation catches up. After the tenth, the service must keep the loser-only loading state until a generated or seed-buffer candidate is consumed. Consuming any non-fallback buffered candidate resets the fallback count and delay.
 
-```text
-now + clamp(0.5 * generationTurnaroundEmaMs, 30000 ms, 300000 ms)
-```
-
-Completed refill jobs update the exponential moving average from job creation to validated completion. Failed jobs do not update it.
-
-If the queue is still empty after the cooldown, one second consecutive fallback may be served. After two consecutive fallback draws, the service must keep the loser-only loading state until a generated or seed-buffer candidate is consumed. Consuming any non-fallback buffered candidate resets the fallback count and cooldown. This makes one fallback normal, two possible only during an unusually slow generation interval, and three impossible.
+Completed refill jobs continue to update the exponential moving average from job creation to validated completion for supply-health tracking. Failed jobs do not update it.
 
 During the cooldown or forced wait, the winner remains visible and untouched. The losing card shows the existing loading treatment plus an approximate availability message; it does not display an old candidate as though selection were still possible.
 
@@ -162,10 +157,10 @@ Deterministic unit and browser tests use the mock provider only and prove:
 7. Concurrent/double selection consumes at most one buffered candidate.
 8. Refill failure leaves the current round and ready queue intact and creates replacement capacity.
 9. Elo updates both compared candidates deterministically.
-10. A generated winner enters a non-full pool or displaces only a strictly lower-rated member in a full pool.
+10. A compared generated candidate enters a non-full pool even with no victories, or displaces only a strictly lower-rated member in a full pool.
 11. Pool size never exceeds 50 and candidate IDs cannot appear twice.
-12. The first eligible empty-buffer fallback is immediate and random only among eligible local-pool candidates.
-13. The second fallback respects half the EMA and a third consecutive fallback is impossible.
+12. The first eligible empty-buffer fallback waits three seconds and is random only among eligible local-pool candidates.
+13. Fallbacks stay on the three-second cadence, permit the tenth consecutive draw, and prohibit an eleventh.
 14. A fresh generated candidate resets fallback pacing.
 15. Empty-buffer waiting keeps the winner visible and shows loading only on the loser.
 16. Preferences opens during generation and communicates why Save may be deferred.

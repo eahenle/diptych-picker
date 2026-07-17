@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getOrCreateGame = vi.fn();
 const getBufferHealth = vi.fn();
+const getDisplayedEloRatings = vi.fn();
 const refreshBufferHealth = vi.fn();
 const resetGame = vi.fn();
 const select = vi.fn();
@@ -10,12 +11,18 @@ const updatePreferenceSeed = vi.fn();
 vi.mock("@/server/runtime", () => ({
   generationProvider: "mock",
   getBufferHealth,
+  getDisplayedEloRatings,
   getOrCreateGame,
   refreshBufferHealth,
   resetGame,
   gameService: { select },
   updatePreferenceSeed,
 }));
+
+beforeEach(() => {
+  getDisplayedEloRatings.mockReset();
+  getDisplayedEloRatings.mockResolvedValue({ left: 1016, right: 984 });
+});
 
 describe("GET /api/game", () => {
   beforeEach(() => {
@@ -57,6 +64,7 @@ describe("GET /api/game", () => {
         pool: 30,
         poolMaximum: 50,
       },
+      eloRatings: { left: 1016, right: 984 },
     });
   });
 });
@@ -99,6 +107,7 @@ describe("POST /api/game/start", () => {
     expect(await response.json()).toMatchObject({
       status: "ready",
       bufferHealth: { ready: 5, pool: 7 },
+      eloRatings: { left: 1016, right: 984 },
     });
   });
 });
@@ -200,6 +209,9 @@ describe("POST /api/game/select", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      eloRatings: { left: 1016, right: 984 },
+    });
   });
 
   it("returns 202 when the selected round is waiting for buffer capacity", async () => {
@@ -215,5 +227,8 @@ describe("POST /api/game/select", () => {
     );
 
     expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({
+      eloRatings: { left: 1016, right: 984 },
+    });
   });
 });

@@ -609,7 +609,9 @@ describe("GameService challenger buffer", () => {
     expect(recovered?.history).toHaveLength(game.history.length + 1);
   });
 
-  it("draws the first fallback immediately while excluding current and recent candidates", async () => {
+  it("waits three seconds before drawing a random eligible fallback", async () => {
+    let currentNow = NOW;
+    const now = () => currentNow;
     const game = gameState();
     const eligibleA = candidate("eligible-a");
     const eligibleB = candidate("eligible-b");
@@ -630,21 +632,35 @@ describe("GameService challenger buffer", () => {
     const context = serviceFor({
       game,
       challengers,
+      now,
       random: () => 0.75,
       bufferTarget: 1,
     });
 
     const selected = await context.service.select("left", 3);
 
-    expect(selected.round.rightCandidate.id).toBe("eligible-b");
-    expect(selected.round.status).toBe("idle");
+    expect(selected.round.status).toBe("generating");
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      consecutiveFallbackDraws: 0,
+      nextFallbackAt: "2026-07-16T01:00:03.000Z",
+    });
+
+    currentNow = "2026-07-16T01:00:02.999Z";
+    expect((await context.service.reconcile())?.round.status).toBe(
+      "generating",
+    );
+
+    currentNow = "2026-07-16T01:00:03.000Z";
+    const completed = await context.service.reconcile();
+    expect(completed?.round.rightCandidate.id).toBe("eligible-b");
+    expect(completed?.round.status).toBe("idle");
     await expect(context.challengerRepository.load()).resolves.toMatchObject({
       consecutiveFallbackDraws: 1,
-      nextFallbackAt: "2026-07-16T01:00:50.000Z",
+      nextFallbackAt: null,
     });
   });
 
-  it("serves a delayed second fallback during reconciliation and hard-stops a third", async () => {
+  it("allows a tenth fallback and hard-stops an eleventh", async () => {
     let currentNow = NOW;
     const now = () => currentNow;
     const game = gameState();
@@ -653,11 +669,11 @@ describe("GameService challenger buffer", () => {
       ratings: [
         rating(game.round.leftCandidate),
         rating(game.round.rightCandidate),
-        rating(candidate("fallback-1")),
-        rating(candidate("fallback-2")),
-        rating(candidate("fallback-3")),
+        rating(candidate("fallback-10")),
+        rating(candidate("fallback-11")),
       ],
-      generationTurnaroundEmaMs: 100_000,
+      consecutiveFallbackDraws: 9,
+      nextFallbackAt: null,
     });
     const context = serviceFor({
       game,
@@ -666,28 +682,22 @@ describe("GameService challenger buffer", () => {
       random: () => 0,
       bufferTarget: 1,
     });
-    const first = await context.service.select("left", 3);
-    expect(first.round.rightCandidate.id).toBe("fallback-1");
-
-    currentNow = "2026-07-16T01:00:10.000Z";
-    const waiting = await context.service.select("left", 4);
+    const waiting = await context.service.select("left", 3);
     expect(waiting.round.status).toBe("generating");
-    expect(waiting.pendingSelection).toMatchObject({ kind: "buffer" });
-
-    currentNow = "2026-07-16T01:00:50.000Z";
-    const second = await context.service.reconcile();
-    expect(second?.round.status).toBe("idle");
-    expect(second?.round.rightCandidate.id).toBe("fallback-2");
+    currentNow = "2026-07-16T01:00:03.000Z";
+    const tenth = await context.service.reconcile();
+    expect(tenth?.round.rightCandidate.id).toBe("fallback-10");
+    expect(tenth?.round.status).toBe("idle");
     await expect(context.challengerRepository.load()).resolves.toMatchObject({
-      consecutiveFallbackDraws: 2,
+      consecutiveFallbackDraws: 10,
     });
 
-    currentNow = "2026-07-16T01:10:00.000Z";
-    const third = await context.service.select("left", 5);
-    expect(third.round.status).toBe("generating");
+    currentNow = "2026-07-16T01:00:10.000Z";
+    const eleventh = await context.service.select("left", 4);
+    expect(eleventh.round.status).toBe("generating");
     const stillWaiting = await context.service.reconcile();
     expect(stillWaiting?.round.status).toBe("generating");
-    expect(stillWaiting?.round.rightCandidate.id).toBe("fallback-2");
+    expect(stillWaiting?.round.rightCandidate.id).toBe("fallback-10");
   });
 
   it("validates a completed refill, updates EMA, and immediately serves a waiting selection", async () => {

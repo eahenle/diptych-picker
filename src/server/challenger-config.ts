@@ -15,14 +15,6 @@ function integerFromEnv(name: string, fallback: number): number {
   return value;
 }
 
-const fallbackMinimumMs = numberFromEnv("CHALLENGER_FALLBACK_MIN_MS", 30_000);
-const fallbackMaximumMs = numberFromEnv("CHALLENGER_FALLBACK_MAX_MS", 300_000);
-if (fallbackMaximumMs < fallbackMinimumMs) {
-  throw new Error(
-    "CHALLENGER_FALLBACK_MAX_MS must be greater than or equal to CHALLENGER_FALLBACK_MIN_MS",
-  );
-}
-
 export const challengerConfig = {
   bufferTarget: numberFromEnv("CHALLENGER_BUFFER_SIZE", 5),
   poolMaximum: numberFromEnv("CANDIDATE_POOL_SIZE", 50),
@@ -33,10 +25,9 @@ export const challengerConfig = {
     "CHALLENGER_INITIAL_TURNAROUND_MS",
     300_000,
   ),
-  fallbackMinimumMs,
-  fallbackMaximumMs,
+  fallbackDelayMs: numberFromEnv("CHALLENGER_FALLBACK_DELAY_MS", 3_000),
   fallbackMaximumConsecutive: integerFromEnv(
     "CHALLENGER_FALLBACK_MAX_CONSECUTIVE",
-    2,
+    10,
   ),
 } as const;
