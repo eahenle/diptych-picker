@@ -81,29 +81,59 @@ export function promoteWinner(
   winnerId: string,
   poolMaximum = DEFAULT_POOL_MAXIMUM,
 ): ChallengerState {
-  const winner = state.ratings.find((item) => item.candidate.id === winnerId);
+  const configuredMaximum = Number.isFinite(poolMaximum)
+    ? Math.floor(poolMaximum)
+    : DEFAULT_POOL_MAXIMUM;
+  const effectiveMaximum = Math.min(
+    DEFAULT_POOL_MAXIMUM,
+    Math.max(0, configuredMaximum),
+  );
+  const rankedMembers = state.ratings
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.poolMember)
+    .sort(
+      (left, right) =>
+        left.item.rating - right.item.rating || left.index - right.index,
+    );
+  const excessCount = Math.max(0, rankedMembers.length - effectiveMaximum);
+  const excessMembers = new Set(
+    rankedMembers.slice(0, excessCount).map(({ item }) => item),
+  );
+  const repairedRatings =
+    excessMembers.size === 0
+      ? state.ratings
+      : state.ratings.map((item) =>
+          excessMembers.has(item) ? { ...item, poolMember: false } : item,
+        );
+  const repairedState =
+    repairedRatings === state.ratings
+      ? state
+      : { ...state, ratings: repairedRatings };
+  const winner = repairedRatings.find((item) => item.candidate.id === winnerId);
   if (!winner || winner.source !== "generated" || winner.poolMember) {
-    return state;
+    return repairedState;
   }
 
-  const poolMembers = state.ratings.filter((item) => item.poolMember);
-  if (poolMembers.length < poolMaximum) {
+  const poolMembers = repairedRatings.filter((item) => item.poolMember);
+  if (poolMembers.length < effectiveMaximum) {
     return {
-      ...state,
-      ratings: state.ratings.map((item) =>
+      ...repairedState,
+      ratings: repairedRatings.map((item) =>
         item === winner ? { ...item, poolMember: true } : item,
       ),
     };
   }
 
+  if (effectiveMaximum === 0) return repairedState;
+
   const lowestRated = poolMembers.reduce((lowest, item) =>
     item.rating < lowest.rating ? item : lowest,
   );
-  if (winner.rating <= lowestRated.rating) return state;
+  if (winner.rating <= lowestRated.rating) return repairedState;
 
   return {
-    ...state,
-    ratings: state.ratings.map((item) => {
+    ...repairedState,
+    ratings: repairedRatings.map((item) => {
       if (item === winner) return { ...item, poolMember: true };
       if (item === lowestRated) return { ...item, poolMember: false };
       return item;

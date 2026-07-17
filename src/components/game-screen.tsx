@@ -537,7 +537,10 @@ export function GameScreen() {
           return;
         }
 
-        if (server.round.status === "error" && server.pendingSelection) {
+        if (
+          server.round.status === "error" &&
+          server.pendingSelection?.kind === "generation"
+        ) {
           setReconcilingRetry(false);
           commitGame(server);
           void submitSelection(server, server.pendingSelection.winnerSide);

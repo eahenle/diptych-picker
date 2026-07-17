@@ -69,6 +69,19 @@ function generatingGame(
   return game;
 }
 
+function bufferedErrorGame(): GameState {
+  const game = cloneGame();
+  game.round.status = "error";
+  game.round.replacingSide = "right";
+  game.pendingSelection = {
+    kind: "buffer",
+    winnerSide: "left",
+    selectedAt: "2026-07-16T12:00:01.000Z",
+  };
+  game.errorMessage = "Buffered challenger was interrupted";
+  return game;
+}
+
 function completedGame(winnerSide: "left" | "right" = "left"): GameState {
   const game = cloneGame();
   const winner =
@@ -451,5 +464,34 @@ describe("GameScreen challenger reconciliation", () => {
       { timeout: 2_000 },
     );
     expect(selectionPosts).toBe(0);
+  });
+
+  it("does not submit a generation retry for a buffered pending selection", async () => {
+    installSuccessfulImagePreload();
+    const failed = bufferedErrorGame();
+    let getRequests = 0;
+    let selectionPosts = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/api/game/select")) {
+          selectionPosts += 1;
+          return json(generatingGame(), 202);
+        }
+        if (init?.method === "POST") throw new Error("unexpected POST");
+        getRequests += 1;
+        return json({ status: "ready", game: failed });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(getRequests).toBe(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(selectionPosts).toBe(0);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
   });
 });

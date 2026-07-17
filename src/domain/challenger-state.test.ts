@@ -161,6 +161,50 @@ describe("challenger state", () => {
     ).toHaveLength(50);
   });
 
+  it("clamps an attempted pool maximum above fifty", () => {
+    const members = Array.from({ length: 50 }, (_, index) =>
+      rating(`member-${index}`, 1000 + index),
+    );
+    const initial = state({
+      ratings: [
+        ...members,
+        rating("winner", 1100, { poolMember: false, wins: 1 }),
+      ],
+    });
+
+    const next = promoteWinner(initial, "winner", 51);
+    const pool = next.ratings.filter((item) => item.poolMember);
+
+    expect(pool).toHaveLength(50);
+    expect(pool.some((item) => item.candidate.id === "winner")).toBe(true);
+    expect(pool.some((item) => item.candidate.id === "member-0")).toBe(false);
+  });
+
+  it("repairs oversized membership by demoting lowest-rated ties in stable order", () => {
+    const oversized = Array.from({ length: 52 }, (_, index) =>
+      rating(`member-${index}`, 900 + Math.floor(index / 2)),
+    );
+
+    const next = promoteWinner(
+      state({
+        ratings: [
+          ...oversized,
+          rating("winner", 800, { poolMember: false, wins: 1 }),
+        ],
+      }),
+      "winner",
+    );
+    const poolIds = next.ratings
+      .filter((item) => item.poolMember)
+      .map((item) => item.candidate.id);
+
+    expect(poolIds).toHaveLength(50);
+    expect(poolIds).not.toContain("member-0");
+    expect(poolIds).not.toContain("member-1");
+    expect(poolIds).toContain("member-2");
+    expect(poolIds).not.toContain("winner");
+  });
+
   it("draws uniformly from eligible pool members and records fallback pacing", () => {
     const initial = state({
       ratings: [
