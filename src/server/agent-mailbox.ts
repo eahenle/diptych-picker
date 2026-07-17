@@ -71,9 +71,23 @@ const initialGenerationJobSchema = z
   })
   .strict();
 
+const refillGenerationJobSchema = z
+  .object({
+    ...generationJobFields,
+    kind: z.literal("refill"),
+    sessionId: jobIdSchema,
+    pinnedWinnerId: nonBlankStringSchema,
+  })
+  .strict()
+  .refine((job) => job.pinnedWinnerId === job.retainedWinner.id, {
+    message: "pinnedWinnerId must equal retainedWinner.id",
+    path: ["pinnedWinnerId"],
+  });
+
 const discriminatedGenerationJobSchema = z.discriminatedUnion("kind", [
   challengerGenerationJobSchema,
   initialGenerationJobSchema,
+  refillGenerationJobSchema,
 ]);
 
 export const generationJobSchema = z.preprocess((value) => {

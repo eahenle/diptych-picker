@@ -65,9 +65,9 @@ export class MockAgentWorker {
 
   private async complete(job: GenerationJob): Promise<void> {
     // Playwright-only deterministic failure hook. A worker consumes this
-    // sentinel once, and only for challenger jobs; no external provider runs.
+    // sentinel once for challenger or refill jobs; no external provider runs.
     if (
-      job.kind === "challenger" &&
+      (job.kind === "challenger" || job.kind === "refill") &&
       job.preferenceSeed.includes("[mock:fail-once]") &&
       !this.failOnceSentinelConsumed
     ) {

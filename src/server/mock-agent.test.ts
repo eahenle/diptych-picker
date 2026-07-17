@@ -49,6 +49,17 @@ const initialJob = (
   winnerSide: initialSide,
 });
 
+const refillJob = (id = "refill-job-1"): GenerationJob => {
+  const baseJob = job();
+  return {
+    ...baseJob,
+    id,
+    kind: "refill",
+    sessionId: "session-1",
+    pinnedWinnerId: baseJob.retainedWinner.id,
+  };
+};
+
 afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(
@@ -57,6 +68,72 @@ afterEach(async () => {
 });
 
 describe("deterministic mock mailbox worker", () => {
+  it("schedules refill jobs through deterministic local providers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-refill-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-07-16T01:00:01.000Z",
+    });
+    const mailbox = new MockGenerationMailbox(fileMailbox, worker);
+    const refill = refillJob();
+
+    await mailbox.enqueue(refill);
+
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readResult(refill.id)).toMatchObject({
+        jobId: refill.id,
+        status: "completed",
+        asset: { candidateId: `challenger-${refill.id}` },
+      });
+    });
+    expect(
+      await readFile(join(root, "assets", `challenger-${refill.id}.png`)),
+    ).not.toHaveLength(0);
+    worker.dispose();
+  });
+
+  it("publishes exactly one failed refill for the fail-once sentinel", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-refill-fail-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-07-16T01:00:01.000Z",
+    });
+    const mailbox = new MockGenerationMailbox(fileMailbox, worker);
+    const first = {
+      ...refillJob("refill-sentinel-1"),
+      preferenceSeed:
+        "Prefer novel, carefully fabricated scenes. [mock:fail-once]",
+    };
+    const second = { ...first, id: "refill-sentinel-2" };
+
+    await mailbox.enqueue(first);
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readResult(first.id)).toMatchObject({
+        status: "failed",
+        message: expect.stringContaining("[mock:fail-once]"),
+      });
+    });
+
+    await mailbox.enqueue(second);
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readResult(second.id)).toMatchObject({
+        status: "completed",
+        asset: { candidateId: `challenger-${second.id}` },
+      });
+    });
+    worker.dispose();
+  });
+
   it("publishes exactly one failed challenger for the fail-once sentinel", async () => {
     const root = await mkdtemp(join(tmpdir(), "diptych-mock-fail-once-"));
     roots.push(root);

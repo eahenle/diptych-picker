@@ -72,6 +72,30 @@ describe("generationJobSchema", () => {
 
     expect(generationJobSchema.parse(legacy)).toEqual(job());
   });
+
+  it("parses strict refill jobs with matching pinned winner metadata", () => {
+    const baseJob = job("refill-1");
+    const refill = {
+      ...baseJob,
+      kind: "refill" as const,
+      sessionId: "session-1",
+      pinnedWinnerId: baseJob.retainedWinner.id,
+    };
+
+    expect(generationJobSchema.parse(refill)).toEqual(refill);
+    expect(() =>
+      generationJobSchema.parse({
+        ...refill,
+        sessionMetadata: { source: "browser" },
+      }),
+    ).toThrow();
+    expect(() =>
+      generationJobSchema.parse({
+        ...refill,
+        pinnedWinnerId: baseJob.rejectedCandidate.id,
+      }),
+    ).toThrow(/pinnedWinnerId/i);
+  });
 });
 
 type CompletedResult = Extract<GenerationResult, { status: "completed" }>;
