@@ -7,10 +7,12 @@ import {
   popReady,
   recordGenerationTurnaround,
   refillDeficit,
+  summarizeBufferHealth,
   updateElo,
   type BufferedCandidate,
   type CandidateRating,
   type ChallengerState,
+  type RefillJobRecord,
 } from "./challenger-state";
 
 const candidate = (id: string): Candidate => ({
@@ -58,6 +60,26 @@ const state = (overrides: Partial<ChallengerState> = {}): ChallengerState => ({
   ...overrides,
 });
 
+const refillJob = (id: string): RefillJobRecord => ({
+  jobId: id,
+  pinnedWinnerId: "winner",
+  enqueuedAt: "2026-07-16T00:00:00.000Z",
+  expectedJob: {
+    id,
+    kind: "refill",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    roundNumber: 1,
+    winnerSide: "left",
+    retainedWinner: candidate("winner"),
+    rejectedCandidate: candidate("loser"),
+    selectionHistory: [],
+    recentConcepts: [],
+    preferenceSeed: "novel test preferences",
+    sessionId: "session-1",
+    pinnedWinnerId: "winner",
+  },
+});
+
 describe("challenger state", () => {
   it("updates equal Elo ratings after a decisive comparison", () => {
     expect(updateElo(1000, 1000, 32)).toEqual({
@@ -88,6 +110,29 @@ describe("challenger state", () => {
     const initial = state();
 
     expect(popReady(initial)).toEqual({ candidate: null, state: initial });
+  });
+
+  it("summarizes only queue, refill, and reusable-pool counts", () => {
+    expect(
+      summarizeBufferHealth(
+        state({
+          ready: [buffered("ready-1"), buffered("ready-2")],
+          refillJobs: [refillJob("job-1")],
+          ratings: [
+            rating("retained", 1016),
+            rating("excluded", 984, { poolMember: false }),
+          ],
+        }),
+        5,
+        50,
+      ),
+    ).toEqual({
+      ready: 2,
+      inFlight: 1,
+      target: 5,
+      pool: 1,
+      poolMaximum: 50,
+    });
   });
 
   it("promotes a generated winner into a non-full pool without duplicating its ID", () => {

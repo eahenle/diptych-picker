@@ -307,6 +307,34 @@ describe("GameScreen initial generation", () => {
 });
 
 describe("GameScreen challenger reconciliation", () => {
+  it("shows live ready-queue and reusable-pool health", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json({
+          status: "ready",
+          game: initializedGame,
+          bufferHealth: {
+            ready: 3,
+            inFlight: 2,
+            target: 5,
+            pool: 30,
+            poolMaximum: 50,
+          },
+        }),
+      ),
+    );
+
+    render(<GameScreen />);
+
+    expect(
+      await screen.findByLabelText("Ready queue 3 of 5; 2 generating"),
+    ).toHaveTextContent("Queue3/5+2");
+    expect(
+      screen.getByLabelText("Reusable image pool 30 of 50"),
+    ).toHaveTextContent("Pool30/50");
+  });
+
   it("commits an instant buffered round after preloading only the losing asset", async () => {
     const preloadedUrls: string[] = [];
     installRecordedImagePreload(preloadedUrls);

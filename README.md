@@ -70,6 +70,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
 - Shape future challengers through **Preferences**, with separate guidance for themes, media, visual style, palette, content range, and things to avoid. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
+- The quiet **Queue** and **Pool** readouts show ready challengers, active refill work, and reusable-image capacity without exposing mailbox or candidate details.
 - **New game** requires confirmation and clears the current round and history.
 
 ## Verification
@@ -94,3 +95,4 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/repository.ts` and `initial-bootstrap.ts`: atomic local persistence behind interfaces.
 - `src/server/asset-store.ts`: immutable PNG storage and verification.
 - `src/components/game-screen.tsx`: async polling, preload-before-swap, keyboard controls, and exactly two candidate images once ready.
+- `GET /api/game/health`: a narrow live snapshot of ready, in-flight, and reusable-pool counts for the UI status readout.

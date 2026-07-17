@@ -19,6 +19,10 @@ Expand the Preferences modal beyond one freeform prompt so it actively encourage
 
 Additional useful guidance includes content to avoid, clear field examples, and preserving a single composed preference seed for generation compatibility.
 
+### Live image-supply health
+
+Show a quiet, continuously refreshed Queue and Pool readout beside the round metrics. The readout reports ready challengers, in-flight refill work, and reusable-pool capacity through a narrow stats-only endpoint; it must not expose prompts, candidate metadata, or mailbox internals.
+
 ## Future feature ideas
 
 Exploration only; these are not yet roadmap commitments.
@@ -39,7 +43,7 @@ Create a visual history that shows each retained winner's challenger lineage. Le
 
 ### Session controls
 
-Consider a reversible one-step undo, a deliberate restart that can keep or reset the preference profile, and a visible-but-quiet buffer health indicator for long-running local sessions.
+Consider a reversible one-step undo and a deliberate restart that can keep or reset the preference profile.
 
 ### Deliberate exploration modes
 

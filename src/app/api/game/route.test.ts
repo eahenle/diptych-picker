@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getOrCreateGame = vi.fn();
+const getBufferHealth = vi.fn();
+const refreshBufferHealth = vi.fn();
+const resetGame = vi.fn();
 const select = vi.fn();
 const updatePreferenceSeed = vi.fn();
 
 vi.mock("@/server/runtime", () => ({
   generationProvider: "mock",
+  getBufferHealth,
   getOrCreateGame,
+  refreshBufferHealth,
+  resetGame,
   gameService: { select },
   updatePreferenceSeed,
 }));
@@ -14,7 +20,15 @@ vi.mock("@/server/runtime", () => ({
 describe("GET /api/game", () => {
   beforeEach(() => {
     getOrCreateGame.mockReset();
+    getBufferHealth.mockReset();
     getOrCreateGame.mockResolvedValue({ status: "initializing" });
+    getBufferHealth.mockResolvedValue({
+      ready: 5,
+      inFlight: 0,
+      target: 5,
+      pool: 30,
+      poolMaximum: 50,
+    });
   });
 
   it("reports the live generation provider in a response header", async () => {
@@ -23,6 +37,69 @@ describe("GET /api/game", () => {
     const response = await GET();
 
     expect(response.headers.get("X-Diptych-Generation-Provider")).toBe("mock");
+  });
+
+  it("includes narrow buffer health data with a ready game", async () => {
+    getOrCreateGame.mockResolvedValue({
+      status: "ready",
+      game: { round: { status: "idle" } },
+    });
+    const { GET } = await import("./route");
+
+    const response = await GET();
+
+    expect(await response.json()).toMatchObject({
+      status: "ready",
+      bufferHealth: {
+        ready: 5,
+        inFlight: 0,
+        target: 5,
+        pool: 30,
+        poolMaximum: 50,
+      },
+    });
+  });
+});
+
+describe("GET /api/game/health", () => {
+  it("returns the current buffer health snapshot", async () => {
+    const health = {
+      ready: 4,
+      inFlight: 1,
+      target: 5,
+      pool: 12,
+      poolMaximum: 50,
+    };
+    refreshBufferHealth.mockResolvedValue(health);
+    const { GET } = await import("./health/route");
+
+    const response = await GET();
+
+    expect(await response.json()).toEqual(health);
+  });
+});
+
+describe("POST /api/game/start", () => {
+  it("includes fresh buffer health when a reset is immediately ready", async () => {
+    resetGame.mockResolvedValue({
+      status: "ready",
+      game: { round: { status: "idle" } },
+    });
+    getBufferHealth.mockResolvedValue({
+      ready: 5,
+      inFlight: 0,
+      target: 5,
+      pool: 7,
+      poolMaximum: 50,
+    });
+    const { POST } = await import("./start/route");
+
+    const response = await POST();
+
+    expect(await response.json()).toMatchObject({
+      status: "ready",
+      bufferHealth: { ready: 5, pool: 7 },
+    });
   });
 });
 

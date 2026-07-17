@@ -62,6 +62,14 @@ export interface GameState {
   errorMessage?: string;
 }
 
+export interface BufferHealth {
+  ready: number;
+  inFlight: number;
+  target: number;
+  pool: number;
+  poolMaximum: number;
+}
+
 export function preferenceProfileFromSeed(
   preferenceSeed: string,
 ): PreferenceProfile {
@@ -97,7 +105,7 @@ export function composePreferenceSeed(profile: PreferenceProfile): string {
 }
 
 export type GameStartState =
-  | { status: "ready"; game: GameState }
+  | { status: "ready"; game: GameState; bufferHealth?: BufferHealth }
   | { status: "initializing"; batchId: string; preferenceSeed: string }
   | {
       status: "initialization-error";

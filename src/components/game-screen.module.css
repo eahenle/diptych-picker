@@ -71,6 +71,8 @@
   margin: clamp(22px, 3vw, 40px) auto clamp(20px, 2vw, 28px);
   display: flex;
   align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 26px;
   color: var(--muted);
   font-size: 11px;
@@ -90,6 +92,46 @@
   width: 1px;
   height: 28px;
   background: var(--border);
+}
+
+.supplyMetric {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  letter-spacing: 0.12em;
+}
+
+.supplyMetric strong {
+  margin-left: 1px;
+  color: #d9d2cb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.supplyMetric small {
+  margin-left: -4px;
+  color: var(--copper-bright);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.healthDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9d7763;
+  box-shadow: 0 0 0 3px rgba(157, 119, 99, 0.1);
+}
+
+.healthDot[data-status="ready"] {
+  background: #76a68b;
+  box-shadow: 0 0 0 3px rgba(118, 166, 139, 0.1);
+}
+
+.healthDot[data-status="refilling"] {
+  background: var(--copper-bright);
+  box-shadow: 0 0 0 3px rgba(180, 104, 73, 0.12);
 }
 
 .comparisonViewport {

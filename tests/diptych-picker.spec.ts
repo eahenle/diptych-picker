@@ -101,6 +101,10 @@ test("starts with five durable challengers and adapts two independent images to 
   const stored = await challengerState();
 
   expect(stored.ready).toHaveLength(5);
+  await expect(
+    page.getByLabel("Ready queue 5 of 5; 0 generating"),
+  ).toBeVisible();
+  await expect(page.getByLabel("Reusable image pool 7 of 50")).toBeVisible();
   expect(stored.ready.map(({ candidate }) => candidate.id)).not.toContain(
     displayedIds[0],
   );

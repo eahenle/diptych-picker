@@ -1,4 +1,4 @@
-import type { Candidate, SelectionHistory, Side } from "./game";
+import type { BufferHealth, Candidate, SelectionHistory, Side } from "./game";
 
 const DEFAULT_POOL_MAXIMUM = 50;
 const DEFAULT_READY_TARGET = 5;
@@ -84,6 +84,20 @@ export interface FallbackDrawOptions {
   minimumCooldownMs?: number;
   maximumCooldownMs?: number;
   maximumConsecutiveDraws?: number;
+}
+
+export function summarizeBufferHealth(
+  state: ChallengerState | null,
+  target = DEFAULT_READY_TARGET,
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): BufferHealth {
+  return {
+    ready: state?.ready.length ?? 0,
+    inFlight: state?.refillJobs.length ?? 0,
+    target,
+    pool: state?.ratings.filter((item) => item.poolMember).length ?? 0,
+    poolMaximum,
+  };
 }
 
 function roundRating(rating: number): number {
