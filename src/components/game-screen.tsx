@@ -145,6 +145,7 @@ export function GameScreen() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [newGameOpen, setNewGameOpen] = useState(false);
+  const [loadGameOpen, setLoadGameOpen] = useState(false);
   const [gameTransferAction, setGameTransferAction] =
     useState<GameTransferAction | null>(null);
   const [gameTransferError, setGameTransferError] = useState<string | null>(
@@ -671,7 +672,14 @@ export function GameScreen() {
 
   const openNewGame = () => {
     setGameTransferError(null);
+    setLoadGameOpen(false);
     setNewGameOpen(true);
+  };
+
+  const openLoadGame = () => {
+    setGameTransferError(null);
+    setNewGameOpen(false);
+    setLoadGameOpen(true);
   };
 
   const exportCurrentGame = async () => {
@@ -696,10 +704,12 @@ export function GameScreen() {
       link.download = filename;
       link.click();
       URL.revokeObjectURL(url);
+      setLocalError(null);
     } catch (error) {
-      setGameTransferError(
-        error instanceof Error ? error.message : "Could not export this game",
-      );
+      const message =
+        error instanceof Error ? error.message : "Could not export this game";
+      if (newGameOpen || loadGameOpen) setGameTransferError(message);
+      else setLocalError(message);
     } finally {
       setGameTransferAction(null);
     }
@@ -734,6 +744,7 @@ export function GameScreen() {
       }
       commitStartState(state);
       setNewGameOpen(false);
+      setLoadGameOpen(false);
       setLocalError(null);
     } catch (error) {
       setGameTransferError(
@@ -758,6 +769,7 @@ export function GameScreen() {
       );
       commitStartState(state);
       setNewGameOpen(false);
+      setLoadGameOpen(false);
       setLocalError(null);
     } catch (error) {
       setGameTransferError(
@@ -849,6 +861,34 @@ export function GameScreen() {
           <button
             type="button"
             className={styles.utilityButton}
+            disabled={
+              !game ||
+              status === "generating" ||
+              reconcilingRetry ||
+              initializing ||
+              gameTransferAction !== null
+            }
+            onClick={() => void exportCurrentGame()}
+          >
+            {gameTransferAction === "exporting" ? "Exporting…" : "Export"}
+          </button>
+          <button
+            type="button"
+            className={styles.utilityButton}
+            disabled={
+              !game ||
+              status === "generating" ||
+              reconcilingRetry ||
+              initializing ||
+              gameTransferAction !== null
+            }
+            onClick={openLoadGame}
+          >
+            Load
+          </button>
+          <button
+            type="button"
+            className={styles.utilityButton}
             disabled={!game || reconcilingRetry || initializing}
             onClick={openPreferences}
           >
@@ -858,7 +898,10 @@ export function GameScreen() {
             type="button"
             className={styles.newGameButton}
             disabled={
-              status === "generating" || reconcilingRetry || initializing
+              status === "generating" ||
+              reconcilingRetry ||
+              initializing ||
+              gameTransferAction !== null
             }
             onClick={openNewGame}
           >
@@ -986,6 +1029,103 @@ export function GameScreen() {
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {loadGameOpen && game ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onMouseDown={() => {
+            if (!gameTransferAction) setLoadGameOpen(false);
+          }}
+        >
+          <section
+            className={`${styles.preferencesModal} ${styles.gameStateModal}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="load-game-title"
+            aria-describedby="load-game-description load-game-save-note"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h2 id="load-game-title">Load saved game</h2>
+            <p id="load-game-description">
+              Loading replaces the current round and learned state after the
+              save and its local images pass validation.
+            </p>
+            <div className={styles.transferOptions}>
+              <div className={styles.transferOption}>
+                <span>
+                  <strong>Keep this game first</strong>
+                  <small>
+                    Download the current round, history, preferences, queue,
+                    ratings, and pool membership before loading another save.
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className={styles.utilityButton}
+                  disabled={gameTransferAction !== null}
+                  onClick={() => void exportCurrentGame()}
+                  autoFocus
+                >
+                  {gameTransferAction === "exporting"
+                    ? "Exporting…"
+                    : "Export current game first"}
+                </button>
+              </div>
+              <div className={styles.transferOption}>
+                <span>
+                  <strong>Choose a saved game</strong>
+                  <small>
+                    The current game stays unchanged if the save cannot be
+                    restored safely.
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className={styles.utilityButton}
+                  disabled={gameTransferAction !== null}
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  {gameTransferAction === "importing"
+                    ? "Loading…"
+                    : "Choose saved game"}
+                </button>
+                <input
+                  ref={importInputRef}
+                  className={styles.fileInput}
+                  type="file"
+                  accept="application/json,.json"
+                  aria-label="Choose saved game file"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importSavedGame(file);
+                  }}
+                />
+              </div>
+            </div>
+            <p id="load-game-save-note" className={styles.gameSaveNote}>
+              Save files use this installation&apos;s immutable image library;
+              missing local images are rejected without changing the current
+              game.
+            </p>
+            {gameTransferError ? (
+              <p className={styles.transferError} role="alert">
+                {gameTransferError}
+              </p>
+            ) : null}
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.utilityButton}
+                disabled={gameTransferAction !== null}
+                onClick={() => setLoadGameOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {newGameOpen && game ? (

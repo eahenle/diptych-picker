@@ -68,6 +68,9 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 
 ## Controls
 
+- **Export** downloads the exact current game as JSON without interrupting play.
+- **Load** opens a restore dialog with the option to export the current game first, then choose a prior JSON save.
+
 - Click the complete A or B card.
 - Read each candidate's current rounded Elo score from its lower-left overlay.
 - Press `A` or `1` for the left image.

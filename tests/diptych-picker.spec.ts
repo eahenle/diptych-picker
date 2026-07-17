@@ -209,16 +209,13 @@ test("exports the current game and restores it after later play", async ({
     page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
   ]);
 
-  await page.getByRole("button", { name: "New game" }).click();
-  await expect(page.getByRole("dialog", { name: "New game" })).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export current game" }).click();
+  await page.getByRole("button", { name: "Export", exact: true }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(
     /^diptych-picker-round-1-\d{4}-\d{2}-\d{2}\.json$/,
   );
   await download.saveAs(savePath);
-  await page.getByRole("button", { name: "Cancel" }).click();
 
   await select(page, "left", 2);
   await expect(page.getByTestId("candidate-card-right")).not.toHaveAttribute(
@@ -226,11 +223,19 @@ test("exports the current game and restores it after later play", async ({
     originalIds[1]!,
   );
 
-  await page.getByRole("button", { name: "New game" }).click();
+  await page.getByRole("button", { name: "Load", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Load saved game" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Export current game first" }),
+  ).toBeVisible();
   await page.getByLabel("Choose saved game file").setInputFiles(savePath);
 
   await expect(page.getByText("Round 1", { exact: true })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "New game" })).toHaveCount(0);
+  await expect(
+    page.getByRole("dialog", { name: "Load saved game" }),
+  ).toHaveCount(0);
   await expect(page.getByTestId("candidate-card-left")).toHaveAttribute(
     "data-candidate-id",
     originalIds[0]!,

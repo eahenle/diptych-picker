@@ -726,6 +726,32 @@ describe("GameScreen challenger reconciliation", () => {
 });
 
 describe("GameScreen game state transfer", () => {
+  it("exposes export and load controls in the main header", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+
+    expect(screen.getByRole("button", { name: "Export" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Load" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "Load saved game" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Export current game first" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Choose saved game" }),
+    ).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("opens a save/reset dialog instead of immediately clearing the game", async () => {
     const confirm = vi.fn();
     vi.stubGlobal("confirm", confirm);
@@ -783,10 +809,7 @@ describe("GameScreen game state transfer", () => {
 
     render(<GameScreen />);
     await screen.findAllByTestId("candidate-image");
-    fireEvent.click(screen.getByRole("button", { name: "New game" }));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Export current game" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() => expect(click).toHaveBeenCalledOnce());
     expect(createObjectURL).toHaveBeenCalledOnce();
@@ -838,7 +861,7 @@ describe("GameScreen game state transfer", () => {
 
     render(<GameScreen />);
     await screen.findAllByTestId("candidate-image");
-    fireEvent.click(screen.getByRole("button", { name: "New game" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
     const save = new File(["{}"], "saved-game.json", {
       type: "application/json",
     });
@@ -852,7 +875,7 @@ describe("GameScreen game state transfer", () => {
       ).toHaveTextContent("Round 12"),
     );
     expect(
-      screen.queryByRole("dialog", { name: "New game" }),
+      screen.queryByRole("dialog", { name: "Load saved game" }),
     ).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/game/snapshot", {
       method: "PUT",
