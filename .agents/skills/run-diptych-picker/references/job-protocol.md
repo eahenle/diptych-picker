@@ -1,0 +1,128 @@
+# Agent mailbox protocol
+
+The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
+
+- [Paths](#paths)
+- [Job request](#job-request)
+- [Proposal](#proposal)
+- [Completed result](#completed-result)
+- [Failed result and heartbeat](#failed-result-and-heartbeat)
+
+## Paths
+
+- `agent-mailbox/pending/<jobId>.json`: immutable request waiting to be claimed
+- `agent-mailbox/active/<jobId>.json`: request claimed by the coordinator
+- `agent-mailbox/batches/<batchId>.json`: durable initial-batch owner token
+- `agent-mailbox/outcomes/<jobId>.json`: exclusive `completed` or `failed` outcome reservation
+- `agent-mailbox/completed/<jobId>.json`: successful terminal result
+- `agent-mailbox/failed/<jobId>.json`: retryable terminal failure
+- `agent-mailbox/heartbeat.json`: last coordinator status
+- `agent-work/<jobId>/proposal.json`: structured proposal passed by file
+- `agent-work/<jobId>/failure.txt`: failure reason passed by file
+- `agent-work/<jobId>/image.png`: worker-generated standalone image
+- `assets/<candidateId>.png`: immutable generated candidate asset
+
+Only the helper scripts move or create mailbox artifacts. The app archives terminal artifacts after reconciling them into game state.
+
+## Job request
+
+```json
+{
+  "id": "job-id",
+  "kind": "challenger",
+  "createdAt": "ISO-8601 timestamp",
+  "roundNumber": 2,
+  "winnerSide": "left",
+  "retainedWinner": {
+    "id": "candidate-id",
+    "imageUrl": "/api/assets/candidate-id.png",
+    "prompt": "original visual prompt",
+    "concept": "concept name",
+    "style": ["tag"],
+    "createdAt": "ISO-8601 timestamp",
+    "winCount": 1,
+    "reasoningSummary": "optional"
+  },
+  "rejectedCandidate": {
+    "id": "candidate-id",
+    "imageUrl": "/api/assets/candidate-id.png",
+    "prompt": "original visual prompt",
+    "concept": "concept name",
+    "style": ["tag"],
+    "createdAt": "ISO-8601 timestamp",
+    "winCount": 0
+  },
+  "selectionHistory": [],
+  "recentConcepts": ["concept"],
+  "preferenceSeed": "editable preference profile"
+}
+```
+
+`kind` is `challenger` or `initial`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+
+```json
+{
+  "id": "initial-batch-1-left",
+  "kind": "initial",
+  "batchId": "batch-1",
+  "initialSide": "left"
+}
+```
+
+The remaining request fields carry the same preference context. A missing `kind` is tolerated as a legacy challenger.
+
+At coordinator startup or restart, run `npm run agent:next -- --resume --wait-ms 0` once. It prints one unterminated active request when recovery is needed, or claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
+
+`npm run agent:next -- --wait-ms 30000` atomically renames one request from `pending` to `active` and never returns existing ordinary active work. Before claiming the first side of an initial batch, it atomically creates one batch ownership record and includes its unguessable `batchOwnerToken` in the printed request. Other ordinary calls skip the owner's pending partner. A wait must be between 0 and 30000 milliseconds.
+
+After receiving an initial job, use `npm run agent:next -- --wait-ms 30000 --batch <batchId> --owner-token <batchOwnerToken>`. Both arguments are required and the token must match the durable ownership record. If a call times out without JSON, repeat that same owned-batch call; do not make an ordinary next-job call while the partner is pending. Continue until the partner or terminal request appears, or the user stops the runner. For a new batch, this claims or returns the opposite-side partner before exactly two parallel workers start. On recovery, if one partner already has a completed or failed result, batch inspection returns that request with `terminalStatus: "completed"` or `"failed"`; never generate that side again and process only the unfinished request. If the unfinished partner was still pending, startup `--resume` claims it under the recovered owner token before batch inspection reports the terminal side.
+
+## Proposal
+
+Write this strict JSON object to `<data-root>/agent-work/<jobId>/proposal.json`:
+
+```json
+{
+  "concept": "short distinct concept",
+  "visualPrompt": "prompt for one standalone square image",
+  "styleTags": ["specific visual tag"],
+  "reasoningSummary": "why this challenger tests the learned preference"
+}
+```
+
+Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Invalid proposals fail before any outcome, result, or asset is published.
+
+## Completed result
+
+`npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png"` requires the matching active job. It rejects inputs over 50 MB or 4096 by 4096 pixels, then uses Sharp to identify and fully decode exactly one square PNG. It reserves the `completed` outcome, creates `assets/challenger-<jobId>.png` without overwriting, and atomically publishes:
+
+```json
+{
+  "jobId": "job-id",
+  "status": "completed",
+  "completedAt": "ISO-8601 timestamp",
+  "proposal": {
+    "concept": "concept",
+    "visualPrompt": "prompt",
+    "styleTags": ["tag"],
+    "reasoningSummary": "reason"
+  },
+  "asset": {
+    "candidateId": "challenger-job-id",
+    "filename": "challenger-job-id.png",
+    "imageUrl": "/api/assets/challenger-job-id.png",
+    "contentType": "image/png",
+    "width": 1024,
+    "height": 1024,
+    "byteLength": 123456
+  }
+}
+```
+
+## Failed result and heartbeat
+
+Write the reason to `<data-root>/agent-work/<id>/failure.txt`. `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt"` requires the matching active job, reserves the `failed` outcome, and atomically publishes a result with `status: "failed"`, an ISO timestamp, the non-empty `message`, and `retryable: true`.
+
+Only one outcome reservation can exist for a job. A retry matching that outcome resumes safely and returns an already-published result unchanged. The opposite outcome is rejected. Completion also resumes when its deterministic asset already exists only if the existing bytes exactly equal the validated source; differing bytes are never overwritten.
+
+`npm run agent:heartbeat -- --status <status> [--job <id>]` atomically replaces `heartbeat.json` with the status, optional job ID, and update timestamp. Use `waiting`, `generating`, and `stopped` coordinator states. The heartbeat does not record the short-lived helper process PID.

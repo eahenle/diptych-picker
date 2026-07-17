@@ -1,0 +1,216 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { FileGenerationMailbox, type GenerationJob } from "./agent-mailbox";
+import { LocalAssetStore } from "./asset-store";
+import { MockAgentWorker, MockGenerationMailbox } from "./mock-agent";
+
+const roots: string[] = [];
+
+const job = (): GenerationJob => ({
+  id: "job-1",
+  kind: "challenger",
+  createdAt: "2026-07-16T01:00:00.000Z",
+  roundNumber: 1,
+  winnerSide: "left",
+  retainedWinner: {
+    id: "left",
+    imageUrl: "/left.png",
+    prompt: "left prompt",
+    concept: "Left concept",
+    style: ["left style"],
+    createdAt: "2026-07-16T00:00:00.000Z",
+    winCount: 0,
+  },
+  rejectedCandidate: {
+    id: "right",
+    imageUrl: "/right.png",
+    prompt: "right prompt",
+    concept: "Right concept",
+    style: ["right style"],
+    createdAt: "2026-07-16T00:00:00.000Z",
+    winCount: 0,
+  },
+  selectionHistory: [],
+  recentConcepts: [],
+  preferenceSeed: "Prefer novel, carefully fabricated scenes.",
+});
+
+const initialJob = (
+  id: string,
+  initialSide: "left" | "right",
+): GenerationJob => ({
+  ...job(),
+  id,
+  kind: "initial",
+  batchId: "batch-1",
+  initialSide,
+  winnerSide: initialSide,
+});
+
+afterEach(async () => {
+  vi.useRealTimers();
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true })),
+  );
+});
+
+describe("deterministic mock mailbox worker", () => {
+  it("publishes exactly one failed challenger for the fail-once sentinel", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-fail-once-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-07-16T01:00:01.000Z",
+    });
+    const mailbox = new MockGenerationMailbox(fileMailbox, worker);
+    const first = {
+      ...job(),
+      id: "sentinel-job-1",
+      preferenceSeed:
+        "Prefer novel, carefully fabricated scenes. [mock:fail-once]",
+    };
+    const second = { ...first, id: "sentinel-job-2" };
+
+    await mailbox.enqueue(first);
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readResult(first.id)).toMatchObject({
+        status: "failed",
+        message: expect.stringContaining("[mock:fail-once]"),
+      });
+    });
+
+    await mailbox.enqueue(second);
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readResult(second.id)).toMatchObject({
+        status: "completed",
+        asset: { candidateId: `challenger-${second.id}` },
+      });
+    });
+    worker.dispose();
+  });
+
+  it("publishes exactly one delayed completion and immutable local asset per job", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-agent-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 25,
+      now: () => "2026-07-16T01:00:01.000Z",
+    });
+    const mailbox = new MockGenerationMailbox(fileMailbox, worker);
+
+    await mailbox.enqueue(job());
+    expect(await fileMailbox.readResult("job-1")).toBeNull();
+
+    let result = await new FileGenerationMailbox(mailboxDirectory).readResult(
+      "job-1",
+    );
+    await vi.waitFor(async () => {
+      result = await new FileGenerationMailbox(mailboxDirectory).readResult(
+        "job-1",
+      );
+      expect(result).not.toBeNull();
+    });
+
+    expect(result).toMatchObject({
+      jobId: "job-1",
+      status: "completed",
+      completedAt: "2026-07-16T01:00:01.000Z",
+      asset: {
+        candidateId: "challenger-job-1",
+        filename: "challenger-job-1.png",
+        imageUrl: "/api/assets/challenger-job-1.png",
+        contentType: "image/png",
+        width: 1024,
+        height: 1024,
+      },
+    });
+    const firstBytes = await readFile(
+      join(root, "assets", "challenger-job-1.png"),
+    );
+
+    worker.schedule(job());
+    worker.schedule(job());
+
+    expect(
+      await readFile(join(root, "assets", "challenger-job-1.png")),
+    ).toEqual(firstBytes);
+    expect(await fileMailbox.readResult("job-1")).toEqual(result);
+    worker.dispose();
+  });
+
+  it("completes both initial sides deterministically with distinct proposals", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-initial-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-07-16T01:00:01.000Z",
+    });
+    const mailbox = new MockGenerationMailbox(fileMailbox, worker);
+
+    await mailbox.enqueue(initialJob("initial-left", "left"));
+    await mailbox.enqueue(initialJob("initial-right", "right"));
+
+    let left = await fileMailbox.readResult("initial-left");
+    let right = await fileMailbox.readResult("initial-right");
+    await vi.waitFor(async () => {
+      left = await fileMailbox.readResult("initial-left");
+      right = await fileMailbox.readResult("initial-right");
+      expect(left?.status).toBe("completed");
+      expect(right?.status).toBe("completed");
+    });
+
+    expect(left).toMatchObject({
+      status: "completed",
+      asset: { candidateId: "challenger-initial-left" },
+    });
+    expect(right).toMatchObject({
+      status: "completed",
+      asset: { candidateId: "challenger-initial-right" },
+    });
+    if (left?.status !== "completed" || right?.status !== "completed") {
+      throw new Error("mock initial generation did not complete");
+    }
+    expect(left.proposal.concept).not.toBe(right.proposal.concept);
+    expect(
+      await readFile(join(root, "assets", left.asset.filename)),
+    ).not.toEqual(await readFile(join(root, "assets", right.asset.filename)));
+    worker.dispose();
+  });
+
+  it("resumes a persisted initial job after the mock worker restarts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-restart-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    await fileMailbox.enqueue(initialJob("initial-left", "left"));
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+    });
+    const restarted = new MockGenerationMailbox(fileMailbox, worker);
+
+    await restarted.readWork("initial-left");
+
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readResult("initial-left")).toMatchObject({
+        status: "completed",
+      });
+    });
+    worker.dispose();
+  });
+});
