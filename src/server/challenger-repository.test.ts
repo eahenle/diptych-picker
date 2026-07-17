@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import type { ChallengerState } from "@/domain/challenger-state";
 import {
   JsonChallengerRepository,
@@ -90,6 +91,16 @@ describe("JsonChallengerRepository", () => {
     await writeFile(file, "{not-json\n", "utf8");
 
     await expect(new JsonChallengerRepository(file).load()).rejects.toThrow();
+  });
+
+  it("rejects persisted null as invalid challenger state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-null-"));
+    const file = join(directory, "challenger-state.json");
+    await writeFile(file, "null\n", "utf8");
+
+    await expect(
+      new JsonChallengerRepository(file).load(),
+    ).rejects.toBeInstanceOf(ZodError);
   });
 
   it("strictly validates loaded and saved state", async () => {

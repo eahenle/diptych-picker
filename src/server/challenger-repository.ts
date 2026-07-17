@@ -141,7 +141,6 @@ export class JsonChallengerRepository implements ChallengerRepository {
   async load(): Promise<ChallengerState | null> {
     try {
       const parsed: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
-      if (parsed === null) return null;
       return challengerStateSchema.parse(parsed);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
