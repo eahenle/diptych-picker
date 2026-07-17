@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ChallengerState } from "@/domain/challenger-state";
 import type { Candidate, GameState } from "@/domain/game";
 import type {
   GenerationJob,
@@ -9,6 +10,7 @@ import {
   InitialGameService,
   type InitialGameServiceOptions,
 } from "./initial-game";
+import { MemoryChallengerRepository } from "./challenger-repository";
 import { MemoryInitialBootstrapRepository } from "./initial-bootstrap";
 import type { AssetStore } from "./providers";
 import { MemoryGameRepository } from "./repository";
@@ -87,8 +89,45 @@ function queue() {
   return { mailbox, enqueue, archive, work, results };
 }
 
-function harness(seedState: GameState | null = null) {
+function challengerState(
+  overrides: Partial<ChallengerState> = {},
+): ChallengerState {
+  return {
+    version: 1,
+    sessionId: "old-session",
+    ready: [],
+    refillJobs: [],
+    ratings: [],
+    generationTurnaroundEmaMs: 42_000,
+    consecutiveFallbackDraws: 0,
+    nextFallbackAt: null,
+    ...overrides,
+  };
+}
+
+function curatedCandidates(): Candidate[] {
+  return Array.from({ length: 7 }, (_, index) =>
+    candidate(`curated-${index + 1}`, `curated concept ${index + 1}`),
+  );
+}
+
+interface HarnessOptions {
+  seedState?: GameState | null;
+  curatedCandidates?: Candidate[];
+  challengerState?: ChallengerState | null;
+  random?: () => number;
+}
+
+function harness({
+  seedState = null,
+  curatedCandidates = [],
+  challengerState: initialChallengerState = null,
+  random = () => 0.5,
+}: HarnessOptions = {}) {
   const gameRepository = new MemoryGameRepository();
+  const challengerRepository = new MemoryChallengerRepository(
+    initialChallengerState,
+  );
   const bootstrapRepository = new MemoryInitialBootstrapRepository();
   const generation = queue();
   const verify = vi.fn<AssetStore["verify"]>(async () => {});
@@ -102,10 +141,12 @@ function harness(seedState: GameState | null = null) {
   ];
   const options: InitialGameServiceOptions = {
     gameRepository,
+    challengerRepository,
     bootstrapRepository,
     mailbox: generation.mailbox,
     assetVerifier: { verify },
     seedState: vi.fn(async () => seedState),
+    curatedCandidates: vi.fn(async () => curatedCandidates),
     initialContext: () => [
       candidate("context-left", "coastal observatory"),
       candidate("context-right", "crystal synthesizer"),
@@ -113,10 +154,12 @@ function harness(seedState: GameState | null = null) {
     preferenceSeed: "prefer carefully made unfamiliar scenes",
     now: () => NOW,
     createId: () => ids.shift()!,
+    random,
   };
   return {
     service: new InitialGameService(options),
     gameRepository,
+    challengerRepository,
     bootstrapRepository,
     generation,
     verify,
@@ -127,7 +170,9 @@ function harness(seedState: GameState | null = null) {
 describe("InitialGameService", () => {
   it("keeps the immediate seeded GameState path unchanged", async () => {
     const seeded = seededGame();
-    const { service, bootstrapRepository, generation } = harness(seeded);
+    const { service, bootstrapRepository, generation } = harness({
+      seedState: seeded,
+    });
 
     await expect(service.getOrCreate()).resolves.toEqual({
       status: "ready",
@@ -135,6 +180,104 @@ describe("InitialGameService", () => {
     });
     await expect(bootstrapRepository.load()).resolves.toBeNull();
     expect(generation.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("starts from seven distinct curated candidates and restores the FIFO on refresh", async () => {
+    const curated = curatedCandidates();
+    const { service, challengerRepository } = harness({
+      curatedCandidates: curated,
+      random: () => 0.25,
+    });
+
+    const start = await service.getOrCreate();
+    expect(start.status).toBe("ready");
+    if (start.status !== "ready") throw new Error("Expected a ready game");
+
+    const persisted = await challengerRepository.load();
+    expect(start.game.round.leftCandidate.id).not.toBe(
+      start.game.round.rightCandidate.id,
+    );
+    expect(persisted?.ready).toHaveLength(5);
+    const allSevenIds = [
+      start.game.round.leftCandidate.id,
+      start.game.round.rightCandidate.id,
+      ...(persisted?.ready.map(({ candidate }) => candidate.id) ?? []),
+    ];
+    expect(new Set(allSevenIds).size).toBe(7);
+    expect(persisted?.ratings).toEqual(
+      expect.arrayContaining(
+        curated.map((item) =>
+          expect.objectContaining({
+            candidate: item,
+            rating: 1000,
+            wins: 0,
+            losses: 0,
+            source: "curated",
+            poolMember: true,
+          }),
+        ),
+      ),
+    );
+
+    const refreshed = await service.getOrCreate();
+    expect(refreshed).toEqual(start);
+    await expect(challengerRepository.load()).resolves.toEqual(persisted);
+  });
+
+  it("resets the session while preserving ratings and archiving old refill jobs", async () => {
+    const learned = {
+      candidate: candidate("learned-generated", "learned concept"),
+      rating: 1184,
+      wins: 7,
+      losses: 2,
+      source: "generated" as const,
+      poolMember: true,
+      lastServedAt: "2026-07-15T12:00:00.000Z",
+    };
+    const previous = challengerState({
+      refillJobs: [
+        {
+          jobId: "old-refill",
+          pinnedWinnerId: "old-winner",
+          enqueuedAt: "2026-07-15T12:00:00.000Z",
+        },
+      ],
+      ratings: [learned],
+      consecutiveFallbackDraws: 2,
+      nextFallbackAt: "2026-07-16T12:05:00.000Z",
+    });
+    const { service, gameRepository, challengerRepository, generation } =
+      harness({
+        curatedCandidates: curatedCandidates(),
+        challengerState: previous,
+      });
+    await gameRepository.save(seededGame());
+    const resetOrder: string[] = [];
+    vi.spyOn(gameRepository, "clear").mockImplementation(async () => {
+      resetOrder.push("clear-game");
+    });
+    generation.archive.mockImplementation(async () => {
+      resetOrder.push("archive-refill");
+    });
+
+    const reset = await service.reset();
+    expect(reset.status).toBe("ready");
+    const persisted = await challengerRepository.load();
+    expect(generation.archive).toHaveBeenCalledWith("old-refill");
+    expect(resetOrder).toEqual(["archive-refill", "clear-game"]);
+    expect(persisted?.sessionId).not.toBe(previous.sessionId);
+    expect(persisted?.refillJobs).toEqual([]);
+    expect(persisted?.ratings).toContainEqual(learned);
+    expect(persisted?.consecutiveFallbackDraws).toBe(0);
+    expect(persisted?.nextFallbackAt).toBeNull();
+
+    generation.results.set(
+      "old-refill",
+      completed("old-refill", "late old-session result"),
+    );
+    const afterLateResult = await service.getOrCreate();
+    expect(afterLateResult).toEqual(reset);
+    await expect(challengerRepository.load()).resolves.toEqual(persisted);
   });
 
   it("persists one bootstrap and enqueues two same-batch initial jobs when seeds are absent", async () => {

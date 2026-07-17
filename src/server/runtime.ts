@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { GameStartState, GameState } from "@/domain/game";
 import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
+import { JsonChallengerRepository } from "./challenger-repository";
 import { GameService } from "./game-service";
 import { JsonInitialBootstrapRepository } from "./initial-bootstrap";
 import { InitialGameService } from "./initial-game";
@@ -9,6 +10,7 @@ import {
   DEFAULT_PREFERENCE_SEED,
   gameFromSeedAssets,
   initialCandidateContext,
+  loadCuratedCandidates,
 } from "./initial-state";
 import { MockAgentWorker, MockGenerationMailbox } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
@@ -21,6 +23,9 @@ const dataDirectory = join(
 export const assetStore = new LocalAssetStore(join(dataDirectory, "assets"));
 export const repository = new JsonGameRepository(
   join(dataDirectory, "game-state.json"),
+);
+export const challengerRepository = new JsonChallengerRepository(
+  join(dataDirectory, "challenger-state.json"),
 );
 export const initialBootstrapRepository = new JsonInitialBootstrapRepository(
   join(dataDirectory, "initial-bootstrap.json"),
@@ -64,10 +69,14 @@ const forceGeneratedInitial =
   process.env.GENERATE_INITIAL_CANDIDATES === "true";
 export const initialGameService = new InitialGameService({
   gameRepository: repository,
+  challengerRepository,
   bootstrapRepository: initialBootstrapRepository,
   mailbox: generationMailbox,
   assetVerifier: assetStore,
   seedState: (now) => gameFromSeedAssets(now, forceGeneratedInitial),
+  curatedCandidates: forceGeneratedInitial
+    ? async () => []
+    : loadCuratedCandidates,
   initialContext: initialCandidateContext,
   preferenceSeed: DEFAULT_PREFERENCE_SEED,
 });

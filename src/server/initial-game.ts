@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import type { ChallengerState } from "@/domain/challenger-state";
 import type { Candidate, GameStartState, GameState } from "@/domain/game";
 import type {
   GenerationJob,
@@ -10,27 +11,34 @@ import type {
   InitialBootstrapRepository,
 } from "./initial-bootstrap";
 import type { AssetStore } from "./providers";
+import { challengerConfig } from "./challenger-config";
+import type { ChallengerRepository } from "./challenger-repository";
 import type { GameRepository } from "./repository";
 
 export interface InitialGameServiceOptions {
   gameRepository: GameRepository;
+  challengerRepository: ChallengerRepository;
   bootstrapRepository: InitialBootstrapRepository;
   mailbox: GenerationMailbox;
   assetVerifier: Pick<AssetStore, "verify">;
   seedState: (now: string) => Promise<GameState | null>;
+  curatedCandidates: (now: string) => Promise<readonly Candidate[]>;
   initialContext: (now: string) => [Candidate, Candidate];
   preferenceSeed: string;
   now?: () => string;
   createId?: () => string;
+  random?: () => number;
 }
 
 export class InitialGameService {
   private readonly now: () => string;
   private readonly createId: () => string;
+  private readonly random: () => number;
 
   constructor(private readonly options: InitialGameServiceOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.createId = options.createId ?? (() => crypto.randomUUID());
+    this.random = options.random ?? Math.random;
   }
 
   async getOrCreate(): Promise<GameStartState> {
@@ -45,12 +53,9 @@ export class InitialGameService {
       if (bootstrap) return this.reconcile(bootstrap);
 
       const createdAt = this.now();
-      const seeded = await this.options.seedState(createdAt);
-      if (seeded) {
-        await this.options.gameRepository.save(seeded);
-        return { status: "ready", game: seeded };
-      }
-      return this.createBootstrap(createdAt);
+      return this.options.challengerRepository.withLock(async () =>
+        this.createNewSession(createdAt),
+      );
     });
   }
 
@@ -66,15 +71,146 @@ export class InitialGameService {
       }
 
       await this.cleanupBootstrap();
-      await this.options.gameRepository.clear();
-      const createdAt = this.now();
-      const seeded = await this.options.seedState(createdAt);
-      if (seeded) {
-        await this.options.gameRepository.save(seeded);
-        return { status: "ready", game: seeded };
-      }
-      return this.createBootstrap(createdAt);
+      return this.options.challengerRepository.withLock(async () => {
+        const previous = await this.options.challengerRepository.load();
+        await this.archiveRefillJobs(previous);
+        await this.options.gameRepository.clear();
+        return this.createNewSession(this.now(), previous, true);
+      });
     });
+  }
+
+  private async createNewSession(
+    createdAt: string,
+    knownPrevious?: ChallengerState | null,
+    refillJobsArchived = false,
+  ): Promise<GameStartState> {
+    const previous =
+      knownPrevious === undefined
+        ? await this.options.challengerRepository.load()
+        : knownPrevious;
+    if (!refillJobsArchived) await this.archiveRefillJobs(previous);
+
+    const candidates = await this.options.curatedCandidates(createdAt);
+    if (candidates.length > 0) {
+      return this.createCuratedGame(createdAt, candidates, previous);
+    }
+
+    if (previous) {
+      await this.options.challengerRepository.save(
+        this.challengerState(createdAt, [], previous),
+      );
+    }
+    const seeded = await this.options.seedState(createdAt);
+    if (seeded) {
+      await this.options.gameRepository.save(seeded);
+      return { status: "ready", game: seeded };
+    }
+    return this.createBootstrap(createdAt);
+  }
+
+  private async createCuratedGame(
+    createdAt: string,
+    candidates: readonly Candidate[],
+    previous: ChallengerState | null,
+  ): Promise<GameStartState> {
+    const selected = this.selectSeven(candidates);
+    const [leftCandidate, rightCandidate, ...readyCandidates] = selected;
+    const game: GameState = {
+      round: {
+        leftCandidate,
+        rightCandidate,
+        status: "idle",
+        replacingSide: null,
+        roundNumber: 1,
+        retainedCandidateId: null,
+        winStreak: 0,
+      },
+      history: [],
+      preferenceSeed: this.options.preferenceSeed,
+    };
+    const challengerState = this.challengerState(
+      createdAt,
+      readyCandidates,
+      previous,
+      selected,
+    );
+
+    await this.options.challengerRepository.save(challengerState);
+    await this.options.gameRepository.save(game);
+    return { status: "ready", game };
+  }
+
+  private challengerState(
+    createdAt: string,
+    readyCandidates: readonly Candidate[],
+    previous: ChallengerState | null,
+    ratedCandidates: readonly Candidate[] = [],
+  ): ChallengerState {
+    const ratedIds = new Set(
+      previous?.ratings.map(({ candidate }) => candidate.id) ?? [],
+    );
+    const newRatings = ratedCandidates
+      .filter((candidate) => !ratedIds.has(candidate.id))
+      .map((candidate) => ({
+        candidate,
+        rating: challengerConfig.initialRating,
+        wins: 0,
+        losses: 0,
+        source: "curated" as const,
+        poolMember: true,
+        lastServedAt: null,
+      }));
+
+    return {
+      version: 1,
+      sessionId: this.createId(),
+      ready: readyCandidates.map((candidate) => ({
+        candidate,
+        source: "seed",
+        pinnedWinnerId: null,
+        enqueuedAt: createdAt,
+      })),
+      refillJobs: [],
+      ratings: [...(previous?.ratings ?? []), ...newRatings],
+      generationTurnaroundEmaMs:
+        previous?.generationTurnaroundEmaMs ??
+        challengerConfig.initialTurnaroundMs,
+      consecutiveFallbackDraws: 0,
+      nextFallbackAt: null,
+    };
+  }
+
+  private selectSeven(candidates: readonly Candidate[]): Candidate[] {
+    const distinct = [
+      ...new Map(candidates.map((item) => [item.id, item])).values(),
+    ];
+    if (distinct.length < 7) {
+      throw new Error(
+        `At least seven distinct curated candidates are required; received ${distinct.length}`,
+      );
+    }
+
+    for (let index = distinct.length - 1; index > 0; index -= 1) {
+      const randomIndex = Math.min(
+        Math.floor(Math.max(0, this.random()) * (index + 1)),
+        index,
+      );
+      [distinct[index], distinct[randomIndex]] = [
+        distinct[randomIndex],
+        distinct[index],
+      ];
+    }
+    return distinct.slice(0, 7);
+  }
+
+  private async archiveRefillJobs(
+    state: ChallengerState | null,
+  ): Promise<void> {
+    if (!state) return;
+    for (const { jobId } of state.refillJobs) {
+      await this.options.mailbox.archive(jobId);
+    }
   }
 
   private async createBootstrap(createdAt: string): Promise<GameStartState> {

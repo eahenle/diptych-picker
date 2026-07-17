@@ -27,4 +27,12 @@ describe("runtime generation provider", () => {
       expect(generationProvider).toBe(expected);
     },
   );
+
+  it("wires a durable challenger repository", async () => {
+    const { JsonChallengerRepository } =
+      await import("./challenger-repository");
+    const { challengerRepository } = await import("./runtime");
+
+    expect(challengerRepository).toBeInstanceOf(JsonChallengerRepository);
+  });
 });
