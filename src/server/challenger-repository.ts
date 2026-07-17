@@ -1,0 +1,315 @@
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import type { ChallengerState } from "@/domain/challenger-state";
+import { z } from "zod";
+
+export interface ChallengerRepository {
+  load(): Promise<ChallengerState | null>;
+  save(state: ChallengerState): Promise<void>;
+  clearSession(sessionId: string): Promise<void>;
+  withLock<T>(operation: () => Promise<T>): Promise<T>;
+}
+
+interface RepositoryLockOptions {
+  lockTimeoutMs?: number;
+  staleLockMs?: number;
+  retryDelayMs?: number;
+}
+
+interface LockOwner {
+  pid: number;
+  token: string;
+  acquiredAt: string;
+}
+
+const candidateSchema = z
+  .object({
+    id: z.string().min(1),
+    imageUrl: z.string().min(1),
+    prompt: z.string().min(1),
+    concept: z.string().min(1),
+    style: z.array(z.string().min(1)),
+    createdAt: z.string().min(1),
+    winCount: z.number().int().nonnegative(),
+    reasoningSummary: z.string().optional(),
+  })
+  .strict();
+
+const challengerStateSchema: z.ZodType<ChallengerState> = z
+  .object({
+    version: z.literal(1),
+    sessionId: z.string().min(1),
+    ready: z.array(
+      z
+        .object({
+          candidate: candidateSchema,
+          source: z.enum(["seed", "generated"]),
+          pinnedWinnerId: z.string().min(1).nullable(),
+          enqueuedAt: z.string().min(1),
+        })
+        .strict(),
+    ),
+    refillJobs: z.array(
+      z
+        .object({
+          jobId: z.string().min(1),
+          pinnedWinnerId: z.string().min(1),
+          enqueuedAt: z.string().min(1),
+        })
+        .strict(),
+    ),
+    ratings: z.array(
+      z
+        .object({
+          candidate: candidateSchema,
+          rating: z.number().finite(),
+          wins: z.number().int().nonnegative(),
+          losses: z.number().int().nonnegative(),
+          source: z.enum(["curated", "generated"]),
+          poolMember: z.boolean(),
+          lastServedAt: z.string().min(1).nullable(),
+        })
+        .strict(),
+    ),
+    generationTurnaroundEmaMs: z.number().finite().nonnegative(),
+    consecutiveFallbackDraws: z.number().int().nonnegative(),
+    nextFallbackAt: z.string().min(1).nullable(),
+  })
+  .strict();
+
+const processLockTails = new Map<string, Promise<void>>();
+
+async function withProcessLock<T>(
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let release!: () => void;
+  const previous = processLockTails.get(key) ?? Promise.resolve();
+  const current = new Promise<void>((resolveLock) => {
+    release = resolveLock;
+  });
+  processLockTails.set(key, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (processLockTails.get(key) === current) processLockTails.delete(key);
+  }
+}
+
+function resetSession(
+  state: ChallengerState,
+  sessionId: string,
+): ChallengerState {
+  return challengerStateSchema.parse({
+    ...state,
+    sessionId,
+    ready: [],
+    refillJobs: [],
+    consecutiveFallbackDraws: 0,
+    nextFallbackAt: null,
+  });
+}
+
+export class ChallengerRepositoryLockTimeoutError extends Error {}
+
+export class JsonChallengerRepository implements ChallengerRepository {
+  private readonly lockTimeoutMs: number;
+  private readonly staleLockMs: number;
+  private readonly retryDelayMs: number;
+  private readonly processLockKey: string;
+
+  constructor(
+    private readonly filePath: string,
+    options: RepositoryLockOptions = {},
+  ) {
+    this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
+    this.staleLockMs = options.staleLockMs ?? 30_000;
+    this.retryDelayMs = options.retryDelayMs ?? 10;
+    this.processLockKey = resolve(filePath);
+  }
+
+  async load(): Promise<ChallengerState | null> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
+      if (parsed === null) return null;
+      return challengerStateSchema.parse(parsed);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async save(state: ChallengerState): Promise<void> {
+    const validated = challengerStateSchema.parse(state);
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const temporaryPath = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    let handle;
+    try {
+      handle = await open(temporaryPath, "wx");
+      await handle.writeFile(`${JSON.stringify(validated, null, 2)}\n`, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await rename(temporaryPath, this.filePath);
+    } finally {
+      await handle?.close();
+      await rm(temporaryPath, { force: true });
+    }
+  }
+
+  async clearSession(sessionId: string): Promise<void> {
+    const state = await this.load();
+    if (state) await this.save(resetSession(state, sessionId));
+  }
+
+  async withLock<T>(operation: () => Promise<T>): Promise<T> {
+    return withProcessLock(this.processLockKey, async () => {
+      const token = crypto.randomUUID();
+      await this.acquireFilesystemLock(token);
+      try {
+        return await operation();
+      } finally {
+        await this.releaseFilesystemLock(token);
+      }
+    });
+  }
+
+  private async acquireFilesystemLock(token: string): Promise<void> {
+    const lockDirectory = `${this.filePath}.lock`;
+    const deadline = Date.now() + this.lockTimeoutMs;
+    await mkdir(dirname(this.filePath), { recursive: true });
+
+    while (true) {
+      try {
+        await mkdir(lockDirectory);
+        const owner: LockOwner = {
+          pid: process.pid,
+          token,
+          acquiredAt: new Date().toISOString(),
+        };
+        await writeFile(
+          join(lockDirectory, "owner.json"),
+          `${JSON.stringify(owner)}\n`,
+          "utf8",
+        );
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+
+      if (await this.lockIsStale(lockDirectory)) {
+        const staleDirectory = `${lockDirectory}.stale.${token}`;
+        try {
+          await rename(lockDirectory, staleDirectory);
+          await rm(staleDirectory, { recursive: true, force: true });
+          continue;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+
+      if (Date.now() >= deadline) {
+        throw new ChallengerRepositoryLockTimeoutError(
+          `Timed out waiting for repository lock ${lockDirectory}`,
+        );
+      }
+      await new Promise((resolveDelay) =>
+        setTimeout(resolveDelay, this.retryDelayMs),
+      );
+    }
+  }
+
+  private async releaseFilesystemLock(token: string): Promise<void> {
+    const lockDirectory = `${this.filePath}.lock`;
+    try {
+      const owner = JSON.parse(
+        await readFile(join(lockDirectory, "owner.json"), "utf8"),
+      ) as LockOwner;
+      if (owner.token === token) {
+        await rm(lockDirectory, { recursive: true, force: true });
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+
+  private async lockIsStale(lockDirectory: string): Promise<boolean> {
+    let acquiredAt: number;
+    let pid: number | undefined;
+    try {
+      const owner = JSON.parse(
+        await readFile(join(lockDirectory, "owner.json"), "utf8"),
+      ) as Partial<LockOwner>;
+      acquiredAt = Date.parse(owner.acquiredAt ?? "");
+      pid = owner.pid;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+      try {
+        acquiredAt = (await stat(lockDirectory)).mtimeMs;
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === "ENOENT") {
+          return false;
+        }
+        throw statError;
+      }
+    }
+
+    if (!Number.isFinite(acquiredAt)) return false;
+    if (Date.now() - acquiredAt < this.staleLockMs) return false;
+    return pid === undefined || !this.processIsAlive(pid);
+  }
+
+  private processIsAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "EPERM";
+    }
+  }
+}
+
+export class MemoryChallengerRepository implements ChallengerRepository {
+  private lockTail: Promise<void> = Promise.resolve();
+  private state: ChallengerState | null;
+
+  constructor(state: ChallengerState | null = null) {
+    this.state = state ? challengerStateSchema.parse(state) : null;
+  }
+
+  async load(): Promise<ChallengerState | null> {
+    return this.state ? challengerStateSchema.parse(this.state) : null;
+  }
+
+  async save(state: ChallengerState): Promise<void> {
+    this.state = challengerStateSchema.parse(state);
+  }
+
+  async clearSession(sessionId: string): Promise<void> {
+    if (this.state) this.state = resetSession(this.state, sessionId);
+  }
+
+  async withLock<T>(operation: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.lockTail;
+    this.lockTail = new Promise<void>((resolveLock) => {
+      release = resolveLock;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}
