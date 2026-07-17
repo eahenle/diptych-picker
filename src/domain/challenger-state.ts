@@ -81,6 +81,9 @@ export interface FallbackDrawOptions {
   currentCandidateIds: readonly string[];
   recentCandidateIds: readonly string[];
   random: () => number;
+  minimumCooldownMs?: number;
+  maximumCooldownMs?: number;
+  maximumConsecutiveDraws?: number;
 }
 
 function roundRating(rating: number): number {
@@ -186,7 +189,8 @@ export function drawFallback(
   options: FallbackDrawOptions,
 ): CandidateDraw {
   if (
-    state.consecutiveFallbackDraws >= MAX_CONSECUTIVE_FALLBACK_DRAWS ||
+    state.consecutiveFallbackDraws >=
+      (options.maximumConsecutiveDraws ?? MAX_CONSECUTIVE_FALLBACK_DRAWS) ||
     (state.nextFallbackAt !== null &&
       Date.parse(options.now) < Date.parse(state.nextFallbackAt))
   ) {
@@ -208,8 +212,11 @@ export function drawFallback(
   );
   const selected = eligible[index];
   const cooldownMs = Math.min(
-    MAX_FALLBACK_COOLDOWN_MS,
-    Math.max(MIN_FALLBACK_COOLDOWN_MS, state.generationTurnaroundEmaMs * 0.5),
+    options.maximumCooldownMs ?? MAX_FALLBACK_COOLDOWN_MS,
+    Math.max(
+      options.minimumCooldownMs ?? MIN_FALLBACK_COOLDOWN_MS,
+      state.generationTurnaroundEmaMs * 0.5,
+    ),
   );
   const nextFallbackAt = new Date(
     Date.parse(options.now) + cooldownMs,
