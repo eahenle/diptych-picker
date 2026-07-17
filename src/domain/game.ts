@@ -33,11 +33,14 @@ export interface SelectionHistory {
   selectedAt: string;
 }
 
-export interface PendingSelection {
-  winnerSide: Side;
-  selectedAt: string;
-  generationJobId: string;
-}
+export type PendingSelection =
+  | {
+      kind: "generation";
+      winnerSide: Side;
+      selectedAt: string;
+      generationJobId: string;
+    }
+  | { kind: "buffer"; winnerSide: Side; selectedAt: string };
 
 export interface GameState {
   round: Round;
@@ -84,7 +87,31 @@ export function beginSelection(
       status: "generating",
       replacingSide: oppositeSide(winnerSide),
     },
-    pendingSelection: { winnerSide, selectedAt, generationJobId },
+    pendingSelection: {
+      kind: "generation",
+      winnerSide,
+      selectedAt,
+      generationJobId,
+    },
+    errorMessage: undefined,
+  };
+}
+
+export function beginBufferedSelection(
+  state: GameState,
+  winnerSide: Side,
+  selectedAt: string,
+): GameState | null {
+  if (state.round.status === "generating") return null;
+
+  return {
+    ...state,
+    round: {
+      ...state.round,
+      status: "generating",
+      replacingSide: oppositeSide(winnerSide),
+    },
+    pendingSelection: { kind: "buffer", winnerSide, selectedAt },
     errorMessage: undefined,
   };
 }

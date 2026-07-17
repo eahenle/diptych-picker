@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  beginBufferedSelection,
   beginSelection,
   completeSelection,
   failSelection,
@@ -43,7 +44,33 @@ describe("round transitions", () => {
       "job-1",
     );
 
-    expect(inFlight?.pendingSelection?.generationJobId).toBe("job-1");
+    expect(inFlight?.pendingSelection).toEqual({
+      kind: "generation",
+      winnerSide: "left",
+      selectedAt: "2026-07-16T00:01:00.000Z",
+      generationJobId: "job-1",
+    });
+  });
+
+  it("completes a buffered selection while retaining the exact winner object", () => {
+    const initial = game();
+    const winner = initial.round.leftCandidate;
+    const challenger = candidate("right-2", "right");
+
+    const pending = beginBufferedSelection(
+      initial,
+      "left",
+      "2026-07-16T00:01:00.000Z",
+    );
+    const next = completeSelection(pending!, challenger);
+
+    expect(pending?.pendingSelection).toEqual({
+      kind: "buffer",
+      winnerSide: "left",
+      selectedAt: "2026-07-16T00:01:00.000Z",
+    });
+    expect(next.round.leftCandidate).toBe(winner);
+    expect(next.round.rightCandidate).toBe(challenger);
   });
 
   it("rejects a generation job ID that cannot be used as a mailbox filename", () => {
