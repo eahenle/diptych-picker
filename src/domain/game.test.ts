@@ -3,9 +3,11 @@ import {
   beginBufferedSelection,
   beginSelection,
   completeSelection,
+  composePreferenceSeed,
   failSelection,
   isSelectionBoundWait,
   mergeServerResult,
+  preferenceProfileFromSeed,
   recentConcepts,
   recoverInterruptedSelection,
   type Candidate,
@@ -37,6 +39,41 @@ const game = (): GameState => ({
 });
 
 describe("round transitions", () => {
+  it("builds a structured preference profile without changing a legacy seed", () => {
+    expect(
+      preferenceProfileFromSeed("prefer strange crafted landscapes"),
+    ).toEqual({
+      themes: "prefer strange crafted landscapes",
+      mediaTypes: "",
+      visualStyle: "",
+      colorPalette: "",
+      contentLevel: "family-friendly",
+      avoid: "",
+    });
+  });
+
+  it("composes fine-grained preferences into generation context", () => {
+    expect(
+      composePreferenceSeed({
+        themes: "mythic engineering and strange ecosystems",
+        mediaTypes: "large-format photography, linocut",
+        visualStyle: "tactile, cinematic, austere",
+        colorPalette: "ultraviolet, copper, oxblood",
+        contentLevel: "adult-allowed",
+        avoid: "cute mascots and readable text",
+      }),
+    ).toBe(
+      [
+        "Themes and subjects: mythic engineering and strange ecosystems",
+        "Preferred media: large-format photography, linocut",
+        "Visual style and mood: tactile, cinematic, austere",
+        "Color palette: ultraviolet, copper, oxblood",
+        "Content range: Adult themes may be used when relevant; keep content non-explicit and depict only clearly adult people.",
+        "Avoid or de-emphasize: cute mascots and readable text",
+      ].join("\n"),
+    );
+  });
+
   it("binds an in-flight selection to exactly one generation job", () => {
     const inFlight = beginSelection(
       game(),

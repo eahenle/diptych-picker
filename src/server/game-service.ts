@@ -19,8 +19,10 @@ import {
   failSelection,
   oppositeSide,
   recentConcepts,
+  preferenceProfileFromSeed,
   type Candidate,
   type GameState,
+  type PreferenceProfile,
   type Side,
 } from "@/domain/game";
 import type {
@@ -91,7 +93,12 @@ export class GameService {
     });
   }
 
-  async updatePreferenceSeed(preferenceSeed: string): Promise<GameState> {
+  async updatePreferenceSeed(
+    preferenceSeed: string,
+    preferenceProfile: PreferenceProfile = preferenceProfileFromSeed(
+      preferenceSeed,
+    ),
+  ): Promise<GameState> {
     return this.gameRepository.withLock(async () => {
       const current = await this.gameRepository.load();
       if (!current) {
@@ -103,7 +110,7 @@ export class GameService {
         );
       }
 
-      const updated = { ...current, preferenceSeed };
+      const updated = { ...current, preferenceSeed, preferenceProfile };
       await this.gameRepository.save(updated);
       return updated;
     });

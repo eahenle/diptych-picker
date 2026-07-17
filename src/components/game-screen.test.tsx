@@ -373,6 +373,61 @@ describe("GameScreen challenger reconciliation", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("saves fine-grained preference fields as one profile", async () => {
+    const updated = cloneGame();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PATCH") return json(updated);
+        return json({ status: "ready", game: initializedGame });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+
+    expect(screen.getByLabelText("Themes & subjects")).toHaveValue(
+      initializedGame.preferenceSeed,
+    );
+    fireEvent.change(screen.getByLabelText("Preferred media"), {
+      target: { value: "linocut and large-format photography" },
+    });
+    fireEvent.change(screen.getByLabelText("Visual style & mood"), {
+      target: { value: "tactile and cinematic" },
+    });
+    fireEvent.change(screen.getByLabelText("Color palette"), {
+      target: { value: "copper and ultraviolet" },
+    });
+    fireEvent.change(screen.getByLabelText("Content range"), {
+      target: { value: "adult-allowed" },
+    });
+    fireEvent.change(screen.getByLabelText("Avoid or de-emphasize"), {
+      target: { value: "readable text" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/game",
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    const patchCall = fetchMock.mock.calls.find(
+      ([, init]) => init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      preferenceProfile: {
+        themes: initializedGame.preferenceSeed,
+        mediaTypes: "linocut and large-format photography",
+        visualStyle: "tactile and cinematic",
+        colorPalette: "copper and ultraviolet",
+        contentLevel: "adult-allowed",
+        avoid: "readable text",
+      },
+    });
+  });
+
   it("abandons local preservation when polling observes a different generating job", async () => {
     installSuccessfulImagePreload();
     const otherJob = generatingGame("job-from-other-tab", "right");

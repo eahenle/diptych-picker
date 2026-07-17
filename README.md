@@ -69,7 +69,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Click the complete A or B card.
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
-- Edit the inspiration seed through **Preferences**. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
+- Shape future challengers through **Preferences**, with separate guidance for themes, media, visual style, palette, content range, and things to avoid. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
 - **New game** requires confirmation and clears the current round and history.
 
 ## Verification
@@ -82,7 +82,7 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow side-by-side layout, and winner-node preservation.
+Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, and winner-node preservation.
 
 ## Architecture
 

@@ -282,7 +282,9 @@
   background: rgba(0, 0, 0, 0.76);
 }
 .preferencesModal {
-  width: min(640px, 100%);
+  width: min(760px, 100%);
+  max-height: min(860px, calc(100vh - 48px));
+  overflow-y: auto;
   padding: 28px;
   background: var(--surface-raised);
   border: 1px solid #383337;
@@ -299,10 +301,37 @@
   color: var(--muted);
   font-size: 13px;
 }
-.preferencesModal textarea {
+.preferenceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.field,
+.fieldWide {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+.fieldWide {
+  grid-column: 1 / -1;
+}
+.field span,
+.fieldWide span {
+  color: #d9d2cb;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+}
+.fieldWide small {
+  color: #817b77;
+  font-size: 11px;
+}
+.preferencesModal textarea,
+.preferencesModal input,
+.preferencesModal select {
   width: 100%;
-  resize: vertical;
-  padding: 14px;
+  min-height: 44px;
+  padding: 11px 12px;
   border: 1px solid #403b3e;
   border-radius: 2px;
   outline: none;
@@ -311,7 +340,15 @@
   font-size: 14px;
   line-height: 1.55;
 }
-.preferencesModal textarea:focus {
+.preferencesModal textarea {
+  resize: vertical;
+}
+.preferencesModal select {
+  color-scheme: dark;
+}
+.preferencesModal textarea:focus,
+.preferencesModal input:focus,
+.preferencesModal select:focus {
   border-color: var(--ultraviolet);
   box-shadow: 0 0 0 2px rgba(167, 107, 239, 0.16);
 }
@@ -354,17 +391,49 @@
     margin-inline: -14px;
     width: calc(100% + 28px);
     padding-inline: 14px;
+    overflow-x: visible;
   }
   .comparisonRail {
-    min-width: 660px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
   .shortcuts {
-    white-space: nowrap;
     font-size: 10px;
+    line-height: 2;
   }
   .conceptLabel {
     font-size: 9px;
+  }
+  .modalBackdrop {
+    align-items: start;
+    padding: 12px;
+  }
+  .preferencesModal {
+    max-height: calc(100vh - 24px);
+    padding: 22px 18px;
+  }
+  .preferenceGrid {
+    grid-template-columns: 1fr;
+  }
+  .fieldWide {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .header h1,
+  .headerActions {
+    grid-column: 1;
+  }
+  .headerActions {
+    width: 100%;
+  }
+  .headerActions button {
+    flex: 1;
   }
 }
 

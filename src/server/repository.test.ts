@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { JsonGameRepository, MemoryGameRepository } from "./repository";
-import type { GameState } from "@/domain/game";
+import { preferenceProfileFromSeed, type GameState } from "@/domain/game";
 
 const state: GameState = {
   round: {
@@ -44,7 +44,10 @@ describe("JsonGameRepository", () => {
 
     const restored = await new JsonGameRepository(file).load();
 
-    expect(restored).toEqual(state);
+    expect(restored).toEqual({
+      ...state,
+      preferenceProfile: preferenceProfileFromSeed(state.preferenceSeed),
+    });
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual(state);
   });
 
