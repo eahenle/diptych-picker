@@ -19,10 +19,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid selection." }, { status: 400 });
 
   try {
-    return NextResponse.json(
-      await gameService.select(parsed.data.winnerSide, parsed.data.roundNumber),
-      { status: 202 },
+    const game = await gameService.select(
+      parsed.data.winnerSide,
+      parsed.data.roundNumber,
     );
+    return NextResponse.json(game, {
+      status: game.round.status === "idle" ? 200 : 202,
+    });
   } catch (error) {
     if (error instanceof SelectionConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });

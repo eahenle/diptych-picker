@@ -1,29 +1,51 @@
 import { describe, expect, it, vi } from "vitest";
+import type {
+  CandidateRating,
+  ChallengerState,
+} from "@/domain/challenger-state";
 import type { Candidate, GameState } from "@/domain/game";
 import type {
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
 } from "./agent-mailbox";
-import { generationJobSchema } from "./agent-mailbox";
+import { MemoryChallengerRepository } from "./challenger-repository";
+import { challengerConfig } from "./challenger-config";
 import { GameService, SelectionConflictError } from "./game-service";
 import type { AssetStore } from "./providers";
 import { MemoryGameRepository, type GameRepository } from "./repository";
 
-const makeCandidate = (id: string, concept: string): Candidate => ({
+const NOW = "2026-07-16T01:00:00.000Z";
+
+const candidate = (id: string): Candidate => ({
   id,
   imageUrl: `/api/assets/${id}.png`,
-  prompt: `${concept} prompt`,
-  concept,
-  style: ["cinematic"],
+  prompt: `${id} prompt`,
+  concept: `${id} concept`,
+  style: ["cinematic", id],
+  reasoningSummary: `${id} reasoning`,
   createdAt: "2026-07-16T00:00:00.000Z",
   winCount: 0,
 });
 
-const makeState = (): GameState => ({
+const rating = (
+  item: Candidate,
+  overrides: Partial<CandidateRating> = {},
+): CandidateRating => ({
+  candidate: item,
+  rating: 1000,
+  wins: 0,
+  losses: 0,
+  source: "curated",
+  poolMember: true,
+  lastServedAt: null,
+  ...overrides,
+});
+
+const gameState = (overrides: Partial<GameState> = {}): GameState => ({
   round: {
-    leftCandidate: makeCandidate("left", "forest observatory"),
-    rightCandidate: makeCandidate("right", "crystal synthesizer"),
+    leftCandidate: candidate("left"),
+    rightCandidate: candidate("right"),
     status: "idle",
     replacingSide: null,
     roundNumber: 3,
@@ -32,55 +54,62 @@ const makeState = (): GameState => ({
   },
   history: [
     {
-      winnerId: "old-a",
-      loserId: "old-b",
-      winnerPrompt: "forge prompt",
-      loserPrompt: "tidepool prompt",
-      winnerConcept: "copper forge",
-      loserConcept: "alien tidepool",
+      winnerId: "recent-winner",
+      loserId: "recent-loser",
+      winnerPrompt: "recent winner prompt",
+      loserPrompt: "recent loser prompt",
+      winnerConcept: "recent winner concept",
+      loserConcept: "recent loser concept",
       selectedAt: "2026-07-15T00:00:00.000Z",
     },
   ],
   preferenceSeed: "industrial, gothic, natural, and surprising",
+  ...overrides,
 });
 
-const completedResult = (jobId = "job-1"): GenerationResult => ({
-  jobId,
-  status: "completed",
-  completedAt: "2026-07-16T01:01:00.000Z",
-  proposal: {
-    concept: "paper automaton ballet",
-    visualPrompt: "one square photograph of mechanical paper dancers",
-    styleTags: ["paper craft", "warm daylight"],
-    reasoningSummary: "Introduces warmth and craft.",
-  },
-  asset: {
-    candidateId: "challenger-job-1",
-    filename: "challenger-job-1.png",
-    imageUrl: "/api/assets/challenger-job-1.png",
-    contentType: "image/png",
-    width: 1024,
-    height: 1024,
-    byteLength: 2048,
-  },
-});
+function challengerState(
+  game: GameState,
+  overrides: Partial<ChallengerState> = {},
+): ChallengerState {
+  const ready = Array.from({ length: 5 }, (_, index) => ({
+    candidate: candidate(`buffer-${index + 1}`),
+    source: "seed" as const,
+    pinnedWinnerId: null,
+    enqueuedAt: "2026-07-16T00:00:00.000Z",
+  }));
+  return {
+    version: 1,
+    sessionId: "session-1",
+    ready,
+    refillJobs: [],
+    ratings: [
+      rating(game.round.leftCandidate),
+      rating(game.round.rightCandidate),
+      ...ready.map(({ candidate: item }) => rating(item)),
+    ],
+    generationTurnaroundEmaMs: 100_000,
+    consecutiveFallbackDraws: 0,
+    nextFallbackAt: null,
+    ...overrides,
+  };
+}
 
-function mailbox(
-  result: GenerationResult | null = null,
-  retainPendingJob = true,
-) {
-  let pendingJob: GenerationJob | null = null;
-  let terminalResult = result;
+function mailbox() {
+  const work = new Map<string, GenerationJob>();
+  const results = new Map<string, GenerationResult>();
   const enqueue = vi.fn<(job: GenerationJob) => Promise<void>>(async (job) => {
-    if (retainPendingJob) pendingJob = job;
+    work.set(job.id, job);
   });
   const readWork = vi.fn<(jobId: string) => Promise<GenerationJob | null>>(
-    async (jobId) => (pendingJob?.id === jobId ? pendingJob : null),
+    async (jobId) => work.get(jobId) ?? null,
   );
   const readResult = vi.fn<(jobId: string) => Promise<GenerationResult | null>>(
-    async () => terminalResult,
+    async (jobId) => results.get(jobId) ?? null,
   );
-  const archive = vi.fn<(jobId: string) => Promise<void>>(async () => {});
+  const archive = vi.fn<(jobId: string) => Promise<void>>(async (jobId) => {
+    work.delete(jobId);
+    results.delete(jobId);
+  });
   const generationMailbox: GenerationMailbox = {
     enqueue,
     readPending: readWork,
@@ -94,11 +123,40 @@ function mailbox(
     readWork,
     readResult,
     archive,
-    setWork(job: GenerationJob | null) {
-      pendingJob = job;
+    setWork(job: GenerationJob) {
+      work.set(job.id, job);
     },
-    setResult(next: GenerationResult | null) {
-      terminalResult = next;
+    deleteWork(jobId: string) {
+      work.delete(jobId);
+    },
+    setResult(result: GenerationResult) {
+      results.set(result.jobId, result);
+    },
+  };
+}
+
+function completedResult(
+  jobId: string,
+  completedAt = "2026-07-16T01:01:40.000Z",
+): GenerationResult {
+  return {
+    jobId,
+    status: "completed",
+    completedAt,
+    proposal: {
+      concept: `${jobId} generated concept`,
+      visualPrompt: `${jobId} standalone square image`,
+      styleTags: ["paper craft", "warm daylight"],
+      reasoningSummary: `${jobId} generated reasoning`,
+    },
+    asset: {
+      candidateId: `challenger-${jobId}`,
+      filename: `challenger-${jobId}.png`,
+      imageUrl: `/api/assets/challenger-${jobId}.png`,
+      contentType: "image/png",
+      width: 1024,
+      height: 1024,
+      byteLength: 2048,
     },
   };
 }
@@ -108,435 +166,713 @@ function verifier() {
   return { assetVerifier: { verify }, verify };
 }
 
-function serviceFor(
-  repository: GameRepository,
-  generationMailbox: GenerationMailbox,
-  assetVerifier: Pick<AssetStore, "verify"> = verifier().assetVerifier,
-  jobId = "job-1",
-) {
-  return new GameService(
-    repository,
-    generationMailbox,
-    assetVerifier,
-    () => "2026-07-16T01:00:00.000Z",
-    () => jobId,
-  );
+function ids(...values: string[]) {
+  let index = 0;
+  return () => values[index++] ?? `job-${index}`;
 }
 
-describe("GameService asynchronous generation", () => {
+function serviceFor(options: {
+  game?: GameState;
+  challengers?: ChallengerState;
+  gameRepository?: GameRepository;
+  challengerRepository?: MemoryChallengerRepository;
+  queue?: ReturnType<typeof mailbox>;
+  assets?: ReturnType<typeof verifier>;
+  now?: () => string;
+  createId?: () => string;
+  random?: () => number;
+  bufferTarget?: number;
+}) {
+  const game = options.game ?? gameState();
+  const gameRepository =
+    options.gameRepository ?? new MemoryGameRepository(game);
+  const challengerRepository =
+    options.challengerRepository ??
+    new MemoryChallengerRepository(
+      options.challengers ?? challengerState(game),
+    );
+  const queue = options.queue ?? mailbox();
+  const assets = options.assets ?? verifier();
+  const config = {
+    ...challengerConfig,
+    bufferTarget: options.bufferTarget ?? challengerConfig.bufferTarget,
+  };
+  const service = new GameService(
+    gameRepository,
+    challengerRepository,
+    queue.generationMailbox,
+    assets.assetVerifier,
+    config,
+    options.now ?? (() => NOW),
+    options.createId ??
+      ids("refill-1", "refill-2", "refill-3", "refill-4", "refill-5"),
+    options.random ?? (() => 0),
+  );
+  return {
+    service,
+    gameRepository,
+    challengerRepository,
+    queue,
+    assets,
+  };
+}
+
+describe("GameService challenger buffer", () => {
   it.each(["left", "right"] as const)(
-    "preserves both candidates while selecting %s and enqueues one complete job",
+    "preserves the exact %s winner and immediately consumes one FIFO head",
     async (winnerSide) => {
-      const initial = makeState();
-      const left = initial.round.leftCandidate;
-      const right = initial.round.rightCandidate;
-      const repository = new MemoryGameRepository(initial);
-      const queue = mailbox();
+      const game = gameState();
+      const originalWinner =
+        winnerSide === "left"
+          ? game.round.leftCandidate
+          : game.round.rightCandidate;
+      const originalWinnerSnapshot = structuredClone(originalWinner);
+      const challengers = challengerState(game);
+      const head = challengers.ready[0].candidate;
+      const context = serviceFor({ game, challengers });
 
-      const selected = await serviceFor(
-        repository,
-        queue.generationMailbox,
-      ).select(winnerSide, 3);
+      const selected = await context.service.select(winnerSide, 3);
 
-      expect(selected.round.leftCandidate).toBe(left);
-      expect(selected.round.rightCandidate).toBe(right);
-      expect(selected.round.status).toBe("generating");
-      expect(selected.pendingSelection).toMatchObject({
-        kind: "generation",
-        generationJobId: "job-1",
-      });
-      expect(queue.enqueue).toHaveBeenCalledTimes(1);
-      expect(queue.enqueue).toHaveBeenCalledWith({
-        id: "job-1",
-        kind: "challenger",
-        createdAt: "2026-07-16T01:00:00.000Z",
-        roundNumber: 3,
-        winnerSide,
-        retainedWinner: winnerSide === "left" ? left : right,
-        rejectedCandidate: winnerSide === "left" ? right : left,
-        selectionHistory: initial.history,
-        recentConcepts: ["alien tidepool", "copper forge"],
-        preferenceSeed: initial.preferenceSeed,
-      });
+      expect(
+        winnerSide === "left"
+          ? selected.round.leftCandidate
+          : selected.round.rightCandidate,
+      ).toBe(originalWinner);
+      expect(originalWinner).toEqual(originalWinnerSnapshot);
+      expect(
+        winnerSide === "left"
+          ? selected.round.rightCandidate
+          : selected.round.leftCandidate,
+      ).toEqual(head);
+      expect(selected.round.status).toBe("idle");
+      expect(selected.round.roundNumber).toBe(4);
+      expect(selected.pendingSelection).toBeUndefined();
+
+      const persisted = await context.challengerRepository.load();
+      expect(persisted?.ready.map(({ candidate: item }) => item.id)).toEqual([
+        "buffer-2",
+        "buffer-3",
+        "buffer-4",
+        "buffer-5",
+      ]);
+      expect(persisted?.refillJobs).toEqual([
+        {
+          jobId: "refill-1",
+          pinnedWinnerId: originalWinner.id,
+          enqueuedAt: NOW,
+        },
+      ]);
+      expect(context.queue.enqueue).toHaveBeenCalledTimes(1);
+      expect(context.queue.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "refill-1",
+          kind: "refill",
+          sessionId: "session-1",
+          pinnedWinnerId: originalWinner.id,
+          retainedWinner: originalWinnerSnapshot,
+          preferenceSeed: game.preferenceSeed,
+        }),
+      );
+      expect(
+        context.queue.enqueue.mock.calls.some(
+          ([job]) => job.kind === "challenger",
+        ),
+      ).toBe(false);
+
+      const winnerRating = persisted?.ratings.find(
+        ({ candidate: item }) => item.id === originalWinner.id,
+      );
+      const loserRating = persisted?.ratings.find(
+        ({ candidate: item }) =>
+          item.id !== originalWinner.id && ["left", "right"].includes(item.id),
+      );
+      expect(winnerRating).toMatchObject({ rating: 1016, wins: 1 });
+      expect(loserRating).toMatchObject({ rating: 984, losses: 1 });
     },
   );
 
-  it("enqueues only once when the same round is selected twice", async () => {
-    const repository = new MemoryGameRepository(makeState());
-    const queue = mailbox();
-    const service = serviceFor(repository, queue.generationMailbox);
-
-    await service.select("left", 3);
-    await expect(service.select("left", 3)).rejects.toBeInstanceOf(
-      SelectionConflictError,
-    );
-
-    expect(queue.enqueue).toHaveBeenCalledTimes(1);
-  });
-
-  it("allows only one of two service instances to select the same round", async () => {
-    let releaseFirstSave!: () => void;
-    let firstSaveStarted!: () => void;
-    const firstSaveEntered = new Promise<void>((resolve) => {
-      firstSaveStarted = resolve;
-    });
-    const heldFirstSave = new Promise<void>((resolve) => {
-      releaseFirstSave = resolve;
-    });
-    const backing = new MemoryGameRepository(makeState());
-    let saveCount = 0;
-    const repository: GameRepository = {
-      load: () => backing.load(),
-      clear: () => backing.clear(),
-      save: async (state) => {
-        saveCount += 1;
-        if (saveCount === 1) {
-          firstSaveStarted();
-          await heldFirstSave;
-        }
-        await backing.save(state);
+  it("keeps stale ready and in-flight work while new deficit jobs pin to the new winner", async () => {
+    const game = gameState();
+    const staleReady = [
+      {
+        candidate: candidate("stale-head"),
+        source: "generated" as const,
+        pinnedWinnerId: "old-winner",
+        enqueuedAt: "2026-07-15T23:00:00.000Z",
       },
-      withLock: (operation) => backing.withLock(operation),
-    };
-    const queue = mailbox();
-    const first = serviceFor(
-      repository,
-      queue.generationMailbox,
-      verifier().assetVerifier,
-      "job-1",
-    );
-    const second = serviceFor(
-      repository,
-      queue.generationMailbox,
-      verifier().assetVerifier,
-      "job-2",
-    );
-
-    const firstSelection = first.select("left", 3);
-    await firstSaveEntered;
-    const secondSelection = second.select("right", 3);
-    releaseFirstSave();
-
-    await expect(firstSelection).resolves.toMatchObject({
-      round: { status: "generating" },
+      {
+        candidate: candidate("stale-tail"),
+        source: "generated" as const,
+        pinnedWinnerId: "old-winner",
+        enqueuedAt: "2026-07-15T23:01:00.000Z",
+      },
+    ];
+    const challengers = challengerState(game, {
+      ready: staleReady,
+      refillJobs: [
+        {
+          jobId: "old-refill",
+          pinnedWinnerId: "old-winner",
+          enqueuedAt: "2026-07-15T23:02:00.000Z",
+        },
+      ],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate, {
+          source: "generated",
+          poolMember: false,
+        }),
+        ...staleReady.map(({ candidate: item }) =>
+          rating(item, { source: "generated", poolMember: false }),
+        ),
+      ],
     });
-    await expect(secondSelection).rejects.toBeInstanceOf(
-      SelectionConflictError,
-    );
+    const queue = mailbox();
+    const staleJob = {
+      id: "old-refill",
+      kind: "refill" as const,
+      createdAt: "2026-07-15T23:02:00.000Z",
+      roundNumber: 2,
+      winnerSide: "left" as const,
+      retainedWinner: candidate("old-winner"),
+      rejectedCandidate: candidate("old-loser"),
+      selectionHistory: [],
+      recentConcepts: [],
+      preferenceSeed: game.preferenceSeed,
+      sessionId: "session-1",
+      pinnedWinnerId: "old-winner",
+    };
+    queue.setWork(staleJob);
+    const context = serviceFor({
+      game,
+      challengers,
+      queue,
+      bufferTarget: 4,
+      createId: ids("new-refill-1", "new-refill-2"),
+    });
+
+    await context.service.select("right", 3);
+
+    const persisted = await context.challengerRepository.load();
+    expect(persisted?.ready).toEqual([staleReady[1]]);
+    expect(persisted?.refillJobs).toEqual([
+      challengers.refillJobs[0],
+      {
+        jobId: "new-refill-1",
+        pinnedWinnerId: "right",
+        enqueuedAt: NOW,
+      },
+      {
+        jobId: "new-refill-2",
+        pinnedWinnerId: "right",
+        enqueuedAt: NOW,
+      },
+    ]);
+    expect(await queue.readWork("old-refill")).toEqual(staleJob);
+    expect(queue.enqueue).toHaveBeenCalledTimes(2);
+    expect(
+      queue.enqueue.mock.calls.map(([job]) =>
+        job.kind === "refill" ? job.pinnedWinnerId : null,
+      ),
+    ).toEqual(["right", "right"]);
+    expect(
+      persisted?.ratings.find(({ candidate: item }) => item.id === "right"),
+    ).toMatchObject({ wins: 1, poolMember: true });
+  });
+
+  it("does not admit an unrated generated loser into the reusable pool", async () => {
+    const game = gameState();
+    game.round.leftCandidate = {
+      ...game.round.leftCandidate,
+      imageUrl: "/seed-assets/left.png",
+    };
+    const ready = challengerState(game).ready;
+    const challengers = challengerState(game, {
+      ready,
+      ratings: [
+        rating(game.round.leftCandidate),
+        ...ready.map(({ candidate: item }) => rating(item)),
+      ],
+    });
+    const context = serviceFor({ game, challengers });
+
+    await context.service.select("left", 3);
+
+    expect(
+      (await context.challengerRepository.load())?.ratings.find(
+        ({ candidate: item }) => item.id === "right",
+      ),
+    ).toMatchObject({ source: "generated", poolMember: false, losses: 1 });
+  });
+
+  it("serializes concurrent selections so only one consumes the FIFO head", async () => {
+    const game = gameState();
+    const challengers = challengerState(game, {
+      ready: [challengerState(game).ready[0]],
+    });
+    const gameRepository = new MemoryGameRepository(game);
+    const challengerRepository = new MemoryChallengerRepository(challengers);
+    const queue = mailbox();
+    const first = serviceFor({
+      gameRepository,
+      challengerRepository,
+      queue,
+      bufferTarget: 1,
+      createId: ids("first-refill"),
+    }).service;
+    const second = serviceFor({
+      gameRepository,
+      challengerRepository,
+      queue,
+      bufferTarget: 1,
+      createId: ids("second-refill"),
+    }).service;
+
+    const outcomes = await Promise.allSettled([
+      first.select("left", 3),
+      second.select("right", 3),
+    ]);
+
+    expect(
+      outcomes.filter(({ status }) => status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = outcomes.find(({ status }) => status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: expect.any(SelectionConflictError),
+    });
+    expect((await challengerRepository.load())?.ready).toEqual([]);
     expect(queue.enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("reconciles a completed result without invoking a provider", async () => {
-    const initial = makeState();
-    const winner = initial.round.leftCandidate;
-    const winnerMetadata = structuredClone(winner);
-    const repository = new MemoryGameRepository(initial);
-    const queue = mailbox(completedResult());
-    const assets = verifier();
-    const service = serviceFor(
-      repository,
-      queue.generationMailbox,
-      assets.assetVerifier,
+  it("replays the prepared FIFO head when the completed game save fails", async () => {
+    const game = gameState();
+    const backingGame = new MemoryGameRepository(game);
+    let failCompletedSave = true;
+    const gameRepository: GameRepository = {
+      load: () => backingGame.load(),
+      clear: () => backingGame.clear(),
+      withLock: (operation) => backingGame.withLock(operation),
+      save: async (state) => {
+        if (failCompletedSave && state.round.status === "idle") {
+          failCompletedSave = false;
+          throw new Error("game disk unavailable");
+        }
+        await backingGame.save(state);
+      },
+    };
+    const context = serviceFor({ game, gameRepository });
+
+    await expect(context.service.select("left", 3)).rejects.toThrow(
+      "game disk unavailable",
     );
-    await service.select("left", 3);
+    await expect(backingGame.load()).resolves.toMatchObject({
+      round: { status: "generating", roundNumber: 3 },
+      pendingSelection: { kind: "buffer", winnerSide: "left" },
+    });
+    const prepared = await context.challengerRepository.load();
+    expect(prepared?.ready[0].candidate.id).toBe("buffer-1");
+    expect(prepared?.refillJobs).toMatchObject([{ jobId: "refill-1" }]);
 
-    const completed = await service.reconcile();
+    const recovered = await context.service.reconcile();
 
-    expect(completed?.round.leftCandidate).toBe(winner);
-    expect(completed?.round.leftCandidate).toEqual(winnerMetadata);
-    expect(completed?.round.retainedCandidateId).toBe(winner.id);
-    expect(completed?.round.winStreak).toBe(1);
-    expect(completed?.round.rightCandidate).toEqual({
-      id: "challenger-job-1",
-      imageUrl: "/api/assets/challenger-job-1.png",
-      prompt: "one square photograph of mechanical paper dancers",
-      concept: "paper automaton ballet",
-      style: ["paper craft", "warm daylight"],
-      reasoningSummary: "Introduces warmth and craft.",
-      createdAt: "2026-07-16T01:01:00.000Z",
+    expect(recovered?.round).toMatchObject({
+      status: "idle",
+      roundNumber: 4,
+      rightCandidate: { id: "buffer-1" },
+    });
+    const persisted = await context.challengerRepository.load();
+    expect(persisted?.ready.map(({ candidate: item }) => item.id)).toEqual([
+      "buffer-2",
+      "buffer-3",
+      "buffer-4",
+      "buffer-5",
+    ]);
+    expect(
+      persisted?.ratings.find(({ candidate: item }) => item.id === "left"),
+    ).toMatchObject({ wins: 1, rating: 1016 });
+  });
+
+  it("draws the first fallback immediately while excluding current and recent candidates", async () => {
+    const game = gameState();
+    const eligibleA = candidate("eligible-a");
+    const eligibleB = candidate("eligible-b");
+    const recentWinner = candidate("recent-winner");
+    const recentLoser = candidate("recent-loser");
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+        rating(recentWinner),
+        rating(recentLoser),
+        rating(eligibleA),
+        rating(eligibleB),
+      ],
+      generationTurnaroundEmaMs: 100_000,
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      random: () => 0.75,
+      bufferTarget: 1,
+    });
+
+    const selected = await context.service.select("left", 3);
+
+    expect(selected.round.rightCandidate.id).toBe("eligible-b");
+    expect(selected.round.status).toBe("idle");
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      consecutiveFallbackDraws: 1,
+      nextFallbackAt: "2026-07-16T01:00:50.000Z",
+    });
+  });
+
+  it("serves a delayed second fallback during reconciliation and hard-stops a third", async () => {
+    let currentNow = NOW;
+    const now = () => currentNow;
+    const game = gameState();
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+        rating(candidate("fallback-1")),
+        rating(candidate("fallback-2")),
+        rating(candidate("fallback-3")),
+      ],
+      generationTurnaroundEmaMs: 100_000,
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      now,
+      random: () => 0,
+      bufferTarget: 1,
+    });
+    const first = await context.service.select("left", 3);
+    expect(first.round.rightCandidate.id).toBe("fallback-1");
+
+    currentNow = "2026-07-16T01:00:10.000Z";
+    const waiting = await context.service.select("left", 4);
+    expect(waiting.round.status).toBe("generating");
+    expect(waiting.pendingSelection).toMatchObject({ kind: "buffer" });
+
+    currentNow = "2026-07-16T01:00:50.000Z";
+    const second = await context.service.reconcile();
+    expect(second?.round.status).toBe("idle");
+    expect(second?.round.rightCandidate.id).toBe("fallback-2");
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      consecutiveFallbackDraws: 2,
+    });
+
+    currentNow = "2026-07-16T01:10:00.000Z";
+    const third = await context.service.select("left", 5);
+    expect(third.round.status).toBe("generating");
+    const stillWaiting = await context.service.reconcile();
+    expect(stillWaiting?.round.status).toBe("generating");
+    expect(stillWaiting?.round.rightCandidate.id).toBe("fallback-2");
+  });
+
+  it("validates a completed refill, updates EMA, and immediately serves a waiting selection", async () => {
+    const game = gameState();
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+      ],
+      consecutiveFallbackDraws: 2,
+      nextFallbackAt: "2026-07-16T01:10:00.000Z",
+    });
+    const context = serviceFor({ game, challengers, bufferTarget: 1 });
+    const waiting = await context.service.select("left", 3);
+    expect(waiting.round.status).toBe("generating");
+    const refill = context.queue.enqueue.mock.calls[0][0];
+    context.queue.setResult(
+      completedResult(refill.id, "2026-07-16T01:03:20.000Z"),
+    );
+
+    const completed = await context.service.reconcile();
+
+    expect(completed?.round.status).toBe("idle");
+    expect(completed?.round.leftCandidate).toBe(game.round.leftCandidate);
+    expect(completed?.round.rightCandidate).toMatchObject({
+      id: `challenger-${refill.id}`,
+      imageUrl: `/api/assets/challenger-${refill.id}.png`,
       winCount: 0,
     });
-    expect(completed?.round.status).toBe("idle");
-    const expectedResult = completedResult();
-    if (expectedResult.status !== "completed") throw new Error("unreachable");
-    expect(assets.verify).toHaveBeenCalledWith(expectedResult.asset);
-    expect(queue.archive).toHaveBeenCalledWith("job-1");
-    await expect(repository.load()).resolves.toBe(completed);
+    expect(context.assets.verify).toHaveBeenCalledWith(
+      expect.objectContaining({ candidateId: `challenger-${refill.id}` }),
+    );
+    expect(context.queue.archive).toHaveBeenCalledWith(refill.id);
+    const persisted = await context.challengerRepository.load();
+    expect(persisted?.generationTurnaroundEmaMs).toBe(125_000);
+    expect(persisted).toMatchObject({
+      consecutiveFallbackDraws: 0,
+      nextFallbackAt: null,
+    });
+    expect(
+      persisted?.ratings.find(
+        ({ candidate: item }) => item.id === `challenger-${refill.id}`,
+      ),
+    ).toMatchObject({
+      source: "generated",
+      rating: challengerConfig.initialRating,
+      poolMember: false,
+    });
   });
 
-  it("preserves both candidates when a failed result is reconciled", async () => {
-    const initial = makeState();
-    const left = initial.round.leftCandidate;
-    const right = initial.round.rightCandidate;
-    const repository = new MemoryGameRepository(initial);
-    const queue = mailbox({
-      jobId: "job-1",
+  it("appends concurrently completed refills in terminal completion order", async () => {
+    const game = gameState({
+      round: {
+        ...gameState().round,
+        retainedCandidateId: "left",
+        winStreak: 1,
+      },
+    });
+    const records = [
+      {
+        jobId: "slow-refill",
+        pinnedWinnerId: "left",
+        enqueuedAt: NOW,
+      },
+      {
+        jobId: "fast-refill",
+        pinnedWinnerId: "left",
+        enqueuedAt: NOW,
+      },
+    ];
+    const challengers = challengerState(game, {
+      ready: [],
+      refillJobs: records,
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+      ],
+    });
+    const queue = mailbox();
+    for (const record of records) {
+      queue.setWork({
+        id: record.jobId,
+        kind: "refill",
+        createdAt: record.enqueuedAt,
+        roundNumber: 3,
+        winnerSide: "left",
+        retainedWinner: game.round.leftCandidate,
+        rejectedCandidate: game.round.rightCandidate,
+        selectionHistory: game.history,
+        recentConcepts: [],
+        preferenceSeed: game.preferenceSeed,
+        sessionId: "session-1",
+        pinnedWinnerId: "left",
+      });
+    }
+    queue.setResult(completedResult("slow-refill", "2026-07-16T01:04:00.000Z"));
+    queue.setResult(completedResult("fast-refill", "2026-07-16T01:02:00.000Z"));
+    const context = serviceFor({
+      game,
+      challengers,
+      queue,
+      bufferTarget: 2,
+    });
+
+    await context.service.reconcile();
+
+    expect(
+      (await context.challengerRepository.load())?.ready.map(
+        ({ candidate: item }) => item.id,
+      ),
+    ).toEqual(["challenger-fast-refill", "challenger-slow-refill"]);
+  });
+
+  it("removes and replaces a failed refill without changing EMA or the waiting round", async () => {
+    const game = gameState();
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+      ],
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      bufferTarget: 1,
+      createId: ids("failed-refill", "replacement-refill"),
+    });
+    const waiting = await context.service.select("right", 3);
+    context.queue.setResult({
+      jobId: "failed-refill",
       status: "failed",
-      completedAt: "2026-07-16T01:01:00.000Z",
-      message: "Image generation was interrupted",
+      completedAt: "2026-07-16T01:01:40.000Z",
+      message: "generation interrupted",
       retryable: true,
     });
-    const service = serviceFor(repository, queue.generationMailbox);
-    await service.select("right", 3);
 
-    const failed = await service.reconcile();
+    const unchanged = await context.service.reconcile();
 
-    expect(failed?.round.leftCandidate).toEqual(left);
-    expect(failed?.round.rightCandidate).toEqual(right);
-    expect(failed?.round.status).toBe("error");
-    expect(failed?.errorMessage).toContain("Image generation was interrupted");
-    expect(queue.archive).toHaveBeenCalledWith("job-1");
-  });
-
-  it("idempotently republishes a missing mailbox job from persisted state", async () => {
-    const repository = new MemoryGameRepository(makeState());
-    const queue = mailbox();
-    const service = serviceFor(repository, queue.generationMailbox);
-    const selected = await service.select("left", 3);
-    const originalJob = queue.enqueue.mock.calls[0][0];
-    queue.setWork(null);
-    queue.enqueue.mockClear();
-
-    const refreshed = await service.reconcile();
-
-    expect(refreshed).toBe(selected);
-    expect(queue.enqueue).toHaveBeenCalledWith(originalJob);
-    expect(queue.archive).not.toHaveBeenCalled();
-  });
-
-  it("accepts schema-canonical work whose object keys have a different order", async () => {
-    const state = makeState();
-    const reorderCandidate = (candidate: Candidate): Candidate => {
-      const { createdAt, winCount, ...rest } = candidate;
-      return { ...rest, winCount, createdAt };
-    };
-    state.round.leftCandidate = reorderCandidate(state.round.leftCandidate);
-    state.round.rightCandidate = reorderCandidate(state.round.rightCandidate);
-    const repository = new MemoryGameRepository(state);
-    const queue = mailbox();
-    const service = serviceFor(repository, queue.generationMailbox);
-    const selected = await service.select("left", 3);
-    const canonicalWork = generationJobSchema.parse(
-      queue.enqueue.mock.calls[0][0],
+    expect(unchanged?.round).toEqual(waiting.round);
+    expect(unchanged?.history).toEqual(waiting.history);
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      generationTurnaroundEmaMs: 100_000,
+      refillJobs: [
+        {
+          jobId: "replacement-refill",
+          pinnedWinnerId: "right",
+        },
+      ],
+    });
+    expect(context.queue.archive).toHaveBeenCalledWith("failed-refill");
+    expect(context.queue.enqueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "replacement-refill", kind: "refill" }),
     );
-    queue.setWork(canonicalWork);
-    queue.enqueue.mockRejectedValueOnce(new Error("duplicate job"));
-
-    await expect(service.reconcile()).resolves.toBe(selected);
   });
 
-  it("keeps generating when enqueue reports an error after publication", async () => {
-    const repository = new MemoryGameRepository(makeState());
-    const queue = mailbox(null, false);
-    queue.enqueue.mockImplementationOnce(async (job) => {
-      queue.setWork(job);
+  it("rejects mismatched refill work metadata and restores capacity", async () => {
+    const game = gameState();
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+      ],
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      bufferTarget: 1,
+      createId: ids("tampered-refill", "replacement-refill"),
+    });
+    await context.service.select("left", 3);
+    const original = context.queue.enqueue.mock.calls[0][0];
+    context.queue.setWork({ ...original, preferenceSeed: "tampered seed" });
+    context.queue.setResult(completedResult("tampered-refill"));
+
+    const waiting = await context.service.reconcile();
+
+    expect(waiting?.round.status).toBe("generating");
+    expect(context.assets.verify).not.toHaveBeenCalled();
+    expect(context.queue.archive).toHaveBeenCalledWith("tampered-refill");
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      refillJobs: [{ jobId: "replacement-refill" }],
+    });
+  });
+
+  it("recovers a lost enqueue acknowledgement from durable refill intent", async () => {
+    const game = gameState();
+    const context = serviceFor({ game, challengers: challengerState(game) });
+    context.queue.enqueue.mockImplementationOnce(async (job) => {
+      context.queue.setWork(job);
       throw new Error("lost acknowledgement");
     });
-    const service = serviceFor(repository, queue.generationMailbox);
 
-    const selected = await service.select("left", 3);
+    const selected = await context.service.select("left", 3);
 
-    expect(selected.round.status).toBe("generating");
-    expect(await queue.readWork("job-1")).toEqual(
-      queue.enqueue.mock.calls[0][0],
+    expect(selected.round.status).toBe("idle");
+    expect(await context.queue.readWork("refill-1")).toEqual(
+      context.queue.enqueue.mock.calls[0][0],
     );
-  });
-
-  it("ignores and does not archive a result for another job", async () => {
-    const repository = new MemoryGameRepository(makeState());
-    const queue = mailbox(completedResult("job-other"));
-    const service = serviceFor(repository, queue.generationMailbox);
-    const selected = await service.select("left", 3);
-
-    const unchanged = await service.reconcile();
-
-    expect(unchanged).toBe(selected);
-    expect(unchanged?.round.status).toBe("generating");
-    expect(queue.archive).not.toHaveBeenCalled();
-  });
-
-  it("rejects a completed result whose candidate ID collides with the current round", async () => {
-    const initial = makeState();
-    initial.round.leftCandidate.id = "challenger-job-1";
-    const left = initial.round.leftCandidate;
-    const right = initial.round.rightCandidate;
-    const collision = completedResult();
-    const repository = new MemoryGameRepository(initial);
-    const queue = mailbox(collision);
-    const service = serviceFor(repository, queue.generationMailbox);
-    await service.select("left", 3);
-
-    const failed = await service.reconcile();
-
-    expect(failed?.round.leftCandidate).toEqual(left);
-    expect(failed?.round.rightCandidate).toEqual(right);
-    expect(failed?.round.status).toBe("error");
-    expect(failed?.errorMessage).toMatch(/candidate id.*already exists/i);
-    expect(queue.archive).toHaveBeenCalledWith("job-1");
-  });
-
-  it("rejects a completed result whose work metadata does not match persisted selection", async () => {
-    const initial = makeState();
-    const repository = new MemoryGameRepository(initial);
-    const queue = mailbox(completedResult());
-    const service = serviceFor(repository, queue.generationMailbox);
-    await service.select("left", 3);
-    const actualWork = await queue.readWork("job-1");
-    queue.setWork({ ...actualWork!, preferenceSeed: "tampered seed" });
-
-    const failed = await service.reconcile();
-
-    expect(failed?.round.status).toBe("error");
-    expect(failed?.round.leftCandidate.winCount).toBe(0);
-    expect(failed?.errorMessage).toMatch(/work metadata/i);
-  });
-
-  it("requires the deterministic challenger ID for a completed result", async () => {
-    const result = completedResult();
-    if (result.status !== "completed") throw new Error("unreachable");
-    result.asset = {
-      ...result.asset,
-      candidateId: "unexpected-challenger",
-      filename: "unexpected-challenger.png",
-      imageUrl: "/api/assets/unexpected-challenger.png",
-    };
-    const repository = new MemoryGameRepository(makeState());
-    const queue = mailbox(result);
-    const service = serviceFor(repository, queue.generationMailbox);
-    await service.select("left", 3);
-
-    const failed = await service.reconcile();
-
-    expect(failed?.round.status).toBe("error");
-    expect(failed?.round.leftCandidate.winCount).toBe(0);
-    expect(failed?.errorMessage).toMatch(/challenger-job-1/i);
-  });
-
-  it("fails safely when immutable asset verification rejects metadata", async () => {
-    const initial = makeState();
-    const left = initial.round.leftCandidate;
-    const right = initial.round.rightCandidate;
-    const repository = new MemoryGameRepository(initial);
-    const queue = mailbox(completedResult());
-    const assets = verifier();
-    assets.verify.mockRejectedValueOnce(new Error("asset bytes are corrupt"));
-    const service = serviceFor(
-      repository,
-      queue.generationMailbox,
-      assets.assetVerifier,
-    );
-    await service.select("left", 3);
-
-    const failed = await service.reconcile();
-
-    expect(failed?.round.status).toBe("error");
-    expect(failed?.round.leftCandidate).toBe(left);
-    expect(failed?.round.rightCandidate).toBe(right);
-    expect(failed?.errorMessage).toContain("asset bytes are corrupt");
-  });
-
-  it("retries a failed terminal save without incrementing the streak twice", async () => {
-    const backing = new MemoryGameRepository(makeState());
-    let saveCount = 0;
-    const repository: GameRepository = {
-      load: () => backing.load(),
-      clear: () => backing.clear(),
-      save: async (state) => {
-        saveCount += 1;
-        if (saveCount === 2) throw new Error("disk full");
-        await backing.save(state);
-      },
-      withLock: (operation) => backing.withLock(operation),
-    };
-    const queue = mailbox(completedResult());
-    const service = serviceFor(repository, queue.generationMailbox);
-    await service.select("left", 3);
-
-    await expect(service.reconcile()).rejects.toThrow("disk full");
-
-    expect(queue.archive).not.toHaveBeenCalled();
-    expect((await backing.load())?.round.status).toBe("generating");
-    expect((await backing.load())?.round.winStreak).toBe(0);
-
-    const completed = await service.reconcile();
-
-    expect(completed?.round.leftCandidate.winCount).toBe(0);
-    expect(completed?.round.winStreak).toBe(1);
-    expect(completed?.history).toHaveLength(2);
-  });
-
-  it("persists cleanup intent and retries archive failure without reapplying completion", async () => {
-    const repository = new MemoryGameRepository(makeState());
-    const queue = mailbox(completedResult());
-    queue.archive.mockRejectedValueOnce(new Error("archive unavailable"));
-    const service = serviceFor(repository, queue.generationMailbox);
-    await service.select("left", 3);
-
-    await expect(service.reconcile()).rejects.toThrow("archive unavailable");
-    const awaitingCleanup = await repository.load();
-    expect(awaitingCleanup?.round.status).toBe("idle");
-    expect(awaitingCleanup?.round.leftCandidate.winCount).toBe(0);
-    expect(awaitingCleanup?.round.winStreak).toBe(1);
-    expect(awaitingCleanup?.mailboxCleanupJobId).toBe("job-1");
-
-    const cleaned = await service.reconcile();
-
-    expect(cleaned?.round.leftCandidate.winCount).toBe(0);
-    expect(cleaned?.round.winStreak).toBe(1);
-    expect(cleaned?.history).toHaveLength(2);
-    expect(cleaned?.mailboxCleanupJobId).toBeUndefined();
-    expect(queue.archive).toHaveBeenCalledTimes(2);
-  });
-
-  it("serializes preference updates with selection so neither state change is overwritten", async () => {
-    const backing = new MemoryGameRepository(makeState());
-    let releasePreferenceSave!: () => void;
-    const preferenceSaveHeld = new Promise<void>((resolve) => {
-      releasePreferenceSave = resolve;
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      refillJobs: [{ jobId: "refill-1" }],
     });
-    let signalPreferenceSave!: () => void;
-    const preferenceSaveEntered = new Promise<void>((resolve) => {
-      signalPreferenceSave = resolve;
+  });
+
+  it("retries cleanup without appending or applying a completed refill twice", async () => {
+    const game = gameState();
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+      ],
     });
-    const repository: GameRepository = {
-      load: () => backing.load(),
-      clear: () => backing.clear(),
-      save: async (state) => {
-        if (state.preferenceSeed === "new preference seed") {
-          signalPreferenceSave();
-          await preferenceSaveHeld;
-        }
-        await backing.save(state);
-      },
-      withLock: (operation) => backing.withLock(operation),
-    };
-    const queue = mailbox();
-    const preferences = serviceFor(repository, queue.generationMailbox);
-    const selection = serviceFor(
-      repository,
-      queue.generationMailbox,
-      verifier().assetVerifier,
-      "job-2",
+    const context = serviceFor({ game, challengers, bufferTarget: 1 });
+    await context.service.select("left", 3);
+    context.queue.setResult(completedResult("refill-1"));
+    context.queue.archive.mockRejectedValueOnce(
+      new Error("archive unavailable"),
     );
 
-    const updating = preferences.updatePreferenceSeed("new preference seed");
-    await preferenceSaveEntered;
-    const selecting = selection.select("left", 3);
-    releasePreferenceSave();
+    await expect(context.service.reconcile()).rejects.toThrow(
+      "archive unavailable",
+    );
+    const afterFailure = await context.challengerRepository.load();
+    expect(
+      afterFailure?.ratings.filter(
+        ({ candidate: item }) => item.id === "challenger-refill-1",
+      ),
+    ).toHaveLength(1);
+    const historyLength = (await context.gameRepository.load())?.history.length;
+    expect(historyLength).toBeDefined();
 
-    await expect(updating).resolves.toMatchObject({
-      preferenceSeed: "new preference seed",
+    await expect(context.service.reconcile()).resolves.toMatchObject({
       round: { status: "idle" },
     });
-    await expect(selecting).resolves.toMatchObject({
-      preferenceSeed: "new preference seed",
-      round: { status: "generating" },
-      pendingSelection: { generationJobId: "job-2" },
+    const afterRetry = await context.challengerRepository.load();
+    expect(
+      afterRetry?.ratings.filter(
+        ({ candidate: item }) => item.id === "challenger-refill-1",
+      ),
+    ).toHaveLength(1);
+    expect((await context.gameRepository.load())?.history).toHaveLength(
+      historyLength!,
+    );
+  });
+
+  it("replays a generated buffer candidate when saving the waiting round fails", async () => {
+    const game = gameState();
+    const backingGame = new MemoryGameRepository(game);
+    let failCompletedSave = false;
+    const gameRepository: GameRepository = {
+      load: () => backingGame.load(),
+      clear: () => backingGame.clear(),
+      withLock: (operation) => backingGame.withLock(operation),
+      save: async (state) => {
+        if (failCompletedSave && state.round.status === "idle") {
+          failCompletedSave = false;
+          throw new Error("game disk unavailable");
+        }
+        await backingGame.save(state);
+      },
+    };
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+      ],
+      consecutiveFallbackDraws: 2,
     });
-    await expect(backing.load()).resolves.toMatchObject({
-      preferenceSeed: "new preference seed",
-      round: { status: "generating" },
-      pendingSelection: { generationJobId: "job-2" },
+    const context = serviceFor({
+      game,
+      gameRepository,
+      challengers,
+      bufferTarget: 1,
     });
+    await context.service.select("left", 3);
+    failCompletedSave = true;
+    context.queue.setResult(completedResult("refill-1"));
+
+    await expect(context.service.reconcile()).rejects.toThrow(
+      "game disk unavailable",
+    );
+    await expect(backingGame.load()).resolves.toMatchObject({
+      round: { status: "generating" },
+      pendingSelection: { kind: "buffer" },
+    });
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      ready: [{ candidate: { id: "challenger-refill-1" } }],
+      refillJobs: [{ jobId: "refill-1" }],
+    });
+
+    const recovered = await context.service.reconcile();
+
+    expect(recovered?.round).toMatchObject({
+      status: "idle",
+      rightCandidate: { id: "challenger-refill-1" },
+    });
+    expect(recovered?.history).toHaveLength(game.history.length + 1);
+    expect(context.queue.archive).toHaveBeenCalledWith("refill-1");
   });
 });

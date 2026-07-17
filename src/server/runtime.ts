@@ -62,6 +62,7 @@ export const generationMailbox = mockAgent
   : fileGenerationMailbox;
 export const gameService = new GameService(
   repository,
+  challengerRepository,
   generationMailbox,
   assetStore,
 );
