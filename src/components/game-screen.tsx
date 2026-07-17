@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   beginSelection,
+  isSelectionBoundWait,
   mergeServerResult,
   type GameStartState,
   type GameState,
@@ -452,6 +453,20 @@ export function GameScreen() {
         ) {
           selection.generationJobId = server.pendingSelection.generationJobId;
         }
+        if (matchingCompletedSelection(server, selection)) {
+          const challenger =
+            winnerSide === "left"
+              ? server.round.rightCandidate
+              : server.round.leftCandidate;
+          await preload(challenger.imageUrl, selection.controller.signal);
+          if (activeSelectionRef.current?.token !== selection.token) return;
+          activeSelectionRef.current = null;
+          selectionLocked.current = false;
+          setConnectionStatus(null);
+          setLocalError(null);
+          commitGame(mergeServerResult(current, server, winnerSide));
+          return;
+        }
         startPolling(selection, server);
       } catch {
         if (selection.controller.signal.aborted) return;
@@ -660,6 +675,7 @@ export function GameScreen() {
     game?.round.status === "error" && Boolean(game.pendingSelection);
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
+  const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
 
   return (
     <main className={styles.shell}>
@@ -671,12 +687,7 @@ export function GameScreen() {
           <button
             type="button"
             className={styles.utilityButton}
-            disabled={
-              !game ||
-              status === "generating" ||
-              reconcilingRetry ||
-              initializing
-            }
+            disabled={!game || reconcilingRetry || initializing}
             onClick={() => setPreferencesOpen(true)}
           >
             Preferences
@@ -791,10 +802,15 @@ export function GameScreen() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="preferences-title"
+            aria-describedby={
+              selectionBoundWait
+                ? "preferences-description preferences-wait-note"
+                : "preferences-description"
+            }
             onMouseDown={(event) => event.stopPropagation()}
           >
             <h2 id="preferences-title">Preference profile</h2>
-            <p>
+            <p id="preferences-description">
               Inspiration for future challengers. Novelty rules still take
               priority.
             </p>
@@ -803,6 +819,15 @@ export function GameScreen() {
               onChange={(event) => setPreferenceDraft(event.target.value)}
               rows={9}
             />
+            {selectionBoundWait ? (
+              <p
+                id="preferences-wait-note"
+                className={styles.preferenceNotice}
+                role="status"
+              >
+                Changes can be saved after this challenger arrives.
+              </p>
+            ) : null}
             <div className={styles.modalActions}>
               <button
                 type="button"
@@ -814,6 +839,7 @@ export function GameScreen() {
               <button
                 type="button"
                 className={styles.newGameButton}
+                disabled={selectionBoundWait}
                 onClick={savePreferences}
               >
                 Save profile

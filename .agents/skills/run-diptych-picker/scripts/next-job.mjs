@@ -16,6 +16,7 @@ const waitMs = Number(args["wait-ms"] ?? 0);
 const batchId = args.batch;
 const ownerToken = args["owner-token"];
 const resume = args.resume === true;
+const maxRefills = Number(args["max-refills"] ?? 1);
 if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 30_000) {
   throw new Error("--wait-ms must be an integer from 0 through 30000");
 }
@@ -27,6 +28,12 @@ if (batchId !== undefined && !JOB_ID.test(ownerToken ?? "")) {
 }
 if (ownerToken !== undefined && batchId === undefined) {
   throw new Error("--owner-token may only be used with --batch");
+}
+if (!Number.isInteger(maxRefills) || maxRefills < 1 || maxRefills > 3) {
+  throw new Error("--max-refills must be an integer from 1 through 3");
+}
+if (batchId !== undefined && args["max-refills"] !== undefined) {
+  throw new Error("--max-refills may not be used with --batch");
 }
 
 const mailbox = join(dataDirectory(), "agent-mailbox");
@@ -71,8 +78,15 @@ async function findNextJob() {
     const unterminatedActive = activeJobs
       .filter(({ terminalResult }) => terminalResult === null)
       .sort(compareJobs);
-    if (unterminatedActive.length > 0) {
-      return presentForOwner(unterminatedActive[0]);
+    const activePriority = unterminatedActive.find(({ job }) => !isRefill(job));
+    if (activePriority) {
+      return presentForOwner(activePriority);
+    }
+    const activeRefills = unterminatedActive
+      .filter(({ job }) => isRefill(job))
+      .slice(0, maxRefills);
+    if (activeRefills.length > 0) {
+      return presentRefillBatch(activeRefills);
     }
 
     for (const entry of pendingJobs.sort(compareJobs)) {
@@ -83,7 +97,8 @@ async function findNextJob() {
       if (claimed) return present(claimed, ownership.ownerToken);
     }
   }
-  for (const entry of pendingJobs.sort(compareJobs)) {
+  const orderedPending = pendingJobs.sort(compareJobs);
+  for (const entry of orderedPending.filter(({ job }) => !isRefill(job))) {
     if (isInitial(entry.job)) {
       const ownership = await acquireBatchOwnership(entry.job.batchId);
       if (!ownership) continue;
@@ -94,7 +109,17 @@ async function findNextJob() {
     const claimed = await claim(entry);
     if (claimed) return present(claimed);
   }
-  return null;
+  return claimRefillBatch(orderedPending.filter(({ job }) => isRefill(job)));
+}
+
+async function claimRefillBatch(entries) {
+  const claimed = [];
+  for (const entry of entries) {
+    if (claimed.length === maxRefills) break;
+    const refill = await claim(entry);
+    if (refill) claimed.push(refill);
+  }
+  return claimed.length > 0 ? presentRefillBatch(claimed) : null;
 }
 
 async function findBatchPartner(
@@ -215,7 +240,20 @@ function compareJobs(left, right) {
     left.job.kind === "initial" && left.job.initialSide === "left" ? 0 : 1;
   const rightRank =
     right.job.kind === "initial" && right.job.initialSide === "left" ? 0 : 1;
-  return leftRank - rightRank || left.filename.localeCompare(right.filename);
+  const leftCreatedAt = Date.parse(left.job.createdAt ?? "");
+  const rightCreatedAt = Date.parse(right.job.createdAt ?? "");
+  const ageOrder =
+    (Number.isFinite(leftCreatedAt)
+      ? leftCreatedAt
+      : Number.POSITIVE_INFINITY) -
+    (Number.isFinite(rightCreatedAt)
+      ? rightCreatedAt
+      : Number.POSITIVE_INFINITY);
+  return (
+    leftRank - rightRank ||
+    ageOrder ||
+    left.filename.localeCompare(right.filename)
+  );
 }
 
 function isInitialBatch(job, batch) {
@@ -226,12 +264,20 @@ function isInitial(job) {
   return job.kind === "initial";
 }
 
+function isRefill(job) {
+  return job.kind === "refill";
+}
+
 function present(entry, batchOwnerToken, terminalStatus) {
   return {
     ...entry.job,
     ...(batchOwnerToken ? { batchOwnerToken } : {}),
     ...(terminalStatus ? { terminalStatus } : {}),
   };
+}
+
+function presentRefillBatch(entries) {
+  return { kind: "refill-batch", jobs: entries.map((entry) => present(entry)) };
 }
 
 async function presentForOwner(entry) {

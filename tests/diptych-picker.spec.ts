@@ -1,12 +1,77 @@
-import { expect, test } from "@playwright/test";
-import { rm } from "node:fs/promises";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+const dataDirectory = join(process.cwd(), ".local-data", "test");
+const challengerStatePath = join(dataDirectory, "challenger-state.json");
+
+interface StoredChallengerState {
+  ready: Array<{ candidate: { id: string } }>;
+  refillJobs: Array<{ jobId: string }>;
+  consecutiveFallbackDraws: number;
+  nextFallbackAt: string | null;
+}
+
+async function challengerState(): Promise<StoredChallengerState> {
+  return JSON.parse(
+    await readFile(challengerStatePath, "utf8"),
+  ) as StoredChallengerState;
+}
+
+async function updateChallengerState(
+  update: (state: StoredChallengerState) => StoredChallengerState,
+): Promise<void> {
+  const next = update(await challengerState());
+  await writeFile(
+    challengerStatePath,
+    `${JSON.stringify(next, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function select(
+  page: Page,
+  side: "left" | "right",
+  expectedRound: number,
+  expectedStatus = 200,
+) {
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/select") &&
+      response.request().method() === "POST",
+  );
+  await page.getByTestId(`candidate-card-${side}`).click();
+  const response = await responsePromise;
+  expect(response.status()).toBe(expectedStatus);
+  await expect(
+    page.getByText(`Round ${expectedRound}`, { exact: true }),
+  ).toBeVisible();
+  return response;
+}
+
+async function reconcileAllRefills(request: APIRequestContext): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await request.get("/api/game");
+        try {
+          return (await challengerState()).refillJobs.length;
+        } catch {
+          return 0;
+        }
+      },
+      { timeout: 5_000 },
+    )
+    .toBe(0);
+}
+
 test.beforeEach(async ({ page, request }) => {
-  await rm(join(process.cwd(), ".local-data", "test"), {
-    recursive: true,
-    force: true,
-  });
+  await rm(dataDirectory, { recursive: true, force: true });
   await request.post("/api/game/start", { data: { reset: true } });
   await expect
     .poll(async () => {
@@ -21,15 +86,36 @@ test.beforeEach(async ({ page, request }) => {
   await expect(page.getByTestId("candidate-image")).toHaveCount(2);
 });
 
-test("renders exactly two independent side-by-side images on desktop and mobile", async ({
+test.afterEach(async ({ request }) => {
+  await reconcileAllRefills(request);
+});
+
+test("starts with five durable challengers and exactly two independent side-by-side images", async ({
   page,
 }) => {
   const images = page.getByTestId("candidate-image");
-  await expect(images).toHaveCount(2);
-  await expect(images.nth(0)).not.toHaveAttribute(
-    "src",
-    (await images.nth(1).getAttribute("src")) ?? "",
+  const displayedIds = await Promise.all([
+    page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
+    page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
+  ]);
+  const stored = await challengerState();
+
+  expect(stored.ready).toHaveLength(5);
+  expect(stored.ready.map(({ candidate }) => candidate.id)).not.toContain(
+    displayedIds[0],
   );
+  expect(stored.ready.map(({ candidate }) => candidate.id)).not.toContain(
+    displayedIds[1],
+  );
+  expect(
+    await images.evaluateAll((items) =>
+      items.every((item, index) =>
+        items.every((other, otherIndex) =>
+          index === otherIndex ? true : item !== other,
+        ),
+      ),
+    ),
+  ).toBe(true);
 
   const desktop = await Promise.all([
     images.nth(0).boundingBox(),
@@ -47,61 +133,29 @@ test("renders exactly two independent side-by-side images on desktop and mobile"
   expect(mobile[0]!.x).toBeLessThan(mobile[1]!.x);
 });
 
-test("new game can bootstrap two generated initial candidates without broken images", async ({
+test("serves five instant FIFO swaps while preserving the winner node and URL", async ({
   page,
 }) => {
-  await expect(page.getByTestId("candidate-image")).toHaveCount(2);
-  page.once("dialog", (dialog) => dialog.accept());
-  const startResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/game/start") &&
-      response.request().method() === "POST",
-  );
-
-  await page.getByRole("button", { name: "New game" }).click();
-  const startResponse = await startResponsePromise;
-
-  expect(await startResponse.json()).toMatchObject({ status: "initializing" });
-  await expect(page.getByTestId("candidate-image")).toHaveCount(0);
-  await expect(page.getByText("Creating your first comparison…")).toBeVisible();
-  await expect(page.getByTestId("candidate-image")).toHaveCount(2);
-});
-
-test("selecting A keeps A's node and URL visible while only B loads and swaps", async ({
-  page,
-}) => {
-  const left = page.getByTestId("candidate-image").nth(0);
-  const right = page.getByTestId("candidate-image").nth(1);
-  const leftUrl = await left.getAttribute("src");
-  const rightUrl = await right.getAttribute("src");
+  const winner = page.getByTestId("candidate-image").nth(0);
+  const winnerUrl = await winner.getAttribute("src");
+  const losingUrls = new Set<string>();
   await page.evaluate(() => {
     (
       globalThis as typeof globalThis & { winnerNode?: Element | null }
     ).winnerNode = document.querySelector('[data-testid="candidate-image"]');
   });
 
-  const selectionResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/game/select") &&
-      response.request().method() === "POST",
-  );
-  await page.getByTestId("candidate-card-left").click();
-  const selectionResponse = await selectionResponsePromise;
-  expect(selectionResponse.status()).toBe(202);
-  expect((await selectionResponse.json()).round.status).toBe("generating");
-  await expect(page.getByTestId("loading-right")).toBeVisible();
-  await expect(right).toHaveAttribute("src", rightUrl!);
-  await expect(page.getByText("Round 1")).toBeVisible();
-  await expect(page.getByRole("button", { name: "New game" })).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Preferences" }),
-  ).toBeDisabled();
-  await expect(left).toBeVisible();
-  await expect(left).toHaveAttribute("src", leftUrl!);
-  await expect(page.getByText("Round 2")).toBeVisible();
+  for (let round = 2; round <= 6; round += 1) {
+    const loser = page.getByTestId("candidate-image").nth(1);
+    const previousLoserUrl = await loser.getAttribute("src");
+    const response = await select(page, "left", round);
+    expect((await response.json()).round.status).toBe("idle");
+    await expect(winner).toHaveAttribute("src", winnerUrl!);
+    await expect(loser).not.toHaveAttribute("src", previousLoserUrl!);
+    losingUrls.add((await loser.getAttribute("src"))!);
+  }
 
-  expect(await left.getAttribute("src")).toBe(leftUrl);
-  expect(await right.getAttribute("src")).not.toBe(rightUrl);
+  expect(losingUrls.size).toBe(5);
   expect(
     await page.evaluate(
       () =>
@@ -110,158 +164,137 @@ test("selecting A keeps A's node and URL visible while only B loads and swaps", 
         document.querySelector('[data-testid="candidate-image"]'),
     ),
   ).toBe(true);
+  expect(await challengerState()).toMatchObject({ ready: [] });
 });
 
-test("selecting B keeps B's URL and replaces only A", async ({ page }) => {
-  const left = page.getByTestId("candidate-image").nth(0);
-  const right = page.getByTestId("candidate-image").nth(1);
-  const leftUrl = await left.getAttribute("src");
-  const rightUrl = await right.getAttribute("src");
-
-  await page.keyboard.press("b");
-  await expect(page.getByTestId("loading-left")).toBeVisible();
-  await expect(page.getByText("Round 2")).toBeVisible();
-
-  expect(await right.getAttribute("src")).toBe(rightUrl);
-  expect(await left.getAttribute("src")).not.toBe(leftUrl);
-});
-
-test("double clicking launches one round and refresh restores the correlated generating job", async ({
+test("keeps stale FIFO work after a challenger becomes the next winner", async ({
   page,
 }) => {
-  const originalUrls = await page
+  await select(page, "left", 2);
+  const challenger = page.getByTestId("candidate-image").nth(1);
+  const challengerUrl = await challenger.getAttribute("src");
+  const previousLeftUrl = await page
     .getByTestId("candidate-image")
-    .evaluateAll((images) =>
-      images.map((image) => (image as HTMLImageElement).src),
-    );
-  await page.getByTestId("candidate-card-left").dblclick();
-  await expect(page.getByTestId("loading-right")).toBeVisible();
-
-  await page.reload();
-
-  await expect(page.getByTestId("loading-right")).toBeVisible();
-  await expect(page.getByText("Round 2")).toBeVisible();
-  await expect(page.getByText("Round 3")).toHaveCount(0);
-  await expect(page.getByTestId("candidate-image")).toHaveCount(2);
-  const completedUrls = await page
-    .getByTestId("candidate-image")
-    .evaluateAll((images) =>
-      images.map((image) => (image as HTMLImageElement).src),
-    );
-  expect(completedUrls[0]).toBe(originalUrls[0]);
-  expect(completedUrls[1]).not.toBe(originalUrls[1]);
-});
-
-test("a transient poll failure reconnects with both images locked", async ({
-  page,
-}) => {
-  const images = page.getByTestId("candidate-image");
-  const originalUrls = await images.evaluateAll((items) =>
-    items.map((item) => (item as HTMLImageElement).getAttribute("src")),
-  );
-  let abortNextPoll = false;
-  let abortedPolls = 0;
-  await page.route("**/api/game", async (route) => {
-    if (
-      abortNextPoll &&
-      abortedPolls === 0 &&
-      route.request().method() === "GET"
-    ) {
-      abortedPolls += 1;
-      await route.abort("connectionfailed");
-      return;
-    }
-    await route.continue();
+    .nth(0)
+    .getAttribute("src");
+  await page.evaluate(() => {
+    (
+      globalThis as typeof globalThis & { challengerNode?: Element | null }
+    ).challengerNode = document.querySelectorAll(
+      '[data-testid="candidate-image"]',
+    )[1];
   });
 
-  const selectionResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/game/select") &&
-      response.request().method() === "POST",
+  await select(page, "right", 3);
+
+  await expect(challenger).toHaveAttribute("src", challengerUrl!);
+  await expect(page.getByTestId("candidate-image").nth(0)).not.toHaveAttribute(
+    "src",
+    previousLeftUrl!,
   );
-  await page.getByTestId("candidate-card-left").click();
-  await selectionResponsePromise;
-  abortNextPoll = true;
-
-  await expect(
-    page.getByRole("status").filter({ hasText: "Reconnecting" }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
-  await expect(page.getByTestId("candidate-card-left")).toBeDisabled();
   expect(
-    await images.evaluateAll((items) =>
-      items.map((item) => (item as HTMLImageElement).getAttribute("src")),
+    await page.evaluate(
+      () =>
+        (globalThis as typeof globalThis & { challengerNode?: Element })
+          .challengerNode ===
+        document.querySelectorAll('[data-testid="candidate-image"]')[1],
     ),
-  ).toEqual(originalUrls);
-
-  await expect(page.getByText("Round 2")).toBeVisible();
-  expect(abortedPolls).toBe(1);
+  ).toBe(true);
+  expect((await challengerState()).ready).toHaveLength(3);
 });
 
-test("a stale tab adopts the authoritative completed round without posting a stale winner", async ({
+test("refresh restores the current round and remaining FIFO exactly", async ({
   page,
-  context,
 }) => {
-  const stalePage = await context.newPage();
-  await stalePage.goto("/");
-  await expect(stalePage.getByTestId("candidate-image")).toHaveCount(2);
-
-  await page.getByTestId("candidate-card-right").click();
-  await expect(page.getByText("Round 2")).toBeVisible();
-  const authoritativeIds = await Promise.all([
+  await select(page, "left", 2);
+  const beforeIds = await Promise.all([
     page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
     page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
   ]);
+  const before = await challengerState();
 
-  const stalePost = stalePage.waitForResponse(
+  await page.reload();
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
+
+  await expect(page.getByTestId("candidate-card-left")).toHaveAttribute(
+    "data-candidate-id",
+    beforeIds[0]!,
+  );
+  await expect(page.getByTestId("candidate-card-right")).toHaveAttribute(
+    "data-candidate-id",
+    beforeIds[1]!,
+  );
+  const after = await challengerState();
+  expect(after.ready).toEqual(before.ready);
+  expect(after.refillJobs).toEqual(before.refillJobs);
+});
+
+test("double click consumes one challenger and advances one round", async ({
+  page,
+}) => {
+  let selectionPosts = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/game/select")
+    ) {
+      selectionPosts += 1;
+    }
+  });
+
+  await page.getByTestId("candidate-card-left").dblclick();
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
+  await page.waitForTimeout(100);
+
+  expect(selectionPosts).toBe(1);
+  await expect(page.getByText("Round 3", { exact: true })).toHaveCount(0);
+  expect((await challengerState()).ready).toHaveLength(4);
+});
+
+test("paces a second fallback, blocks a third, and explains deferred Preferences save", async ({
+  page,
+}) => {
+  await updateChallengerState((state) => ({ ...state, ready: [] }));
+
+  await select(page, "left", 2);
+  const winner = page.getByTestId("candidate-image").nth(0);
+  const winnerUrl = await winner.getAttribute("src");
+
+  const secondResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/game/select") &&
       response.request().method() === "POST",
   );
-  await stalePage.getByTestId("candidate-card-left").click();
-  expect((await stalePost).status()).toBe(409);
-
-  await expect(stalePage.getByText("Round 2")).toBeVisible();
-  await expect(stalePage.getByText("Round 3")).toHaveCount(0);
-  await expect(stalePage.getByTestId("candidate-card-left")).toHaveAttribute(
-    "data-candidate-id",
-    authoritativeIds[0]!,
-  );
-  await expect(stalePage.getByTestId("candidate-card-right")).toHaveAttribute(
-    "data-candidate-id",
-    authoritativeIds[1]!,
-  );
-  await stalePage.close();
-});
-
-test("a failed refill preserves the winner and recovers without a manual retry", async ({
-  page,
-}) => {
-  const images = page.getByTestId("candidate-image");
-  await expect(images).toHaveCount(2);
-  const originalUrls = await images.evaluateAll((items) =>
-    items.map((item) => (item as HTMLImageElement).getAttribute("src")),
-  );
-  await page.getByRole("button", { name: "Preferences" }).click();
-  await page
-    .getByRole("textbox")
-    .fill("Prefer deterministic test scenes. [mock:fail-once]");
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-
   await page.getByTestId("candidate-card-left").click();
+  expect((await secondResponse).status()).toBe(202);
   await expect(page.getByTestId("loading-right")).toBeVisible();
-  expect(
-    await images.evaluateAll((items) =>
-      items.map((item) => (item as HTMLImageElement).getAttribute("src")),
-    ),
-  ).toEqual(originalUrls);
+  await expect(page.getByRole("button", { name: "Preferences" })).toBeEnabled();
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save profile" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Changes can be saved after this challenger arrives."),
+  ).toBeVisible();
+  await expect(page.getByText("Round 3", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save profile" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Cancel" }).click();
 
-  await expect(page.getByText("Round 2")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
-  const completedUrls = await images.evaluateAll((items) =>
-    items.map((item) => (item as HTMLImageElement).getAttribute("src")),
+  const thirdResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/select") &&
+      response.request().method() === "POST",
   );
-  expect(completedUrls[0]).toBe(originalUrls[0]);
-  expect(completedUrls[1]).not.toBe(originalUrls[1]);
+  await page.getByTestId("candidate-card-left").click();
+  expect((await thirdResponse).status()).toBe(202);
+  await expect(page.getByTestId("loading-right")).toBeVisible();
+  await expect(page.getByTestId("loading-left")).toHaveCount(0);
+  await expect(winner).toHaveAttribute("src", winnerUrl!);
+  await page.waitForTimeout(300);
+  await expect(page.getByTestId("loading-right")).toBeVisible();
+  expect((await challengerState()).consecutiveFallbackDraws).toBe(2);
+  await expect(page.getByText("Round 4", { exact: true })).toBeVisible();
 });

@@ -731,6 +731,9 @@ export class GameService {
       ],
       recentCandidateIds,
       random: this.random,
+      minimumCooldownMs: this.config.fallbackMinimumMs,
+      maximumCooldownMs: this.config.fallbackMaximumMs,
+      maximumConsecutiveDraws: this.config.fallbackMaximumConsecutive,
     });
   }
 

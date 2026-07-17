@@ -153,6 +153,26 @@ function installSuccessfulImagePreload() {
   vi.stubGlobal("Image", SuccessfulImage);
 }
 
+function installRecordedImagePreload(urls: string[]) {
+  class RecordedImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    private value = "";
+
+    set src(value: string) {
+      this.value = value;
+      if (!value) return;
+      urls.push(value);
+      queueMicrotask(() => this.onload?.());
+    }
+
+    get src() {
+      return this.value;
+    }
+  }
+  vi.stubGlobal("Image", RecordedImage);
+}
+
 function installFailOnceImagePreload() {
   let failuresRemaining = 1;
   class FailOnceImage {
@@ -287,6 +307,72 @@ describe("GameScreen initial generation", () => {
 });
 
 describe("GameScreen challenger reconciliation", () => {
+  it("commits an instant buffered round after preloading only the losing asset", async () => {
+    const preloadedUrls: string[] = [];
+    installRecordedImagePreload(preloadedUrls);
+    const completed = completedGame("left");
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json(completed)
+          : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    const images = await screen.findAllByTestId("candidate-image");
+    const winnerImage = images[0];
+    const losingImage = images[1];
+    fireEvent.click(screen.getByTestId("candidate-card-left"));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Game status")).toHaveTextContent("Round 2"),
+    );
+    const updatedImages = screen.getAllByTestId("candidate-image");
+    expect(updatedImages[0]).toBe(winnerImage);
+    expect(updatedImages[1]).not.toBe(losingImage);
+    expect(preloadedUrls).toEqual(["/api/assets/challenger-job-1.png"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens Preferences during a selection wait and defers Save", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json(bufferedGeneratingGame(), 202)
+          : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByTestId("candidate-card-left"));
+    await screen.findByTestId("loading-right");
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save profile" })).toBeDisabled();
+    expect(
+      screen.getByText("Changes can be saved after this challenger arrives."),
+    ).toBeVisible();
+  });
+
+  it("keeps Preferences Save enabled outside a selection-bound wait", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: initializedGame })),
+    );
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+
+    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(
+      screen.queryByText("Changes can be saved after this challenger arrives."),
+    ).not.toBeInTheDocument();
+  });
+
   it("abandons local preservation when polling observes a different generating job", async () => {
     installSuccessfulImagePreload();
     const otherJob = generatingGame("job-from-other-tab", "right");

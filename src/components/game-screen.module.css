@@ -315,6 +315,10 @@
   border-color: var(--ultraviolet);
   box-shadow: 0 0 0 2px rgba(167, 107, 239, 0.16);
 }
+.preferencesModal .preferenceNotice {
+  margin: 10px 0 0;
+  color: var(--copper-bright);
+}
 .modalActions {
   margin-top: 18px;
   display: flex;

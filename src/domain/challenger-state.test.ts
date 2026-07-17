@@ -287,6 +287,34 @@ describe("challenger state", () => {
     expect(draw(1_000_000)).toBe("2026-07-16T00:05:00.000Z");
   });
 
+  it("accepts service-provided pacing bounds without changing defaults", () => {
+    const initial = state({
+      ratings: [rating("eligible", 1000)],
+      generationTurnaroundEmaMs: 400,
+    });
+
+    const result = drawFallback(initial, {
+      now: "2026-07-16T00:00:00.000Z",
+      currentCandidateIds: [],
+      recentCandidateIds: [],
+      random: () => 0,
+      minimumCooldownMs: 100,
+      maximumCooldownMs: 250,
+      maximumConsecutiveDraws: 1,
+    });
+
+    expect(result.state.nextFallbackAt).toBe("2026-07-16T00:00:00.200Z");
+    expect(
+      drawFallback(result.state, {
+        now: "2026-07-16T00:00:01.000Z",
+        currentCandidateIds: [],
+        recentCandidateIds: [],
+        random: () => 0,
+        maximumConsecutiveDraws: 1,
+      }).candidate,
+    ).toBeNull();
+  });
+
   it("updates generation turnaround with a 0.25 exponential moving average", () => {
     const next = recordGenerationTurnaround(
       state({ generationTurnaroundEmaMs: 300_000 }),
@@ -305,6 +333,20 @@ describe("challenger state", () => {
           jobId: "job-1",
           pinnedWinnerId: "winner",
           enqueuedAt: "2026-07-16T00:00:00.000Z",
+          expectedJob: {
+            id: "job-1",
+            kind: "refill",
+            createdAt: "2026-07-16T00:00:00.000Z",
+            roundNumber: 1,
+            winnerSide: "left",
+            retainedWinner: candidate("winner"),
+            rejectedCandidate: candidate("loser"),
+            selectionHistory: [],
+            recentConcepts: [],
+            preferenceSeed: "novel test preferences",
+            sessionId: "session-1",
+            pinnedWinnerId: "winner",
+          },
         },
       ],
     });

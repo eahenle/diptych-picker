@@ -52,6 +52,21 @@ export async function assertActiveJob(mailbox, jobId) {
 export function validateJobKind(job) {
   const kind = job.kind ?? "challenger";
   if (kind === "challenger") return;
+  if (kind === "refill") {
+    if (!JOB_ID.test(job.sessionId ?? "")) {
+      throw new Error(`Refill job ${job.id} requires a valid sessionId`);
+    }
+    if (
+      typeof job.pinnedWinnerId !== "string" ||
+      job.pinnedWinnerId.length === 0 ||
+      job.pinnedWinnerId !== job.retainedWinner?.id
+    ) {
+      throw new Error(
+        `Refill job ${job.id} requires pinnedWinnerId to match retainedWinner.id`,
+      );
+    }
+    return;
+  }
   if (kind !== "initial") throw new Error(`Unsupported job kind ${kind}`);
   if (!JOB_ID.test(job.batchId ?? "")) {
     throw new Error(`Initial job ${job.id} requires a valid batchId`);

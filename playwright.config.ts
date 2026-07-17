@@ -19,8 +19,11 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       GENERATION_PROVIDER: "mock",
-      GENERATE_INITIAL_CANDIDATES: "true",
-      MOCK_GENERATION_DELAY_MS: "450",
+      GENERATE_INITIAL_CANDIDATES: "false",
+      MOCK_GENERATION_DELAY_MS: "2000",
+      CHALLENGER_INITIAL_TURNAROUND_MS: "2000",
+      CHALLENGER_FALLBACK_MIN_MS: "1000",
+      CHALLENGER_FALLBACK_MAX_MS: "1000",
       LOCAL_DATA_DIR: ".local-data/test",
     },
   },
