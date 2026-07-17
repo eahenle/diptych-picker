@@ -58,7 +58,7 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
 }
 ```
 
-`kind` is `challenger` or `initial`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+`kind` is `challenger`, `initial`, or `refill`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
 
 ```json
 {
@@ -71,9 +71,31 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
 
 The remaining request fields carry the same preference context. A missing `kind` is tolerated as a legacy challenger.
 
-At coordinator startup or restart, run `npm run agent:next -- --resume --wait-ms 0` once. It prints one unterminated active request when recovery is needed, or claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
+Refill jobs carry the same preference context plus durable session and pinned-winner ownership:
 
-`npm run agent:next -- --wait-ms 30000` atomically renames one request from `pending` to `active` and never returns existing ordinary active work. Before claiming the first side of an initial batch, it atomically creates one batch ownership record and includes its unguessable `batchOwnerToken` in the printed request. Other ordinary calls skip the owner's pending partner. A wait must be between 0 and 30000 milliseconds.
+```json
+{
+  "id": "refill-job-1",
+  "kind": "refill",
+  "sessionId": "session-1",
+  "pinnedWinnerId": "candidate-id"
+}
+```
+
+`pinnedWinnerId` must equal `retainedWinner.id`. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
+
+At coordinator startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills 3` until it prints no JSON. It prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
+
+`npm run agent:next -- --wait-ms 30000 --max-refills 3` prioritizes one pending challenger or initial request. When neither is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3. The helper never mixes challenger/initial work into a refill batch and emits strict JSON:
+
+```json
+{
+  "kind": "refill-batch",
+  "jobs": [{ "id": "refill-job-1", "kind": "refill" }]
+}
+```
+
+Every returned refill must immediately receive its own fresh worker. Before claiming the first side of an initial batch, the helper atomically creates one batch ownership record and includes its unguessable `batchOwnerToken` in the printed request. Other ordinary calls skip the owner's pending partner. A wait must be between 0 and 30000 milliseconds. `--max-refills` is not accepted with owned `--batch` inspection.
 
 After receiving an initial job, use `npm run agent:next -- --wait-ms 30000 --batch <batchId> --owner-token <batchOwnerToken>`. Both arguments are required and the token must match the durable ownership record. If a call times out without JSON, repeat that same owned-batch call; do not make an ordinary next-job call while the partner is pending. Continue until the partner or terminal request appears, or the user stops the runner. For a new batch, this claims or returns the opposite-side partner before exactly two parallel workers start. On recovery, if one partner already has a completed or failed result, batch inspection returns that request with `terminalStatus: "completed"` or `"failed"`; never generate that side again and process only the unfinished request. If the unfinished partner was still pending, startup `--resume` claims it under the recovered owner token before batch inspection reports the terminal side.
 
