@@ -141,7 +141,10 @@ describe("GameService asynchronous generation", () => {
       expect(selected.round.leftCandidate).toBe(left);
       expect(selected.round.rightCandidate).toBe(right);
       expect(selected.round.status).toBe("generating");
-      expect(selected.pendingSelection?.generationJobId).toBe("job-1");
+      expect(selected.pendingSelection).toMatchObject({
+        kind: "generation",
+        generationJobId: "job-1",
+      });
       expect(queue.enqueue).toHaveBeenCalledTimes(1);
       expect(queue.enqueue).toHaveBeenCalledWith({
         id: "job-1",

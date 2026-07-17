@@ -61,6 +61,7 @@ function generatingGame(
   game.round.status = "generating";
   game.round.replacingSide = winnerSide === "left" ? "right" : "left";
   game.pendingSelection = {
+    kind: "generation",
     winnerSide,
     selectedAt: "2026-07-16T12:00:01.000Z",
     generationJobId,

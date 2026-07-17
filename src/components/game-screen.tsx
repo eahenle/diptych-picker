@@ -93,6 +93,7 @@ function matchingPendingSelection(
   return (
     selection.generationJobId !== null &&
     server.round.roundNumber === selection.expectedRound &&
+    server.pendingSelection?.kind === "generation" &&
     server.pendingSelection?.generationJobId === selection.generationJobId
   );
 }
@@ -378,6 +379,7 @@ export function GameScreen() {
     if (
       game?.round.status !== "generating" ||
       !game.pendingSelection ||
+      game.pendingSelection.kind !== "generation" ||
       activeSelectionRef.current
     ) {
       return;
@@ -437,7 +439,7 @@ export function GameScreen() {
         if (activeSelectionRef.current?.token !== selection.token) return;
         if (
           server.round.roundNumber === selection.expectedRound &&
-          server.pendingSelection
+          server.pendingSelection?.kind === "generation"
         ) {
           selection.generationJobId = server.pendingSelection.generationJobId;
         }
@@ -514,7 +516,10 @@ export function GameScreen() {
         setConnectionStatus(null);
         setLocalError(null);
 
-        if (server.round.status === "generating" && server.pendingSelection) {
+        if (
+          server.round.status === "generating" &&
+          server.pendingSelection?.kind === "generation"
+        ) {
           const selection: ActiveSelection = {
             token: crypto.randomUUID(),
             original: server,

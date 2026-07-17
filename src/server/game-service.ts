@@ -122,7 +122,13 @@ export class GameService {
     }
 
     const pending = current.pendingSelection;
-    if (current.round.status !== "generating" || !pending) return current;
+    if (
+      current.round.status !== "generating" ||
+      !pending ||
+      pending.kind !== "generation"
+    ) {
+      return current;
+    }
 
     const expectedJob = this.generationJob(current);
     const result = await this.mailbox.readResult(pending.generationJobId);
@@ -211,7 +217,9 @@ export class GameService {
 
   private generationJob(state: GameState): GenerationJob {
     const pending = state.pendingSelection;
-    if (!pending) throw new Error("No pending selection can be enqueued");
+    if (pending?.kind !== "generation") {
+      throw new Error("No pending generation can be enqueued");
+    }
     return {
       id: pending.generationJobId,
       kind: "challenger",
