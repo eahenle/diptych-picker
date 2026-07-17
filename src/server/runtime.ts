@@ -1,9 +1,14 @@
 import { join } from "node:path";
 import type {
+  BufferHealth,
   GameStartState,
   GameState,
   PreferenceProfile,
 } from "@/domain/game";
+import {
+  summarizeBufferHealth,
+  summarizeDisplayedEloRatings,
+} from "@/domain/challenger-state";
 import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
 import { JsonChallengerRepository } from "./challenger-repository";
@@ -18,6 +23,7 @@ import {
 } from "./initial-state";
 import { MockAgentWorker, MockGenerationMailbox } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
+import { challengerConfig } from "./challenger-config";
 
 const dataDirectory = join(
   /* turbopackIgnore: true */ process.cwd(),
@@ -96,6 +102,28 @@ export async function getOrCreateGame(): Promise<GameStartState> {
   if (start.status !== "ready") return start;
   const reconciled = await gameService.reconcile();
   return { status: "ready", game: reconciled ?? start.game };
+}
+
+export async function getBufferHealth(): Promise<BufferHealth> {
+  return summarizeBufferHealth(
+    await challengerRepository.load(),
+    challengerConfig.bufferTarget,
+    challengerConfig.poolMaximum,
+  );
+}
+
+export async function refreshBufferHealth(): Promise<BufferHealth> {
+  await gameService.reconcile();
+  return getBufferHealth();
+}
+
+export async function getDisplayedEloRatings(game: GameState) {
+  return summarizeDisplayedEloRatings(
+    await challengerRepository.load(),
+    game.round.leftCandidate.id,
+    game.round.rightCandidate.id,
+    challengerConfig.initialRating,
+  );
 }
 
 export async function updatePreferenceSeed(

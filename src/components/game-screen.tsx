@@ -6,6 +6,8 @@ import {
   isSelectionBoundWait,
   mergeServerResult,
   preferenceProfileFromSeed,
+  type BufferHealth,
+  type DisplayedEloRatings,
   type GameStartState,
   type GameState,
   type PreferenceProfile,
@@ -21,6 +23,7 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 const POLL_INTERVAL_MS = 150;
+const HEALTH_POLL_INTERVAL_MS = 2_000;
 const MAX_RECONNECT_DELAY_MS = 2_400;
 const RECONNECT_MESSAGE = "Connection interrupted. Reconnecting…";
 
@@ -34,6 +37,8 @@ interface ActiveSelection {
   polling: boolean;
   retryAttempt: number;
 }
+
+type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
 
 function reconnectDelay(attempt: number): number {
   return Math.min(
@@ -141,7 +146,13 @@ export function GameScreen() {
   );
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
+  const [bufferHealth, setBufferHealth] = useState<BufferHealth | null>(null);
+  const [eloRatings, setEloRatings] = useState<DisplayedEloRatings | null>(
+    null,
+  );
   const [reconcilingRetry, setReconcilingRetry] = useState(false);
+  const healthPollingEnabled = game !== null && bufferHealth !== null;
+  const healthRound = game?.round.roundNumber ?? null;
   const selectionLocked = useRef(false);
   const gameRef = useRef<GameState | null>(null);
   const activeSelectionRef = useRef<ActiveSelection | null>(null);
@@ -162,6 +173,8 @@ export function GameScreen() {
       setStartState(next);
       if (next.status === "ready") {
         commitGame(next.game);
+        setBufferHealth(next.bufferHealth ?? null);
+        setEloRatings(next.eloRatings ?? null);
         setPreferenceDraft(
           next.game.preferenceProfile ??
             preferenceProfileFromSeed(next.game.preferenceSeed),
@@ -169,6 +182,8 @@ export function GameScreen() {
       } else {
         gameRef.current = null;
         setGame(null);
+        setBufferHealth(null);
+        setEloRatings(null);
         setPreferenceDraft(preferenceProfileFromSeed(next.preferenceSeed));
       }
     },
@@ -237,6 +252,7 @@ export function GameScreen() {
               setLocalError(null);
               return;
             }
+            setEloRatings(response.eloRatings ?? null);
             server = response.game;
           }
           if (!isCurrent()) return;
@@ -392,6 +408,32 @@ export function GameScreen() {
   useEffect(() => cancelActiveSelection, [cancelActiveSelection]);
 
   useEffect(() => {
+    if (!healthPollingEnabled) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const health = await readJson<BufferHealth>(
+          await fetch("/api/game/health", { cache: "no-store" }),
+        );
+        if (active) setBufferHealth(health);
+      } catch {
+        // Health is supporting information; gameplay reconnects separately.
+      } finally {
+        if (active)
+          timer = setTimeout(() => void poll(), HEALTH_POLL_INTERVAL_MS);
+      }
+    };
+
+    timer = setTimeout(() => void poll(), HEALTH_POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [healthPollingEnabled, healthRound]);
+
+  useEffect(() => {
     if (
       game?.round.status !== "generating" ||
       !game.pendingSelection ||
@@ -453,8 +495,9 @@ export function GameScreen() {
           }),
           signal: selection.controller.signal,
         });
-        const server = await readJson<GameState>(response);
+        const server = await readJson<RatedGameState>(response);
         if (activeSelectionRef.current?.token !== selection.token) return;
+        setEloRatings(server.eloRatings ?? null);
         if (
           server.round.roundNumber === selection.expectedRound &&
           server.pendingSelection?.kind === "generation"
@@ -538,6 +581,7 @@ export function GameScreen() {
         }
 
         const server = response.game;
+        setEloRatings(response.eloRatings ?? null);
         await preloadChangedAssets(
           gameRef.current ?? failed,
           server,
@@ -702,6 +746,13 @@ export function GameScreen() {
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
   const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
+  const bufferStatus = bufferHealth
+    ? bufferHealth.ready >= bufferHealth.target
+      ? "ready"
+      : bufferHealth.inFlight > 0
+        ? "refilling"
+        : "low"
+    : null;
 
   return (
     <main className={styles.shell}>
@@ -764,6 +815,39 @@ export function GameScreen() {
             <span>
               Win streak <strong>{streak}</strong>
             </span>
+            {bufferHealth && bufferStatus ? (
+              <>
+                <i aria-hidden="true" />
+                <span
+                  className={styles.supplyMetric}
+                  aria-label={`Ready queue ${bufferHealth.ready} of ${bufferHealth.target}; ${bufferHealth.inFlight} generating`}
+                  title={`${bufferHealth.inFlight} challenger${bufferHealth.inFlight === 1 ? "" : "s"} generating`}
+                >
+                  <span
+                    className={styles.healthDot}
+                    data-status={bufferStatus}
+                    aria-hidden="true"
+                  />
+                  Queue
+                  <strong>
+                    {bufferHealth.ready}/{bufferHealth.target}
+                  </strong>
+                  {bufferHealth.inFlight > 0 ? (
+                    <small>+{bufferHealth.inFlight}</small>
+                  ) : null}
+                </span>
+                <i aria-hidden="true" />
+                <span
+                  className={styles.supplyMetric}
+                  aria-label={`Reusable image pool ${bufferHealth.pool} of ${bufferHealth.poolMaximum}`}
+                >
+                  Pool
+                  <strong>
+                    {bufferHealth.pool}/{bufferHealth.poolMaximum}
+                  </strong>
+                </span>
+              </>
+            ) : null}
           </section>
 
           <div className={styles.comparisonViewport}>
@@ -780,6 +864,7 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
+                eloRating={eloRatings?.left}
               />
               <CandidateCard
                 candidate={game.round.rightCandidate}
@@ -791,6 +876,7 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
+                eloRating={eloRatings?.right}
               />
             </section>
           </div>

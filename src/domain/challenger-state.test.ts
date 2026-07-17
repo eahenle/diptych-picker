@@ -7,10 +7,13 @@ import {
   popReady,
   recordGenerationTurnaround,
   refillDeficit,
+  summarizeBufferHealth,
+  summarizeDisplayedEloRatings,
   updateElo,
   type BufferedCandidate,
   type CandidateRating,
   type ChallengerState,
+  type RefillJobRecord,
 } from "./challenger-state";
 
 const candidate = (id: string): Candidate => ({
@@ -58,6 +61,26 @@ const state = (overrides: Partial<ChallengerState> = {}): ChallengerState => ({
   ...overrides,
 });
 
+const refillJob = (id: string): RefillJobRecord => ({
+  jobId: id,
+  pinnedWinnerId: "winner",
+  enqueuedAt: "2026-07-16T00:00:00.000Z",
+  expectedJob: {
+    id,
+    kind: "refill",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    roundNumber: 1,
+    winnerSide: "left",
+    retainedWinner: candidate("winner"),
+    rejectedCandidate: candidate("loser"),
+    selectionHistory: [],
+    recentConcepts: [],
+    preferenceSeed: "novel test preferences",
+    sessionId: "session-1",
+    pinnedWinnerId: "winner",
+  },
+});
+
 describe("challenger state", () => {
   it("updates equal Elo ratings after a decisive comparison", () => {
     expect(updateElo(1000, 1000, 32)).toEqual({
@@ -88,6 +111,40 @@ describe("challenger state", () => {
     const initial = state();
 
     expect(popReady(initial)).toEqual({ candidate: null, state: initial });
+  });
+
+  it("summarizes only queue, refill, and reusable-pool counts", () => {
+    expect(
+      summarizeBufferHealth(
+        state({
+          ready: [buffered("ready-1"), buffered("ready-2")],
+          refillJobs: [refillJob("job-1")],
+          ratings: [
+            rating("retained", 1016),
+            rating("excluded", 984, { poolMember: false }),
+          ],
+        }),
+        5,
+        50,
+      ),
+    ).toEqual({
+      ready: 2,
+      inFlight: 1,
+      target: 5,
+      pool: 1,
+      poolMaximum: 50,
+    });
+  });
+
+  it("rounds displayed Elo ratings and falls back for an unrated candidate", () => {
+    expect(
+      summarizeDisplayedEloRatings(
+        state({ ratings: [rating("left", 1016.49)] }),
+        "left",
+        "right",
+        1000,
+      ),
+    ).toEqual({ left: 1016, right: 1000 });
   });
 
   it("promotes a generated winner into a non-full pool without duplicating its ID", () => {
@@ -280,7 +337,7 @@ describe("challenger state", () => {
     expect(poolIds).not.toContain("winner");
   });
 
-  it("draws uniformly from eligible pool members and records fallback pacing", () => {
+  it("waits three seconds, then draws uniformly from eligible pool members", () => {
     const initial = state({
       ratings: [
         rating("current", 1000),
@@ -292,8 +349,17 @@ describe("challenger state", () => {
       generationTurnaroundEmaMs: 100_000,
     });
 
-    const result = drawFallback(initial, {
+    const armed = drawFallback(initial, {
       now: "2026-07-16T00:00:00.000Z",
+      currentCandidateIds: ["current"],
+      recentCandidateIds: ["recent"],
+      random: () => 0.75,
+    });
+    expect(armed.candidate).toBeNull();
+    expect(armed.state.nextFallbackAt).toBe("2026-07-16T00:00:03.000Z");
+
+    const result = drawFallback(armed.state, {
+      now: "2026-07-16T00:00:03.000Z",
       currentCandidateIds: ["current"],
       recentCandidateIds: ["recent"],
       random: () => 0.75,
@@ -301,14 +367,14 @@ describe("challenger state", () => {
 
     expect(result.candidate?.id).toBe("eligible-b");
     expect(result.state.consecutiveFallbackDraws).toBe(1);
-    expect(result.state.nextFallbackAt).toBe("2026-07-16T00:00:50.000Z");
+    expect(result.state.nextFallbackAt).toBeNull();
     expect(
       result.state.ratings.find((item) => item.candidate.id === "eligible-b")
         ?.lastServedAt,
-    ).toBe("2026-07-16T00:00:00.000Z");
+    ).toBe("2026-07-16T00:00:03.000Z");
   });
 
-  it("does not draw during cooldown, after two fallbacks, or without an eligible member", () => {
+  it("does not draw during the delay, after ten fallbacks, or without an eligible member", () => {
     const eligible = rating("eligible", 1000);
     const duringCooldown = state({
       ratings: [eligible],
@@ -317,7 +383,7 @@ describe("challenger state", () => {
     });
     const exhausted = state({
       ratings: [eligible],
-      consecutiveFallbackDraws: 2,
+      consecutiveFallbackDraws: 10,
     });
     const excluded = state({ ratings: [eligible] });
 
@@ -347,37 +413,32 @@ describe("challenger state", () => {
     ).toBeNull();
   });
 
-  it("clamps fallback cooldown to thirty seconds and five minutes", () => {
-    const pool = [rating("eligible", 1000)];
-    const draw = (generationTurnaroundEmaMs: number) =>
-      drawFallback(state({ ratings: pool, generationTurnaroundEmaMs }), {
-        now: "2026-07-16T00:00:00.000Z",
-        currentCandidateIds: [],
-        recentCandidateIds: [],
-        random: () => 0,
-      }).state.nextFallbackAt;
-
-    expect(draw(10_000)).toBe("2026-07-16T00:00:30.000Z");
-    expect(draw(1_000_000)).toBe("2026-07-16T00:05:00.000Z");
-  });
-
-  it("accepts service-provided pacing bounds without changing defaults", () => {
+  it("accepts a service-provided delay and draw cap without changing defaults", () => {
     const initial = state({
       ratings: [rating("eligible", 1000)],
       generationTurnaroundEmaMs: 400,
     });
 
-    const result = drawFallback(initial, {
+    const armed = drawFallback(initial, {
       now: "2026-07-16T00:00:00.000Z",
       currentCandidateIds: [],
       recentCandidateIds: [],
       random: () => 0,
-      minimumCooldownMs: 100,
-      maximumCooldownMs: 250,
+      delayMs: 200,
       maximumConsecutiveDraws: 1,
     });
 
-    expect(result.state.nextFallbackAt).toBe("2026-07-16T00:00:00.200Z");
+    expect(armed.candidate).toBeNull();
+    expect(armed.state.nextFallbackAt).toBe("2026-07-16T00:00:00.200Z");
+    const result = drawFallback(armed.state, {
+      now: "2026-07-16T00:00:00.200Z",
+      currentCandidateIds: [],
+      recentCandidateIds: [],
+      random: () => 0,
+      delayMs: 200,
+      maximumConsecutiveDraws: 1,
+    });
+    expect(result.candidate?.id).toBe("eligible");
     expect(
       drawFallback(result.state, {
         now: "2026-07-16T00:00:01.000Z",

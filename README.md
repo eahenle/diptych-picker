@@ -41,7 +41,7 @@ If `GENERATE_INITIAL_CANDIDATES=true`, the browser instead shows an initializing
 
 ## Depleted-buffer fallback
 
-When no ready challenger exists, the service may draw an eligible local-pool candidate immediately. A second fallback waits for half the measured generation-turnaround EMA, clamped between `CHALLENGER_FALLBACK_MIN_MS` and `CHALLENGER_FALLBACK_MAX_MS`. A third consecutive fallback is prohibited by default: the exact winner remains visible and only the losing card shows its loading treatment until a refill arrives. Consuming a ready seed or generated challenger resets the fallback counter.
+When no ready challenger exists, the service keeps the exact winner visible and waits three seconds after the selection before drawing a random eligible local-pool candidate. It may repeat that per-selection fallback up to ten times while generation catches up; after the tenth consecutive pool draw, only the losing card shows its loading treatment until a refill arrives. Consuming a ready seed or generated challenger resets the fallback counter and delay.
 
 ## Local storage
 
@@ -67,9 +67,11 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 ## Controls
 
 - Click the complete A or B card.
+- Read each candidate's current rounded Elo score from its lower-left overlay.
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
 - Shape future challengers through **Preferences**, with separate guidance for themes, media, visual style, palette, content range, and things to avoid. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
+- The quiet **Queue** and **Pool** readouts show ready challengers, active refill work, and reusable-image capacity without exposing mailbox or candidate details.
 - **New game** requires confirmation and clears the current round and history.
 
 ## Verification
@@ -94,3 +96,4 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/repository.ts` and `initial-bootstrap.ts`: atomic local persistence behind interfaces.
 - `src/server/asset-store.ts`: immutable PNG storage and verification.
 - `src/components/game-screen.tsx`: async polling, preload-before-swap, keyboard controls, and exactly two candidate images once ready.
+- `GET /api/game/health`: a narrow live snapshot of ready, in-flight, and reusable-pool counts for the UI status readout.

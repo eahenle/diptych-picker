@@ -12,6 +12,7 @@ interface CandidateCardProps {
   label: "A" | "B";
   loading: boolean;
   disabled: boolean;
+  eloRating?: number;
   onSelect: (side: Side) => void;
 }
 
@@ -21,6 +22,7 @@ export const CandidateCard = memo(function CandidateCard({
   label,
   loading,
   disabled,
+  eloRating,
   onSelect,
 }: CandidateCardProps) {
   return (
@@ -29,7 +31,7 @@ export const CandidateCard = memo(function CandidateCard({
       className={`${styles.candidateCard} ${styles[side]}`}
       onClick={() => onSelect(side)}
       disabled={disabled}
-      aria-label={`Choose image ${label}: ${candidate.concept}`}
+      aria-label={`Choose image ${label}: ${candidate.concept}${eloRating === undefined ? "" : `. Elo rating ${eloRating}`}`}
       data-testid={`candidate-card-${side}`}
       data-candidate-id={candidate.id}
     >
@@ -45,6 +47,11 @@ export const CandidateCard = memo(function CandidateCard({
         {label}
       </span>
       <span className={styles.conceptLabel}>{candidate.concept}</span>
+      {eloRating === undefined ? null : (
+        <span className={styles.eloLabel} aria-hidden="true">
+          Elo <strong>{eloRating}</strong>
+        </span>
+      )}
       {loading ? (
         <span
           className={styles.loadingVeil}
@@ -52,7 +59,7 @@ export const CandidateCard = memo(function CandidateCard({
           aria-live="polite"
         >
           <span className={styles.spinner} aria-hidden="true" />
-          <span>Creating challenger</span>
+          <span>Loading</span>
         </span>
       ) : null}
     </button>

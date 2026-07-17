@@ -101,6 +101,16 @@ test("starts with five durable challengers and adapts two independent images to 
   const stored = await challengerState();
 
   expect(stored.ready).toHaveLength(5);
+  await expect(
+    page.getByLabel("Ready queue 5 of 5; 0 generating"),
+  ).toBeVisible();
+  await expect(page.getByLabel("Reusable image pool 7 of 50")).toBeVisible();
+  await expect(page.getByTestId("candidate-card-left")).toContainText(
+    /Elo\s*1000/,
+  );
+  await expect(page.getByTestId("candidate-card-right")).toContainText(
+    /Elo\s*1000/,
+  );
   expect(stored.ready.map(({ candidate }) => candidate.id)).not.toContain(
     displayedIds[0],
   );
@@ -308,23 +318,22 @@ test("double click consumes one challenger and advances one round", async ({
   expect((await challengerState()).ready).toHaveLength(4);
 });
 
-test("paces a second fallback, blocks a third, and explains deferred Preferences save", async ({
+test("delays pool fallback, blocks an eleventh, and explains deferred Preferences save", async ({
   page,
 }) => {
   await updateChallengerState((state) => ({ ...state, ready: [] }));
 
-  await select(page, "left", 2);
-  const winner = page.getByTestId("candidate-image").nth(0);
-  const winnerUrl = await winner.getAttribute("src");
-
-  const secondResponse = page.waitForResponse(
+  const firstResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/game/select") &&
       response.request().method() === "POST",
   );
   await page.getByTestId("candidate-card-left").click();
-  expect((await secondResponse).status()).toBe(202);
+  expect((await firstResponse).status()).toBe(202);
   await expect(page.getByTestId("loading-right")).toBeVisible();
+  await expect(page.getByText("Loading")).toBeVisible();
+  const winner = page.getByTestId("candidate-image").nth(0);
+  const winnerUrl = await winner.getAttribute("src");
   await expect(page.getByRole("button", { name: "Preferences" })).toBeEnabled();
   await page.getByRole("button", { name: "Preferences" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -334,24 +343,30 @@ test("paces a second fallback, blocks a third, and explains deferred Preferences
   await expect(
     page.getByText("Changes can be saved after this challenger arrives."),
   ).toBeVisible();
-  await expect(page.getByText("Round 3", { exact: true })).toBeVisible();
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Save profile" }),
   ).toBeEnabled();
   await page.getByRole("button", { name: "Cancel" }).click();
 
-  const thirdResponse = page.waitForResponse(
+  await updateChallengerState((state) => ({
+    ...state,
+    ready: [],
+    consecutiveFallbackDraws: 10,
+  }));
+
+  const eleventhResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/game/select") &&
       response.request().method() === "POST",
   );
   await page.getByTestId("candidate-card-left").click();
-  expect((await thirdResponse).status()).toBe(202);
+  expect((await eleventhResponse).status()).toBe(202);
   await expect(page.getByTestId("loading-right")).toBeVisible();
   await expect(page.getByTestId("loading-left")).toHaveCount(0);
   await expect(winner).toHaveAttribute("src", winnerUrl!);
   await page.waitForTimeout(300);
   await expect(page.getByTestId("loading-right")).toBeVisible();
-  expect((await challengerState()).consecutiveFallbackDraws).toBe(2);
-  await expect(page.getByText("Round 4", { exact: true })).toBeVisible();
+  expect((await challengerState()).consecutiveFallbackDraws).toBe(10);
+  await expect(page.getByText("Round 3", { exact: true })).toBeVisible();
 });

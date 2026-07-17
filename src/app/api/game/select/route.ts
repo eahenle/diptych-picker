@@ -4,7 +4,7 @@ import {
   MissingGameError,
   SelectionConflictError,
 } from "@/server/game-service";
-import { gameService } from "@/server/runtime";
+import { gameService, getDisplayedEloRatings } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +23,12 @@ export async function POST(request: Request) {
       parsed.data.winnerSide,
       parsed.data.roundNumber,
     );
-    return NextResponse.json(game, {
-      status: game.round.status === "idle" ? 200 : 202,
-    });
+    return NextResponse.json(
+      { ...game, eloRatings: await getDisplayedEloRatings(game) },
+      {
+        status: game.round.status === "idle" ? 200 : 202,
+      },
+    );
   } catch (error) {
     if (error instanceof SelectionConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });

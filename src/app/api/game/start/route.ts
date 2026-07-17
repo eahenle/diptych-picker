@@ -1,12 +1,25 @@
 import { NextResponse } from "next/server";
 import { SelectionConflictError } from "@/server/game-service";
-import { resetGame } from "@/server/runtime";
+import {
+  getBufferHealth,
+  getDisplayedEloRatings,
+  resetGame,
+} from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
-    return NextResponse.json(await resetGame());
+    const state = await resetGame();
+    return NextResponse.json(
+      state.status === "ready"
+        ? {
+            ...state,
+            bufferHealth: await getBufferHealth(),
+            eloRatings: await getDisplayedEloRatings(state.game),
+          }
+        : state,
+    );
   } catch (error) {
     if (error instanceof SelectionConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });

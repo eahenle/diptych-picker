@@ -1,11 +1,16 @@
-import type { Candidate, SelectionHistory, Side } from "./game";
+import type {
+  BufferHealth,
+  Candidate,
+  DisplayedEloRatings,
+  SelectionHistory,
+  Side,
+} from "./game";
 
 const DEFAULT_POOL_MAXIMUM = 50;
 const DEFAULT_READY_TARGET = 5;
 const DEFAULT_TURNAROUND_ALPHA = 0.25;
-const MAX_CONSECUTIVE_FALLBACK_DRAWS = 2;
-const MIN_FALLBACK_COOLDOWN_MS = 30_000;
-const MAX_FALLBACK_COOLDOWN_MS = 300_000;
+const MAX_CONSECUTIVE_FALLBACK_DRAWS = 10;
+const FALLBACK_DRAW_DELAY_MS = 3_000;
 
 export interface CandidateRating {
   candidate: Candidate;
@@ -81,9 +86,37 @@ export interface FallbackDrawOptions {
   currentCandidateIds: readonly string[];
   recentCandidateIds: readonly string[];
   random: () => number;
-  minimumCooldownMs?: number;
-  maximumCooldownMs?: number;
+  delayMs?: number;
   maximumConsecutiveDraws?: number;
+}
+
+export function summarizeBufferHealth(
+  state: ChallengerState | null,
+  target = DEFAULT_READY_TARGET,
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): BufferHealth {
+  return {
+    ready: state?.ready.length ?? 0,
+    inFlight: state?.refillJobs.length ?? 0,
+    target,
+    pool: state?.ratings.filter((item) => item.poolMember).length ?? 0,
+    poolMaximum,
+  };
+}
+
+export function summarizeDisplayedEloRatings(
+  state: ChallengerState | null,
+  leftCandidateId: string,
+  rightCandidateId: string,
+  initialRating = 1000,
+): DisplayedEloRatings {
+  const ratings = new Map(
+    state?.ratings.map((item) => [item.candidate.id, item.rating]) ?? [],
+  );
+  return {
+    left: Math.round(ratings.get(leftCandidateId) ?? initialRating),
+    right: Math.round(ratings.get(rightCandidateId) ?? initialRating),
+  };
 }
 
 function roundRating(rating: number): number {
@@ -208,11 +241,10 @@ export function drawFallback(
   state: ChallengerState,
   options: FallbackDrawOptions,
 ): CandidateDraw {
+  const delayMs = options.delayMs ?? FALLBACK_DRAW_DELAY_MS;
   if (
     state.consecutiveFallbackDraws >=
-      (options.maximumConsecutiveDraws ?? MAX_CONSECUTIVE_FALLBACK_DRAWS) ||
-    (state.nextFallbackAt !== null &&
-      Date.parse(options.now) < Date.parse(state.nextFallbackAt))
+    (options.maximumConsecutiveDraws ?? MAX_CONSECUTIVE_FALLBACK_DRAWS)
   ) {
     return { candidate: null, state };
   }
@@ -226,22 +258,27 @@ export function drawFallback(
   );
   if (eligible.length === 0) return { candidate: null, state };
 
+  if (state.nextFallbackAt === null) {
+    return {
+      candidate: null,
+      state: {
+        ...state,
+        nextFallbackAt: new Date(
+          Date.parse(options.now) + delayMs,
+        ).toISOString(),
+      },
+    };
+  }
+
+  if (Date.parse(options.now) < Date.parse(state.nextFallbackAt)) {
+    return { candidate: null, state };
+  }
+
   const index = Math.min(
     Math.floor(options.random() * eligible.length),
     eligible.length - 1,
   );
   const selected = eligible[index];
-  const cooldownMs = Math.min(
-    options.maximumCooldownMs ?? MAX_FALLBACK_COOLDOWN_MS,
-    Math.max(
-      options.minimumCooldownMs ?? MIN_FALLBACK_COOLDOWN_MS,
-      state.generationTurnaroundEmaMs * 0.5,
-    ),
-  );
-  const nextFallbackAt = new Date(
-    Date.parse(options.now) + cooldownMs,
-  ).toISOString();
-
   return {
     candidate: selected.candidate,
     state: {
@@ -250,7 +287,7 @@ export function drawFallback(
         item === selected ? { ...item, lastServedAt: options.now } : item,
       ),
       consecutiveFallbackDraws: state.consecutiveFallbackDraws + 1,
-      nextFallbackAt,
+      nextFallbackAt: null,
     },
   };
 }
