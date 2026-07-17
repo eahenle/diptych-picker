@@ -724,3 +724,140 @@ describe("GameScreen challenger reconciliation", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
   });
 });
+
+describe("GameScreen game state transfer", () => {
+  it("opens a save/reset dialog instead of immediately clearing the game", async () => {
+    const confirm = vi.fn();
+    vi.stubGlobal("confirm", confirm);
+    const fetchMock = vi.fn(async () =>
+      json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "New game" }));
+
+    expect(screen.getByRole("dialog", { name: "New game" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Export current game" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Load saved game" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Start new game" }),
+    ).toBeVisible();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads the server-provided current-game snapshot", async () => {
+    const snapshot = JSON.stringify({
+      format: "diptych-picker-game",
+      version: 1,
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/api/game/snapshot")
+        ? new Response(snapshot, {
+            headers: {
+              "Content-Type": "application/json",
+              "Content-Disposition":
+                'attachment; filename="diptych-picker-round-8.json"',
+            },
+          })
+        : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const NativeURL = URL;
+    const createObjectURL = vi.fn(() => "blob:game-save");
+    const revokeObjectURL = vi.fn();
+    class DownloadURL extends NativeURL {
+      static createObjectURL = createObjectURL;
+      static revokeObjectURL = revokeObjectURL;
+    }
+    vi.stubGlobal("URL", DownloadURL);
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "New game" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Export current game" }),
+    );
+
+    await waitFor(() => expect(click).toHaveBeenCalledOnce());
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:game-save");
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/snapshot", {
+      cache: "no-store",
+    });
+  });
+
+  it("starts fresh only after the explicit dialog action", async () => {
+    const fresh = cloneGame();
+    fresh.round.roundNumber = 1;
+    const current = cloneGame();
+    current.round.roundNumber = 9;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json({ status: "ready", game: fresh })
+          : json({ status: "ready", game: current }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "New game" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start new game" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Game status" }),
+      ).toHaveTextContent("Round 1"),
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/start", {
+      method: "POST",
+    });
+  });
+
+  it("loads a saved game and replaces the visible round", async () => {
+    installSuccessfulImagePreload();
+    const restored = completedGame();
+    restored.round.roundNumber = 12;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith("/api/game/snapshot") && init?.method === "PUT"
+          ? json({ status: "ready", game: restored })
+          : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "New game" }));
+    const save = new File(["{}"], "saved-game.json", {
+      type: "application/json",
+    });
+    fireEvent.change(screen.getByLabelText("Choose saved game file"), {
+      target: { files: [save] },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Game status" }),
+      ).toHaveTextContent("Round 12"),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "New game" }),
+    ).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/snapshot", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  });
+});

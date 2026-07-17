@@ -5,6 +5,8 @@ const getBufferHealth = vi.fn();
 const getDisplayedEloRatings = vi.fn();
 const refreshBufferHealth = vi.fn();
 const resetGame = vi.fn();
+const exportGameSnapshot = vi.fn();
+const importGameSnapshot = vi.fn();
 const select = vi.fn();
 const updatePreferenceSeed = vi.fn();
 
@@ -15,6 +17,8 @@ vi.mock("@/server/runtime", () => ({
   getOrCreateGame,
   refreshBufferHealth,
   resetGame,
+  exportGameSnapshot,
+  importGameSnapshot,
   gameService: { select },
   updatePreferenceSeed,
 }));
@@ -109,6 +113,82 @@ describe("POST /api/game/start", () => {
       bufferHealth: { ready: 5, pool: 7 },
       eloRatings: { left: 1016, right: 984 },
     });
+  });
+});
+
+describe("GET and PUT /api/game/snapshot", () => {
+  beforeEach(() => {
+    exportGameSnapshot.mockReset();
+    importGameSnapshot.mockReset();
+    exportGameSnapshot.mockResolvedValue({
+      format: "diptych-picker-game",
+      version: 1,
+      exportedAt: "2026-07-17T12:00:00.000Z",
+      game: { round: { roundNumber: 8 } },
+      challengers: { sessionId: "session" },
+    });
+    importGameSnapshot.mockResolvedValue({
+      round: { status: "idle", roundNumber: 8 },
+    });
+    getBufferHealth.mockResolvedValue({
+      ready: 3,
+      inFlight: 2,
+      target: 5,
+      pool: 20,
+      poolMaximum: 50,
+    });
+  });
+
+  it("downloads a named, no-store JSON snapshot", async () => {
+    const { GET } = await import("./snapshot/route");
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="diptych-picker-round-8-2026-07-17.json"',
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      format: "diptych-picker-game",
+      version: 1,
+    });
+  });
+
+  it("imports a JSON snapshot and returns the ready restored game", async () => {
+    const save = { format: "diptych-picker-game", version: 1 };
+    const { PUT } = await import("./snapshot/route");
+
+    const response = await PUT(
+      new Request("http://localhost/api/game/snapshot", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(save),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(importGameSnapshot).toHaveBeenCalledWith(save);
+    expect(await response.json()).toMatchObject({
+      status: "ready",
+      game: { round: { roundNumber: 8 } },
+      bufferHealth: { ready: 3, inFlight: 2 },
+      eloRatings: { left: 1016, right: 984 },
+    });
+  });
+
+  it("rejects malformed JSON without attempting an import", async () => {
+    const { PUT } = await import("./snapshot/route");
+
+    const response = await PUT(
+      new Request("http://localhost/api/game/snapshot", {
+        method: "PUT",
+        body: "{not-json",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(importGameSnapshot).not.toHaveBeenCalled();
   });
 });
 

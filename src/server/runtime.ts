@@ -1,6 +1,8 @@
+import { isDeepStrictEqual } from "node:util";
 import { join } from "node:path";
 import type {
   BufferHealth,
+  Candidate,
   GameStartState,
   GameState,
   PreferenceProfile,
@@ -13,6 +15,7 @@ import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
 import { JsonChallengerRepository } from "./challenger-repository";
 import { GameService } from "./game-service";
+import { GameSnapshotService, type GameSnapshot } from "./game-snapshot";
 import { JsonInitialBootstrapRepository } from "./initial-bootstrap";
 import { InitialGameService } from "./initial-game";
 import {
@@ -91,10 +94,55 @@ export const initialGameService = new InitialGameService({
   initialContext: initialCandidateContext,
   preferenceSeed: DEFAULT_PREFERENCE_SEED,
 });
+let verifiedCuratedCandidates: Promise<readonly Candidate[]> | null = null;
+const gameSnapshotService = new GameSnapshotService({
+  gameRepository: repository,
+  challengerRepository,
+  bootstrapRepository: initialBootstrapRepository,
+  mailbox: generationMailbox,
+  verifyCandidateAsset: async (candidate, source) => {
+    if (source === "generated") {
+      await assetStore.verifyExistingPng(`${candidate.id}.png`);
+      return;
+    }
+    if (!/^\/seed-assets\/[a-zA-Z0-9-]+\.png$/.test(candidate.imageUrl))
+      throw new Error(`Invalid curated asset URL for ${candidate.id}`);
+    verifiedCuratedCandidates ??= loadCuratedCandidates(candidate.createdAt);
+    const expected = (await verifiedCuratedCandidates).find(
+      ({ id }) => id === candidate.id,
+    );
+    if (
+      !expected ||
+      expected.imageUrl !== candidate.imageUrl ||
+      expected.prompt !== candidate.prompt ||
+      expected.concept !== candidate.concept ||
+      !isDeepStrictEqual(expected.style, candidate.style)
+    ) {
+      throw new Error(
+        `Curated candidate metadata does not match ${candidate.id}`,
+      );
+    }
+  },
+});
 
 export async function resetGame(): Promise<GameStartState> {
   await gameService.assertIdle();
   return initialGameService.reset();
+}
+
+export async function exportGameSnapshot(): Promise<GameSnapshot> {
+  const state = await getOrCreateGame();
+  if (state.status !== "ready") {
+    throw new Error("Wait for the initial comparison before exporting");
+  }
+  return gameSnapshotService.export();
+}
+
+export async function importGameSnapshot(value: unknown): Promise<GameState> {
+  await gameService.assertIdle();
+  const imported = await gameSnapshotService.import(value);
+  await gameService.ensureRefillCapacity();
+  return (await gameService.reconcile()) ?? imported;
 }
 
 export async function getOrCreateGame(): Promise<GameStartState> {

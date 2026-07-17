@@ -39,6 +39,9 @@ interface ActiveSelection {
 }
 
 type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
+type GameTransferAction = "exporting" | "importing" | "resetting";
+
+const MAX_GAME_SAVE_BYTES = 25 * 1024 * 1024;
 
 function reconnectDelay(attempt: number): number {
   return Math.min(
@@ -141,6 +144,12 @@ export function GameScreen() {
   const [initializing, setInitializing] = useState(true);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [newGameOpen, setNewGameOpen] = useState(false);
+  const [gameTransferAction, setGameTransferAction] =
+    useState<GameTransferAction | null>(null);
+  const [gameTransferError, setGameTransferError] = useState<string | null>(
+    null,
+  );
   const [preferenceDraft, setPreferenceDraft] = useState<PreferenceProfile>(
     () => preferenceProfileFromSeed(""),
   );
@@ -162,6 +171,7 @@ export function GameScreen() {
     null,
   );
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const commitGame = useCallback((next: GameState) => {
     gameRef.current = next;
@@ -659,29 +669,104 @@ export function GameScreen() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [select]);
 
-  const newGame = async () => {
-    if (
-      !window.confirm(
-        "Start a new game? This clears the current round and selection history.",
-      )
-    )
+  const openNewGame = () => {
+    setGameTransferError(null);
+    setNewGameOpen(true);
+  };
+
+  const exportCurrentGame = async () => {
+    setGameTransferAction("exporting");
+    setGameTransferError(null);
+    try {
+      const response = await fetch("/api/game/snapshot", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Could not export this game");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename =
+        disposition.match(/filename="([^"]+)"/)?.[1] ??
+        `diptych-picker-round-${gameRef.current?.round.roundNumber ?? 1}.json`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setGameTransferError(
+        error instanceof Error ? error.message : "Could not export this game",
+      );
+    } finally {
+      setGameTransferAction(null);
+    }
+  };
+
+  const importSavedGame = async (file: File) => {
+    if (file.size > MAX_GAME_SAVE_BYTES) {
+      setGameTransferError("The selected save file is too large");
       return;
+    }
+    setGameTransferAction("importing");
+    setGameTransferError(null);
+    selectionLocked.current = true;
+    try {
+      const state = await readJson<GameStartState>(
+        await fetch("/api/game/snapshot", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: await file.text(),
+        }),
+      );
+      if (state.status !== "ready") {
+        throw new Error("The saved game did not contain a ready comparison");
+      }
+      const current = gameRef.current;
+      if (current) {
+        await preloadChangedAssets(
+          current,
+          state.game,
+          new AbortController().signal,
+        );
+      }
+      commitStartState(state);
+      setNewGameOpen(false);
+      setLocalError(null);
+    } catch (error) {
+      setGameTransferError(
+        error instanceof Error ? error.message : "Could not load this game",
+      );
+    } finally {
+      selectionLocked.current = false;
+      setGameTransferAction(null);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
+
+  const startFreshGame = async () => {
     cancelActiveSelection();
     selectionLocked.current = true;
     setInitializing(true);
+    setGameTransferAction("resetting");
+    setGameTransferError(null);
     try {
       const state = await readJson<GameStartState>(
         await fetch("/api/game/start", { method: "POST" }),
       );
       commitStartState(state);
+      setNewGameOpen(false);
       setLocalError(null);
     } catch (error) {
-      setLocalError(
+      setGameTransferError(
         error instanceof Error ? error.message : "Could not start a new game",
       );
     } finally {
       selectionLocked.current = false;
       setInitializing(false);
+      setGameTransferAction(null);
     }
   };
 
@@ -775,7 +860,7 @@ export function GameScreen() {
             disabled={
               status === "generating" || reconcilingRetry || initializing
             }
-            onClick={newGame}
+            onClick={openNewGame}
           >
             New game
           </button>
@@ -901,6 +986,122 @@ export function GameScreen() {
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {newGameOpen && game ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onMouseDown={() => {
+            if (!gameTransferAction) setNewGameOpen(false);
+          }}
+        >
+          <section
+            className={`${styles.preferencesModal} ${styles.gameStateModal}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-game-title"
+            aria-describedby="new-game-description game-save-note"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h2 id="new-game-title">New game</h2>
+            <p id="new-game-description">
+              Save this exact game before starting over, or restore a game you
+              saved earlier.
+            </p>
+            <div className={styles.transferOptions}>
+              <div className={styles.transferOption}>
+                <span>
+                  <strong>Keep this game</strong>
+                  <small>
+                    Export the round, history, preferences, queue, ratings, and
+                    pool membership.
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className={styles.utilityButton}
+                  disabled={gameTransferAction !== null}
+                  onClick={() => void exportCurrentGame()}
+                  autoFocus
+                >
+                  {gameTransferAction === "exporting"
+                    ? "Exporting…"
+                    : "Export current game"}
+                </button>
+              </div>
+              <div className={styles.transferOption}>
+                <span>
+                  <strong>Return to a saved game</strong>
+                  <small>
+                    Loading a save replaces the current round and learned state
+                    after validation.
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className={styles.utilityButton}
+                  disabled={gameTransferAction !== null}
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  {gameTransferAction === "importing"
+                    ? "Loading…"
+                    : "Load saved game"}
+                </button>
+                <input
+                  ref={importInputRef}
+                  className={styles.fileInput}
+                  type="file"
+                  accept="application/json,.json"
+                  aria-label="Choose saved game file"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importSavedGame(file);
+                  }}
+                />
+              </div>
+            </div>
+            <p id="game-save-note" className={styles.gameSaveNote}>
+              Save files use this installation&apos;s immutable image library;
+              missing local images are rejected without changing the current
+              game.
+            </p>
+            {gameTransferError ? (
+              <p className={styles.transferError} role="alert">
+                {gameTransferError}
+              </p>
+            ) : null}
+            <div className={styles.freshGameSection}>
+              <span>
+                <strong>Start fresh</strong>
+                <small>
+                  Clears the current round, history, and preference profile.
+                  Learned pool ratings and image files stay available.
+                </small>
+              </span>
+              <button
+                type="button"
+                className={styles.newGameButton}
+                disabled={gameTransferAction !== null}
+                onClick={() => void startFreshGame()}
+              >
+                {gameTransferAction === "resetting"
+                  ? "Starting…"
+                  : "Start new game"}
+              </button>
+            </div>
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.utilityButton}
+                disabled={gameTransferAction !== null}
+                onClick={() => setNewGameOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {preferencesOpen && game ? (

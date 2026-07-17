@@ -31,6 +31,10 @@ When generation falls behind, keep the selected winner fixed, wait three seconds
 
 Show each candidate's current rounded Elo score in a compact lower-left image overlay. Keep it visually subordinate to the artwork, expose the same value in the card's accessible name, and refresh it after every comparison.
 
+### Saved games
+
+Replace the destructive native New Game confirmation with an in-app decision point: export the exact current game, load a previous save, start fresh, or cancel. A save preserves the round, history, detailed preferences, ready queue, Elo ratings, and pool membership while excluding session-bound generator jobs. Loading validates the entire document and every referenced immutable local image before changing current state, then creates a fresh refill session.
+
 ## Future feature ideas
 
 Exploration only; these are not yet roadmap commitments.

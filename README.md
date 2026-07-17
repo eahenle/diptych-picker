@@ -58,6 +58,8 @@ Game, challenger, and bootstrap repositories use atomic writes and a fixed local
 
 `GET /api/game` and `POST /api/game/start` return a tagged state: `{ status: "ready", game }`, `{ status: "initializing", ... }`, or `{ status: "initialization-error", ... }`.
 
+`GET /api/game/snapshot` downloads a versioned JSON save containing the restorable round, history, preference profile, ready queue, Elo ratings, and pool membership. `PUT /api/game/snapshot` validates the complete document and every referenced immutable local image before replacing state. In-flight job IDs are deliberately excluded; restored games start a fresh session and request any missing refill capacity safely. Save files therefore reload on installations that still have their referenced local image library.
+
 ## Mock mode
 
 Automated tests set `GENERATION_PROVIDER=mock`. This enables a deterministic in-process mailbox worker that creates local PNGs and makes no model, network, or API calls. Normal CLI-backed use leaves `GENERATION_PROVIDER=agent` (or unset).
@@ -72,7 +74,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Press `B` or `2` for the right image.
 - Shape future challengers through **Preferences**, with separate guidance for themes, media, visual style, palette, content range, and things to avoid. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
 - The quiet **Queue** and **Pool** readouts show ready challengers, active refill work, and reusable-image capacity without exposing mailbox or candidate details.
-- **New game** requires confirmation and clears the current round and history.
+- **New game** opens a save/restore dialog. Export the exact current game, load a prior JSON save, or start fresh; starting fresh clears the round, history, and preference profile while retaining learned pool ratings and immutable images.
 
 ## Verification
 
@@ -84,7 +86,7 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, and winner-node preservation.
+Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, and winner-node preservation.
 
 ## Architecture
 
@@ -92,8 +94,10 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/domain/game.ts` and `challenger-state.ts`: round transitions, winner identity, FIFO/pool state, Elo, and fallback pacing.
 - `src/server/agent-mailbox.ts`: validated durable job/result protocol and restart recovery.
 - `src/server/game-service.ts`: transactional selection, buffer/refill coordination, result verification, winner-preserving reconciliation, and cleanup retry.
+- `src/server/game-snapshot.ts`: versioned save validation, asset verification, fresh-session restore, and stale-job exclusion.
 - `src/server/initial-game.ts`: seed-or-generated initial-pair orchestration.
 - `src/server/repository.ts` and `initial-bootstrap.ts`: atomic local persistence behind interfaces.
 - `src/server/asset-store.ts`: immutable PNG storage and verification.
 - `src/components/game-screen.tsx`: async polling, preload-before-swap, keyboard controls, and exactly two candidate images once ready.
 - `GET /api/game/health`: a narrow live snapshot of ready, in-flight, and reusable-pool counts for the UI status readout.
+- `GET` and `PUT /api/game/snapshot`: download and restore validated local game saves.

@@ -114,3 +114,37 @@ describe("LocalAssetStore.verify", () => {
     await expect(store.verify(metadata(bytes.length))).resolves.toBeUndefined();
   });
 });
+
+describe("LocalAssetStore.verifyExistingPng", () => {
+  it("fully decodes an existing square PNG", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-assets-"));
+    const store = new LocalAssetStore(directory);
+    await writeFile(join(directory, "candidate.png"), await squarePng());
+
+    await expect(
+      store.verifyExistingPng("candidate.png"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects corrupt or non-square existing assets", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-assets-"));
+    const store = new LocalAssetStore(directory);
+    await writeFile(join(directory, "corrupt.png"), Buffer.from("not a png"));
+    const rectangle = await sharp({
+      create: {
+        width: 8,
+        height: 4,
+        channels: 4,
+        background: "#46145a",
+      },
+    })
+      .png()
+      .toBuffer();
+    await writeFile(join(directory, "rectangle.png"), rectangle);
+
+    await expect(store.verifyExistingPng("corrupt.png")).rejects.toThrow();
+    await expect(store.verifyExistingPng("rectangle.png")).rejects.toThrow(
+      /square PNG/i,
+    );
+  });
+});

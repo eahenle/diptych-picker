@@ -365,6 +365,61 @@
   color: var(--muted);
   font-size: 13px;
 }
+.gameStateModal {
+  width: min(680px, 100%);
+}
+.transferOptions {
+  display: grid;
+  gap: 10px;
+}
+.transferOption,
+.freshGameSection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid #383337;
+  background: #090b0d;
+}
+.transferOption > span,
+.freshGameSection > span {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.transferOption strong,
+.freshGameSection strong {
+  color: #e4ddd5;
+  font-size: 13px;
+}
+.transferOption small,
+.freshGameSection small {
+  color: #8f8984;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.fileInput {
+  display: none;
+}
+.preferencesModal p.gameSaveNote {
+  margin: 12px 2px 0;
+  color: #817b77;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.preferencesModal p.transferError {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(183, 77, 66, 0.55);
+  background: rgba(183, 77, 66, 0.1);
+  color: #e0b4ae;
+  font-size: 12px;
+}
+.freshGameSection {
+  margin-top: 22px;
+  border-color: rgba(180, 104, 73, 0.45);
+}
 .preferenceGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -530,6 +585,14 @@
   .preferencesModal {
     max-height: calc(100vh - 24px);
     padding: 22px 18px;
+  }
+  .transferOption,
+  .freshGameSection {
+    grid-template-columns: 1fr;
+  }
+  .transferOption button,
+  .freshGameSection button {
+    width: 100%;
   }
   .preferenceGrid {
     grid-template-columns: 1fr;
