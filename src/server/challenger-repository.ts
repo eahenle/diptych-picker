@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { ChallengerState } from "@/domain/challenger-state";
+import { GENERATION_JOB_ID_PATTERN } from "@/domain/game";
 import { z } from "zod";
 
 export interface ChallengerRepository {
@@ -43,6 +44,39 @@ const candidateSchema = z
   })
   .strict();
 
+const selectionHistorySchema = z
+  .object({
+    winnerId: z.string().min(1),
+    loserId: z.string().min(1),
+    winnerPrompt: z.string().min(1),
+    loserPrompt: z.string().min(1),
+    winnerConcept: z.string().min(1),
+    loserConcept: z.string().min(1),
+    selectedAt: z.string().min(1),
+  })
+  .strict();
+
+const refillGenerationJobSnapshotSchema = z
+  .object({
+    id: z.string().regex(GENERATION_JOB_ID_PATTERN),
+    kind: z.literal("refill"),
+    createdAt: z.string().min(1),
+    roundNumber: z.number().int().positive(),
+    winnerSide: z.enum(["left", "right"]),
+    retainedWinner: candidateSchema,
+    rejectedCandidate: candidateSchema,
+    selectionHistory: z.array(selectionHistorySchema),
+    recentConcepts: z.array(z.string().min(1)),
+    preferenceSeed: z.string().min(1),
+    sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
+    pinnedWinnerId: z.string().min(1),
+  })
+  .strict()
+  .refine((job) => job.pinnedWinnerId === job.retainedWinner.id, {
+    message: "pinnedWinnerId must equal retainedWinner.id",
+    path: ["pinnedWinnerId"],
+  });
+
 const challengerStateSchema: z.ZodType<ChallengerState> = z
   .object({
     version: z.literal(1),
@@ -60,12 +94,47 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
     refillJobs: z.array(
       z
         .object({
-          jobId: z.string().min(1),
+          jobId: z.string().regex(GENERATION_JOB_ID_PATTERN),
           pinnedWinnerId: z.string().min(1),
           enqueuedAt: z.string().min(1),
+          expectedJob: refillGenerationJobSnapshotSchema,
         })
-        .strict(),
+        .strict()
+        .superRefine((record, context) => {
+          if (record.jobId !== record.expectedJob.id) {
+            context.addIssue({
+              code: "custom",
+              message: "jobId must equal expectedJob.id",
+              path: ["jobId"],
+            });
+          }
+          if (record.pinnedWinnerId !== record.expectedJob.pinnedWinnerId) {
+            context.addIssue({
+              code: "custom",
+              message: "pinnedWinnerId must equal expectedJob.pinnedWinnerId",
+              path: ["pinnedWinnerId"],
+            });
+          }
+          if (record.enqueuedAt !== record.expectedJob.createdAt) {
+            context.addIssue({
+              code: "custom",
+              message: "enqueuedAt must equal expectedJob.createdAt",
+              path: ["enqueuedAt"],
+            });
+          }
+        }),
     ),
+    pendingComparison: z
+      .object({
+        selectedAt: z.string().min(1),
+        roundNumber: z.number().int().positive(),
+        winnerSide: z.enum(["left", "right"]),
+        winnerId: z.string().min(1),
+        loserId: z.string().min(1),
+      })
+      .strict()
+      .nullable()
+      .default(null),
     ratings: z.array(
       z
         .object({
@@ -115,6 +184,7 @@ function resetSession(
     sessionId,
     ready: [],
     refillJobs: [],
+    pendingComparison: null,
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,
   });

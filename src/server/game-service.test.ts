@@ -9,7 +9,10 @@ import type {
   GenerationMailbox,
   GenerationResult,
 } from "./agent-mailbox";
-import { MemoryChallengerRepository } from "./challenger-repository";
+import {
+  MemoryChallengerRepository,
+  type ChallengerRepository,
+} from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
 import { GameService, SelectionConflictError } from "./game-service";
 import type { AssetStore } from "./providers";
@@ -175,7 +178,7 @@ function serviceFor(options: {
   game?: GameState;
   challengers?: ChallengerState;
   gameRepository?: GameRepository;
-  challengerRepository?: MemoryChallengerRepository;
+  challengerRepository?: ChallengerRepository;
   queue?: ReturnType<typeof mailbox>;
   assets?: ReturnType<typeof verifier>;
   now?: () => string;
@@ -493,6 +496,90 @@ describe("GameService challenger buffer", () => {
     ).toMatchObject({ wins: 1, rating: 1016 });
   });
 
+  it("replays an unsaved comparison exactly once after service restart", async () => {
+    const game = gameState();
+    const generatedWinner = game.round.rightCandidate;
+    const initialChallengers = challengerState(game, {
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(generatedWinner, {
+          source: "generated",
+          poolMember: false,
+        }),
+        ...challengerState(game).ready.map(({ candidate: item }) =>
+          rating(item),
+        ),
+      ],
+    });
+    const gameRepository = new MemoryGameRepository(game);
+    const backingChallengers = new MemoryChallengerRepository(
+      initialChallengers,
+    );
+    let failComparisonSave = true;
+    const challengerRepository: ChallengerRepository = {
+      load: () => backingChallengers.load(),
+      clearSession: (sessionId) =>
+        backingChallengers.clearSession(sessionId),
+      withLock: (operation) => backingChallengers.withLock(operation),
+      save: async (state) => {
+        if (failComparisonSave) {
+          failComparisonSave = false;
+          throw new Error("challenger disk unavailable");
+        }
+        await backingChallengers.save(state);
+      },
+    };
+    const queue = mailbox();
+    const first = serviceFor({
+      game,
+      gameRepository,
+      challengerRepository,
+      queue,
+      createId: ids("failed-attempt", "restart-refill"),
+    });
+
+    await expect(first.service.select("right", 3)).rejects.toThrow(
+      "challenger disk unavailable",
+    );
+    await expect(gameRepository.load()).resolves.toMatchObject({
+      round: { status: "generating", roundNumber: 3 },
+      pendingSelection: { kind: "buffer", winnerSide: "right" },
+    });
+
+    const restarted = serviceFor({
+      gameRepository,
+      challengerRepository,
+      queue,
+      createId: ids("restart-refill"),
+    });
+    const recovered = await restarted.service.reconcile();
+    await restarted.service.reconcile();
+
+    expect(recovered?.round).toMatchObject({
+      status: "idle",
+      roundNumber: 4,
+      leftCandidate: { id: "buffer-1" },
+      rightCandidate: { id: generatedWinner.id },
+    });
+    const persisted = await backingChallengers.load();
+    expect(
+      persisted?.ratings.find(
+        ({ candidate: item }) => item.id === generatedWinner.id,
+      ),
+    ).toMatchObject({
+      rating: 1016,
+      wins: 1,
+      losses: 0,
+      poolMember: true,
+    });
+    expect(
+      persisted?.ratings.find(
+        ({ candidate: item }) => item.id === game.round.leftCandidate.id,
+      ),
+    ).toMatchObject({ rating: 984, wins: 0, losses: 1 });
+    expect(recovered?.history).toHaveLength(game.history.length + 1);
+  });
+
   it("draws the first fallback immediately while excluding current and recent candidates", async () => {
     const game = gameState();
     const eligibleA = candidate("eligible-a");
@@ -757,6 +844,108 @@ describe("GameService challenger buffer", () => {
     await expect(context.challengerRepository.load()).resolves.toMatchObject({
       refillJobs: [{ jobId: "replacement-refill" }],
     });
+  });
+
+  it.each([
+    ["round number", (job: GenerationJob) => ({ ...job, roundNumber: 99 })],
+    [
+      "winner side",
+      (job: GenerationJob) => ({ ...job, winnerSide: "right" as const }),
+    ],
+    [
+      "rejected candidate",
+      (job: GenerationJob) => ({
+        ...job,
+        rejectedCandidate: candidate("tampered-rejected"),
+      }),
+    ],
+    [
+      "selection history",
+      (job: GenerationJob) => ({ ...job, selectionHistory: [] }),
+    ],
+    [
+      "recent concepts",
+      (job: GenerationJob) => ({ ...job, recentConcepts: ["tampered"] }),
+    ],
+    [
+      "preference seed",
+      (job: GenerationJob) => ({ ...job, preferenceSeed: "tampered seed" }),
+    ],
+  ])(
+    "rejects tampered %s after service restart",
+    async (_label, tamper) => {
+      const game = gameState();
+      const gameRepository = new MemoryGameRepository(game);
+      const challengerRepository = new MemoryChallengerRepository(
+        challengerState(game),
+      );
+      const queue = mailbox();
+      const first = serviceFor({
+        gameRepository,
+        challengerRepository,
+        queue,
+        createId: ids("restart-tamper", "replacement-refill"),
+      });
+      await first.service.select("left", 3);
+      const expected = queue.enqueue.mock.calls[0][0];
+      queue.setWork(tamper(expected) as GenerationJob);
+      queue.setResult(completedResult("restart-tamper"));
+      const restartedAssets = verifier();
+      const restarted = serviceFor({
+        gameRepository,
+        challengerRepository,
+        queue,
+        assets: restartedAssets,
+        createId: ids("replacement-refill"),
+      });
+
+      await restarted.service.reconcile();
+
+      expect(restartedAssets.verify).not.toHaveBeenCalled();
+      expect(queue.archive).toHaveBeenCalledWith("restart-tamper");
+      expect(
+        (await challengerRepository.load())?.ratings.some(
+          ({ candidate: item }) => item.id === "challenger-restart-tamper",
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("re-enqueues the exact persisted refill after restart when publication never happened", async () => {
+    const game = gameState();
+    const gameRepository = new MemoryGameRepository(game);
+    const challengerRepository = new MemoryChallengerRepository(
+      challengerState(game),
+    );
+    const queue = mailbox();
+    queue.enqueue.mockRejectedValueOnce(new Error("mailbox unavailable"));
+    const first = serviceFor({
+      gameRepository,
+      challengerRepository,
+      queue,
+      createId: ids("durable-refill"),
+    });
+
+    await expect(first.service.select("left", 3)).rejects.toThrow(
+      "mailbox unavailable",
+    );
+    const expected = structuredClone(queue.enqueue.mock.calls[0][0]);
+    queue.enqueue.mockClear();
+    const restarted = serviceFor({
+      gameRepository,
+      challengerRepository,
+      queue,
+      createId: ids("must-not-replace"),
+    });
+
+    await restarted.service.reconcile();
+
+    expect(queue.archive).not.toHaveBeenCalledWith("durable-refill");
+    expect(queue.enqueue).toHaveBeenCalledWith(expected);
+    expect(await queue.readWork("durable-refill")).toEqual(expected);
+    expect((await challengerRepository.load())?.refillJobs).toMatchObject([
+      { jobId: "durable-refill" },
+    ]);
   });
 
   it("recovers a lost enqueue acknowledgement from durable refill intent", async () => {

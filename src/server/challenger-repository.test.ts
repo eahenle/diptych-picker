@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import type { ChallengerState } from "@/domain/challenger-state";
+import type { GenerationJob } from "./agent-mailbox";
 import {
   JsonChallengerRepository,
   MemoryChallengerRepository,
@@ -54,6 +55,21 @@ const populatedState: ChallengerState = {
   nextFallbackAt: "2026-07-16T20:05:00.000Z",
 };
 
+const expectedRefillJob: GenerationJob = {
+  id: "job-1",
+  kind: "refill",
+  createdAt: "2026-07-16T20:02:00.000Z",
+  roundNumber: 3,
+  winnerSide: "left",
+  retainedWinner: candidate("winner-1"),
+  rejectedCandidate: candidate("loser-1"),
+  selectionHistory: [],
+  recentConcepts: ["older concept"],
+  preferenceSeed: "industrial and strange",
+  sessionId: "session-1",
+  pinnedWinnerId: "winner-1",
+};
+
 async function expectSessionReset(
   repository: ChallengerRepository,
 ): Promise<void> {
@@ -71,6 +87,25 @@ async function expectSessionReset(
 }
 
 describe("JsonChallengerRepository", () => {
+  it("strictly persists the complete expected refill job snapshot", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-refill-intent-"));
+    const file = join(directory, "challenger-state.json");
+    const repository = new JsonChallengerRepository(file);
+    const expanded = {
+      ...populatedState,
+      refillJobs: [
+        {
+          ...populatedState.refillJobs[0],
+          expectedJob: expectedRefillJob,
+        },
+      ],
+    } as ChallengerState;
+
+    await repository.save(expanded);
+
+    await expect(repository.load()).resolves.toEqual(expanded);
+  });
+
   it("atomically persists validated challenger state", async () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-challengers-"));
     const file = join(directory, "challenger-state.json");

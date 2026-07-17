@@ -1,4 +1,4 @@
-import type { Candidate } from "./game";
+import type { Candidate, SelectionHistory, Side } from "./game";
 
 const DEFAULT_POOL_MAXIMUM = 50;
 const DEFAULT_READY_TARGET = 5;
@@ -28,6 +28,30 @@ export interface RefillJobRecord {
   jobId: string;
   pinnedWinnerId: string;
   enqueuedAt: string;
+  expectedJob: RefillGenerationJobSnapshot;
+}
+
+export interface RefillGenerationJobSnapshot {
+  id: string;
+  kind: "refill";
+  createdAt: string;
+  roundNumber: number;
+  winnerSide: Side;
+  retainedWinner: Candidate;
+  rejectedCandidate: Candidate;
+  selectionHistory: SelectionHistory[];
+  recentConcepts: string[];
+  preferenceSeed: string;
+  sessionId: string;
+  pinnedWinnerId: string;
+}
+
+export interface PendingComparisonReceipt {
+  selectedAt: string;
+  roundNumber: number;
+  winnerSide: Side;
+  winnerId: string;
+  loserId: string;
 }
 
 export interface ChallengerState {
@@ -35,6 +59,7 @@ export interface ChallengerState {
   sessionId: string;
   ready: BufferedCandidate[];
   refillJobs: RefillJobRecord[];
+  pendingComparison: PendingComparisonReceipt | null;
   ratings: CandidateRating[];
   generationTurnaroundEmaMs: number;
   consecutiveFallbackDraws: number;
