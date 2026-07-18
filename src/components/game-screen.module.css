@@ -35,6 +35,18 @@
   gap: 9px;
 }
 
+.headerActions > button {
+  width: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.headerPictograph {
+  width: 19px;
+  height: 19px;
+}
+
 .utilityButton,
 .newGameButton {
   min-height: 40px;

@@ -726,7 +726,7 @@ describe("GameScreen challenger reconciliation", () => {
 });
 
 describe("GameScreen game state transfer", () => {
-  it("exposes export and load controls in the main header", async () => {
+  it("exposes accessible pictographic controls in the main header", async () => {
     const fetchMock = vi.fn(async () =>
       json({ status: "ready", game: initializedGame }),
     );
@@ -735,8 +735,12 @@ describe("GameScreen game state transfer", () => {
     render(<GameScreen />);
     await screen.findAllByTestId("candidate-image");
 
-    expect(screen.getByRole("button", { name: "Export" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Load" })).toBeVisible();
+    for (const name of ["Export", "Load", "Preferences", "New game"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toBeVisible();
+      expect(button.querySelector("svg")).not.toBeNull();
+      expect(button.textContent).toBe("");
+    }
 
     fireEvent.click(screen.getByRole("button", { name: "Load" }));
 

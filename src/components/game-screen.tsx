@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   beginSelection,
   isSelectionBoundWait,
@@ -136,6 +142,57 @@ function matchingCompletedSelection(
       ? selection.original.round.rightCandidate
       : selection.original.round.leftCandidate;
   return history?.winnerId === winner.id && history.loserId === loser.id;
+}
+
+type HeaderPictographName = "export" | "load" | "preferences" | "new";
+
+function HeaderPictograph({ name }: { name: HeaderPictographName }) {
+  const paths: Record<HeaderPictographName, ReactNode> = {
+    export: (
+      <>
+        <path d="M12 3v12" />
+        <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+        <path d="M4 19h16" />
+      </>
+    ),
+    load: (
+      <>
+        <path d="M3.5 7.5h6l2-2h9v13h-17z" />
+        <path d="M8 13h8" />
+        <path d="m13 10 3 3-3 3" />
+      </>
+    ),
+    preferences: (
+      <>
+        <path d="M4 6h8M16 6h4M4 12h3M11 12h9M4 18h10M18 18h2" />
+        <circle cx="14" cy="6" r="2" />
+        <circle cx="9" cy="12" r="2" />
+        <circle cx="16" cy="18" r="2" />
+      </>
+    ),
+    new: (
+      <>
+        <path d="M12 3v18M3 12h18" />
+        <path d="m5 4 .5 1.5L7 6l-1.5.5L5 8l-.5-1.5L3 6l1.5-.5z" />
+      </>
+    ),
+  };
+
+  return (
+    <svg
+      className={styles.headerPictograph}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {paths[name]}
+    </svg>
+  );
 }
 
 export function GameScreen() {
@@ -855,12 +912,16 @@ export function GameScreen() {
     <main className={styles.shell}>
       <header className={styles.header}>
         <h1>
-          Diptych <em>Picker</em>
+          Di<em>pycker</em>
         </h1>
         <div className={styles.headerActions}>
           <button
             type="button"
             className={styles.utilityButton}
+            aria-label={
+              gameTransferAction === "exporting" ? "Exporting game" : "Export"
+            }
+            title="Export current game"
             disabled={
               !game ||
               status === "generating" ||
@@ -870,11 +931,13 @@ export function GameScreen() {
             }
             onClick={() => void exportCurrentGame()}
           >
-            {gameTransferAction === "exporting" ? "Exporting…" : "Export"}
+            <HeaderPictograph name="export" />
           </button>
           <button
             type="button"
             className={styles.utilityButton}
+            aria-label="Load"
+            title="Load saved game"
             disabled={
               !game ||
               status === "generating" ||
@@ -884,19 +947,23 @@ export function GameScreen() {
             }
             onClick={openLoadGame}
           >
-            Load
+            <HeaderPictograph name="load" />
           </button>
           <button
             type="button"
             className={styles.utilityButton}
+            aria-label="Preferences"
+            title="Preferences"
             disabled={!game || reconcilingRetry || initializing}
             onClick={openPreferences}
           >
-            Preferences
+            <HeaderPictograph name="preferences" />
           </button>
           <button
             type="button"
             className={styles.newGameButton}
+            aria-label="New game"
+            title="New game"
             disabled={
               status === "generating" ||
               reconcilingRetry ||
@@ -905,7 +972,7 @@ export function GameScreen() {
             }
             onClick={openNewGame}
           >
-            New game
+            <HeaderPictograph name="new" />
           </button>
         </div>
       </header>

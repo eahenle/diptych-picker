@@ -80,9 +80,8 @@ test.beforeEach(async ({ page, request }) => {
     })
     .toBe("ready");
   await page.goto("/");
-  await expect(
-    page.getByRole("heading", { name: "Diptych Picker" }),
-  ).toBeVisible();
+  await expect(page).toHaveTitle("Dipycker");
+  await expect(page.getByRole("heading", { name: "Dipycker" })).toBeVisible();
   await expect(page.getByTestId("candidate-image")).toHaveCount(2);
 });
 
