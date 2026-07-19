@@ -1,6 +1,8 @@
 # Co-proc Agent Transport and Prompt Deck
 
-Status: proposed follow-up architecture; not implemented.
+Status: co-proc attachable transport and the opt-in durable-notification adapter
+are implemented on feature branches; persistent channel workers and deck state
+remain staged follow-ups.
 
 ## Objective
 
@@ -102,8 +104,8 @@ Maintain a separate, editable inspiration profile inferred from winning generate
 
 ## Delivery sequence
 
-1. Extend `co-proc` with attachable, buffered, cross-process IPC and its own tests.
-2. Add a Diptych transport adapter behind the existing generation interface while retaining durable job reconciliation.
+1. Extend `co-proc` with attachable, buffered, cross-process IPC and its own tests. Implemented on `feature/attachable-ipc`.
+2. Add a Diptych transport adapter behind the existing generation interface while retaining durable job reconciliation. Implemented as an opt-in notification adapter on `feature/co-proc-transport-adapter`.
 3. Move generation workers to persistent named channels and remove mailbox polling only after parity tests pass.
 4. Add deck persistence, weighted draw, winner updates, verdict tracking, and editor suggestions.
 5. Add blend, write-from-set, lineage UI, and winner-driven inspiration controls.

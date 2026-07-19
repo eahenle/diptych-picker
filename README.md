@@ -50,6 +50,22 @@ The selected winner is never sent through an image-editing model. Its candidate 
 
 If Codex closes during a job, the current images, ready queue, pool, and mailbox remain on disk. Reopen the `codex/personal` profile through `multi-cli` in the repository and run the skill again; startup recovery resumes unfinished refill batches and ordinary jobs. Completion and failure helpers are idempotent, and opposite terminal outcomes cannot both win.
 
+### Staged co-proc transport
+
+The optional `CO_PROC_GENERATION_CHANNEL` setting enables a low-latency
+notification adapter behind the same durable mailbox interface. The app first
+publishes the complete job to the mailbox, then sends a compact version-1
+NDJSON frame containing its ID, kind, and absolute job path to the named
+attachable `co-proc` channel. If the live channel is absent or backpressured,
+the durable enqueue still succeeds and ordinary mailbox polling recovers the
+job.
+
+Set `CO_PROC_RUNTIME_ROOT` only when `co-proc` uses a non-default runtime root.
+The adapter revalidates owner-only directory, metadata, and FIFO permissions on
+every notification. Mailbox polling remains active during this parity stage;
+persistent named workers can replace it only after end-to-end result parity is
+covered.
+
 ## Curated and learned pools
 
 Seven standalone curated PNGs and their strict manifest live under `public/seed-assets/`. A normal new game shuffles seven distinct eligible candidates: two are displayed and five fill the ready FIFO. Curated files are immutable at runtime.
@@ -117,6 +133,7 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `.agents/skills/run-diptych-picker/`: persistent coordinator workflow, protocol, and validated mailbox helper scripts.
 - `src/domain/game.ts` and `challenger-state.ts`: round transitions, winner identity, FIFO/pool state, Elo, and fallback pacing.
 - `src/server/agent-mailbox.ts`: validated durable job/result protocol and restart recovery.
+- `src/server/co-proc-generation-transport.ts`: opt-in live NDJSON notification over secure attachable `co-proc` endpoints, with durable mailbox fallback.
 - `src/server/game-service.ts`: transactional selection, buffer/refill coordination, result verification, winner-preserving reconciliation, and cleanup retry.
 - `src/server/game-snapshot.ts`: versioned save validation, asset verification, fresh-session restore, and stale-job exclusion.
 - `src/server/initial-game.ts`: seed-or-generated initial-pair orchestration.

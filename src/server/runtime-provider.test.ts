@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const originalProvider = process.env.GENERATION_PROVIDER;
+const originalCoProcChannel = process.env.CO_PROC_GENERATION_CHANNEL;
 
 describe("runtime generation provider", () => {
   afterEach(() => {
@@ -9,6 +10,11 @@ describe("runtime generation provider", () => {
       delete process.env.GENERATION_PROVIDER;
     } else {
       process.env.GENERATION_PROVIDER = originalProvider;
+    }
+    if (originalCoProcChannel === undefined) {
+      delete process.env.CO_PROC_GENERATION_CHANNEL;
+    } else {
+      process.env.CO_PROC_GENERATION_CHANNEL = originalCoProcChannel;
     }
   });
 
@@ -34,5 +40,19 @@ describe("runtime generation provider", () => {
     const { challengerRepository } = await import("./runtime");
 
     expect(challengerRepository).toBeInstanceOf(JsonChallengerRepository);
+  });
+
+  it("adds co-proc notification behind the durable mailbox when configured", async () => {
+    process.env.GENERATION_PROVIDER = "agent";
+    process.env.CO_PROC_GENERATION_CHANNEL = "gen_a";
+    vi.resetModules();
+
+    const { TransportNotifyingGenerationMailbox } =
+      await import("./co-proc-generation-transport");
+    const { generationMailbox } = await import("./runtime");
+
+    expect(generationMailbox).toBeInstanceOf(
+      TransportNotifyingGenerationMailbox,
+    );
   });
 });
