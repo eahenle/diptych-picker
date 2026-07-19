@@ -154,6 +154,10 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
   })
   .strict();
 
+export function parseChallengerState(value: unknown): ChallengerState {
+  return challengerStateSchema.parse(value);
+}
+
 const processLockTails = new Map<string, Promise<void>>();
 
 async function withProcessLock<T>(

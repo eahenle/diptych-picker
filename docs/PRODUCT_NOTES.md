@@ -31,6 +31,10 @@ When generation falls behind, keep the selected winner fixed, wait three seconds
 
 Show each candidate's current rounded Elo score in a compact lower-left image overlay. Keep it visually subordinate to the artwork, expose the same value in the card's accessible name, and refresh it after every comparison.
 
+### Saved games
+
+The main header exposes direct Export and Load controls. Export downloads the exact current game without interrupting play. Load offers to export the current game first, then accepts a previous save. New Game remains an in-app decision point for exporting, loading, starting fresh, or canceling. A save preserves the round, history, detailed preferences, ready queue, Elo ratings, and pool membership while excluding session-bound generator jobs. Loading validates the entire document and every referenced immutable local image before changing current state, then creates a fresh refill session.
+
 ## Future feature ideas
 
 Exploration only; these are not yet roadmap commitments.

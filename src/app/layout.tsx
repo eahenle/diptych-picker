@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Diptych Picker",
+  title: "Dipycker",
   description: "An iterative two-image preference game.",
 };
 

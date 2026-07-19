@@ -28,6 +28,30 @@ export class LocalAssetStore implements AssetStore {
     return readFile(join(/* turbopackIgnore: true */ this.directory, filename));
   }
 
+  async verifyExistingPng(filename: string): Promise<void> {
+    const maximumByteLength = 50 * 1024 * 1024;
+    const maximumPixels = 4096 * 4096;
+    const bytes = await this.read(filename);
+    if (bytes.length > maximumByteLength) {
+      throw new Error(
+        `Asset byte length ${bytes.length} exceeds the ${maximumByteLength} byte limit`,
+      );
+    }
+    const image = sharp(bytes, {
+      failOn: "error",
+      limitInputPixels: maximumPixels,
+    });
+    const metadata = await image.metadata();
+    if (
+      metadata.format !== "png" ||
+      !metadata.width ||
+      metadata.width !== metadata.height
+    ) {
+      throw new Error("Existing asset must be a square PNG");
+    }
+    await image.raw().toBuffer();
+  }
+
   async verify(asset: CompletedAssetMetadata): Promise<void> {
     const maximumByteLength = 50 * 1024 * 1024;
     const maximumPixels = 4096 * 4096;

@@ -80,9 +80,8 @@ test.beforeEach(async ({ page, request }) => {
     })
     .toBe("ready");
   await page.goto("/");
-  await expect(
-    page.getByRole("heading", { name: "Diptych Picker" }),
-  ).toBeVisible();
+  await expect(page).toHaveTitle("Dipycker");
+  await expect(page.getByRole("heading", { name: "Dipycker" })).toBeVisible();
   await expect(page.getByTestId("candidate-image")).toHaveCount(2);
 });
 
@@ -197,6 +196,52 @@ test("persists a fine-grained preference profile and composes generation context
   );
   expect(state.game.preferenceSeed).toContain(
     "Content range: Adult themes may be used when relevant",
+  );
+});
+
+test("exports the current game and restores it after later play", async ({
+  page,
+}) => {
+  const savePath = join(dataDirectory, "saved-round.json");
+  const originalIds = await Promise.all([
+    page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
+    page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
+  ]);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^diptych-picker-round-1-\d{4}-\d{2}-\d{2}\.json$/,
+  );
+  await download.saveAs(savePath);
+
+  await select(page, "left", 2);
+  await expect(page.getByTestId("candidate-card-right")).not.toHaveAttribute(
+    "data-candidate-id",
+    originalIds[1]!,
+  );
+
+  await page.getByRole("button", { name: "Load", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Load saved game" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Export current game first" }),
+  ).toBeVisible();
+  await page.getByLabel("Choose saved game file").setInputFiles(savePath);
+
+  await expect(page.getByText("Round 1", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("dialog", { name: "Load saved game" }),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("candidate-card-left")).toHaveAttribute(
+    "data-candidate-id",
+    originalIds[0]!,
+  );
+  await expect(page.getByTestId("candidate-card-right")).toHaveAttribute(
+    "data-candidate-id",
+    originalIds[1]!,
   );
 });
 

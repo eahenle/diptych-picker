@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { migrateGameState, type GameState } from "@/domain/game";
+import { z } from "zod";
 
 export interface GameRepository {
   load(): Promise<GameState | null>;
@@ -22,6 +23,86 @@ interface LockOwner {
 }
 
 export class RepositoryLockTimeoutError extends Error {}
+
+const candidateSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    imageUrl: z.string().trim().min(1),
+    prompt: z.string().trim().min(1),
+    concept: z.string().trim().min(1),
+    style: z.array(z.string().trim().min(1)),
+    createdAt: z.string().trim().min(1),
+    winCount: z.number().int().nonnegative(),
+    reasoningSummary: z.string().optional(),
+  })
+  .strict();
+
+const preferenceProfileSchema = z
+  .object({
+    themes: z.string(),
+    mediaTypes: z.string(),
+    visualStyle: z.string(),
+    colorPalette: z.string(),
+    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
+    avoid: z.string(),
+  })
+  .strict();
+
+const pendingSelectionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("generation"),
+      winnerSide: z.enum(["left", "right"]),
+      selectedAt: z.string().trim().min(1),
+      generationJobId: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("buffer"),
+      winnerSide: z.enum(["left", "right"]),
+      selectedAt: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
+const gameStateSchema: z.ZodType<GameState> = z
+  .object({
+    round: z
+      .object({
+        leftCandidate: candidateSchema,
+        rightCandidate: candidateSchema,
+        status: z.enum(["idle", "generating", "error"]),
+        replacingSide: z.enum(["left", "right"]).nullable(),
+        roundNumber: z.number().int().positive(),
+        retainedCandidateId: z.string().trim().min(1).nullable(),
+        winStreak: z.number().int().nonnegative(),
+      })
+      .strict(),
+    history: z.array(
+      z
+        .object({
+          winnerId: z.string().trim().min(1),
+          loserId: z.string().trim().min(1),
+          winnerPrompt: z.string().trim().min(1),
+          loserPrompt: z.string().trim().min(1),
+          winnerConcept: z.string().trim().min(1),
+          loserConcept: z.string().trim().min(1),
+          selectedAt: z.string().trim().min(1),
+        })
+        .strict(),
+    ),
+    preferenceSeed: z.string().trim().min(1),
+    preferenceProfile: preferenceProfileSchema.optional(),
+    pendingSelection: pendingSelectionSchema.optional(),
+    mailboxCleanupJobId: z.string().trim().min(1).optional(),
+    errorMessage: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+export function parseGameState(value: unknown): GameState {
+  return migrateGameState(gameStateSchema.parse(value));
+}
 
 export class JsonGameRepository implements GameRepository {
   private readonly lockTimeoutMs: number;
