@@ -28,6 +28,10 @@ import {
 import { MockAgentWorker, MockGenerationMailbox } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
 import { challengerConfig } from "./challenger-config";
+import {
+  CoProcGenerationTransport,
+  TransportNotifyingGenerationMailbox,
+} from "./co-proc-generation-transport";
 
 const dataDirectory = join(
   /* turbopackIgnore: true */ process.cwd(),
@@ -55,6 +59,7 @@ export const initialBootstrapRepository = new JsonInitialBootstrapRepository(
 );
 const mailboxDirectory = join(dataDirectory, "agent-mailbox");
 const fileGenerationMailbox = new FileGenerationMailbox(mailboxDirectory);
+const coProcGenerationChannel = process.env.CO_PROC_GENERATION_CHANNEL?.trim();
 if (mockMode && process.env.NODE_ENV === "production") {
   throw new Error("The deterministic mock worker is test-only");
 }
@@ -76,9 +81,29 @@ const mockAgent = mockMode
       delayMs: configuredMockDelay,
     })
   : null;
-export const generationMailbox = mockAgent
+const durableGenerationMailbox = mockAgent
   ? new MockGenerationMailbox(fileGenerationMailbox, mockAgent)
   : fileGenerationMailbox;
+export const generationMailbox =
+  !mockAgent && coProcGenerationChannel
+    ? new TransportNotifyingGenerationMailbox(
+        durableGenerationMailbox,
+        new CoProcGenerationTransport({
+          channel: coProcGenerationChannel,
+          runtimeRoot: process.env.CO_PROC_RUNTIME_ROOT,
+        }),
+        {
+          durableJobPath: (job) =>
+            join(mailboxDirectory, "pending", `${job.id}.json`),
+          onTransportError: (error, job) => {
+            console.warn(
+              `co-proc notification failed for ${job.id}; durable mailbox polling remains active`,
+              error,
+            );
+          },
+        },
+      )
+    : durableGenerationMailbox;
 export const gameService = new GameService(
   repository,
   challengerRepository,

@@ -593,6 +593,40 @@ describe("agent mailbox scripts", () => {
     expect(playwrightConfig).toContain('GENERATION_PROVIDER: "mock"');
   });
 
+  it("documents preference guidance as authoritative for image workers", async () => {
+    const skill = await readFile(
+      join(
+        process.cwd(),
+        ".agents",
+        "skills",
+        "run-diptych-picker",
+        "SKILL.md",
+      ),
+      "utf8",
+    );
+    const protocol = await readFile(
+      join(
+        process.cwd(),
+        ".agents",
+        "skills",
+        "run-diptych-picker",
+        "references",
+        "job-protocol.md",
+      ),
+      "utf8",
+    );
+
+    expect(skill).toContain(
+      "Treat `preferenceSeed` as the authoritative creative brief",
+    );
+    expect(skill).toContain(
+      "Retained-winner metadata, rejected-candidate metadata, history, and recent concepts are secondary",
+    );
+    expect(protocol).toContain(
+      "The preference seed is the authoritative creative brief",
+    );
+  });
+
   it("resumes completion after a crash left the outcome and matching asset", async () => {
     const root = await createDataDirectory();
     await putJob(root, "active", job("job-resume"));
