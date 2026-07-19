@@ -208,6 +208,7 @@ export function GameScreen() {
   const [gameTransferError, setGameTransferError] = useState<string | null>(
     null,
   );
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [preferenceDraft, setPreferenceDraft] = useState<PreferenceProfile>(
     () => preferenceProfileFromSeed(""),
   );
@@ -742,6 +743,7 @@ export function GameScreen() {
   const exportCurrentGame = async () => {
     setGameTransferAction("exporting");
     setGameTransferError(null);
+    setExportNotice(null);
     try {
       const response = await fetch("/api/game/snapshot", {
         cache: "no-store",
@@ -761,6 +763,12 @@ export function GameScreen() {
       link.download = filename;
       link.click();
       URL.revokeObjectURL(url);
+      const exportPath = response.headers.get("x-diptych-export-path");
+      setExportNotice(
+        exportPath
+          ? `Exported ${filename} to ${exportPath} and downloaded a copy.`
+          : `Downloaded ${filename}.`,
+      );
       setLocalError(null);
     } catch (error) {
       const message =
@@ -1093,6 +1101,11 @@ export function GameScreen() {
                   Retry
                 </button>
               ) : null}
+            </div>
+          ) : null}
+          {exportNotice && status !== "error" && !localError ? (
+            <div className={styles.exportNotice} role="status">
+              {exportNotice}
             </div>
           ) : null}
         </>

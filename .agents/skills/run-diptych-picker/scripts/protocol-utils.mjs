@@ -7,6 +7,13 @@ export function dataDirectory() {
   return resolve(process.cwd(), process.env.LOCAL_DATA_DIR ?? ".local-data");
 }
 
+export function exportDirectory() {
+  if (process.env.NODE_ENV === "test") {
+    return join(dataDirectory(), "exports");
+  }
+  return resolve(process.cwd(), "output", "artifacts");
+}
+
 export function parseArgs(values, booleanNames = []) {
   const parsed = {};
   const booleans = new Set(booleanNames);

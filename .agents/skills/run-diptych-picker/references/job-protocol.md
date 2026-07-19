@@ -20,7 +20,8 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `agent-work/<jobId>/proposal.json`: structured proposal passed by file
 - `agent-work/<jobId>/failure.txt`: failure reason passed by file
 - `agent-work/<jobId>/image.png`: worker-generated standalone image
-- `assets/<candidateId>.png`: immutable generated candidate asset
+- `assets/<sha256-of-png-bytes>.png`: immutable content-addressed generated candidate asset
+- `output/artifacts/<sha256-of-png-bytes>.png`: discoverable immutable export of every completed candidate
 
 Only the helper scripts move or create mailbox artifacts. The app archives terminal artifacts after reconciling them into game state.
 
@@ -84,9 +85,9 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 `pinnedWinnerId` must equal `retainedWinner.id`. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
 
-At coordinator startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills 3` until it prints no JSON. It prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
+At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
-`npm run agent:next -- --wait-ms 30000 --max-refills 3` prioritizes one pending challenger or initial request. When neither is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3. The helper never mixes challenger/initial work into a refill batch and emits strict JSON:
+`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger or initial request. When neither is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes challenger/initial work into a refill batch and emits strict JSON:
 
 ```json
 {
@@ -116,7 +117,7 @@ Every proposal string, including each `styleTags` entry, is trimmed and must con
 
 ## Completed result
 
-`npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png"` requires the matching active job. It rejects inputs over 50 MB or 4096 by 4096 pixels, then uses Sharp to identify and fully decode exactly one square PNG. It reserves the `completed` outcome, creates `assets/challenger-<jobId>.png` without overwriting, and atomically publishes:
+`npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png"` requires the matching active job. It rejects inputs over 50 MB or 4096 by 4096 pixels, then uses Sharp to identify and fully decode exactly one square PNG. It reserves the `completed` outcome, hashes the exact PNG bytes with SHA-256, creates `assets/<sha256>.png` and `output/artifacts/<sha256>.png` without overwriting, and atomically publishes:
 
 ```json
 {
@@ -131,8 +132,8 @@ Every proposal string, including each `styleTags` entry, is trimmed and must con
   },
   "asset": {
     "candidateId": "challenger-job-id",
-    "filename": "challenger-job-id.png",
-    "imageUrl": "/api/assets/challenger-job-id.png",
+    "filename": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+    "imageUrl": "/api/assets/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
     "contentType": "image/png",
     "width": 1024,
     "height": 1024,

@@ -7,6 +7,7 @@ const refreshBufferHealth = vi.fn();
 const resetGame = vi.fn();
 const exportGameSnapshot = vi.fn();
 const importGameSnapshot = vi.fn();
+const publishGameExport = vi.fn();
 const select = vi.fn();
 const updatePreferenceSeed = vi.fn();
 
@@ -19,6 +20,7 @@ vi.mock("@/server/runtime", () => ({
   resetGame,
   exportGameSnapshot,
   importGameSnapshot,
+  publishGameExport,
   gameService: { select },
   updatePreferenceSeed,
 }));
@@ -120,6 +122,12 @@ describe("GET and PUT /api/game/snapshot", () => {
   beforeEach(() => {
     exportGameSnapshot.mockReset();
     importGameSnapshot.mockReset();
+    publishGameExport.mockReset();
+    publishGameExport.mockResolvedValue({
+      digest: "a".repeat(64),
+      filename: `${"a".repeat(64)}.json`,
+      path: `/repo/output/artifacts/${"a".repeat(64)}.json`,
+    });
     exportGameSnapshot.mockResolvedValue({
       format: "diptych-picker-game",
       version: 1,
@@ -146,13 +154,17 @@ describe("GET and PUT /api/game/snapshot", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-disposition")).toBe(
-      'attachment; filename="diptych-picker-round-8-2026-07-17.json"',
+      `attachment; filename="${"a".repeat(64)}.json"`,
+    );
+    expect(response.headers.get("x-diptych-export-path")).toBe(
+      `/repo/output/artifacts/${"a".repeat(64)}.json`,
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({
       format: "diptych-picker-game",
       version: 1,
     });
+    expect(publishGameExport).toHaveBeenCalledOnce();
   });
 
   it("imports a JSON snapshot and returns the ready restored game", async () => {

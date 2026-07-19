@@ -24,6 +24,7 @@ export default defineConfig({
       CHALLENGER_INITIAL_TURNAROUND_MS: "2000",
       CHALLENGER_FALLBACK_DELAY_MS: "1000",
       LOCAL_DATA_DIR: ".local-data/test",
+      NEXT_DIST_DIR: ".next-e2e",
     },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

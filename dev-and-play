@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+print_only=false
+if [[ "${1:-}" == "--print-command" ]]; then
+  print_only=true
+  shift
+fi
+
+requested_threads="${1:-${DIPTYCH_CODEX_THREADS:-8}}"
+if [[ ! "$requested_threads" =~ ^[1-9][0-9]*$ ]]; then
+  printf '%s\n' "Thread count must be a positive integer." >&2
+  exit 2
+fi
+if (( requested_threads < 5 )); then
+  printf '%s\n' "Diptych Picker needs at least 5 threads: root, monitor, and three image workers." >&2
+  exit 2
+fi
+if (( $# > 1 )); then
+  printf '%s\n' "Usage: ./dev-and-play [--print-command] [thread-count]" >&2
+  exit 2
+fi
+repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+initial_prompt="Use \$run-diptych-picker to start or resume the local app and continuously run the dev-and-play loop. Keep the root session responsive while one persistent mailbox-monitor subagent owns polling and delegates fresh native-image workers. This session has $requested_threads total agent threads: reserve one for the root and one for the monitor, set workerLimit=3, and use all three worker slots whenever at least three independent jobs are pending."
+command=(
+  multi-cli
+  codex/personal
+  --cd "$repository_root"
+  --strict-config
+  --config "features.multi_agent_v2={enabled=true,max_concurrent_threads_per_session=$requested_threads}"
+  --config 'agents.max_depth=2'
+  "$initial_prompt"
+)
+
+if [[ "$print_only" == true ]]; then
+  printf '%q ' "${command[@]}"
+  printf '\n'
+  exit 0
+fi
+
+if ! command -v multi-cli >/dev/null 2>&1; then
+  printf '%s\n' "multi-cli is not installed or is not on PATH." >&2
+  exit 127
+fi
+
+exec "${command[@]}"

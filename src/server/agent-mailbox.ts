@@ -123,19 +123,22 @@ const completedAssetSchema = z
   })
   .strict()
   .superRefine((asset, context) => {
-    const canonicalFilename = `${asset.candidateId}.png`;
-    if (asset.filename !== canonicalFilename) {
+    const legacyFilename = `${asset.candidateId}.png`;
+    if (
+      asset.filename !== legacyFilename &&
+      !/^[a-f0-9]{64}\.png$/.test(asset.filename)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["filename"],
-        message: `Asset filename must equal ${canonicalFilename}`,
+        message: `Asset filename must be a SHA-256 digest or equal legacy name ${legacyFilename}`,
       });
     }
-    if (asset.imageUrl !== `/api/assets/${canonicalFilename}`) {
+    if (asset.imageUrl !== `/api/assets/${asset.filename}`) {
       context.addIssue({
         code: "custom",
         path: ["imageUrl"],
-        message: `Asset imageUrl must equal /api/assets/${canonicalFilename}`,
+        message: `Asset imageUrl must equal /api/assets/${asset.filename}`,
       });
     }
   });

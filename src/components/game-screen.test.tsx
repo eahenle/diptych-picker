@@ -794,6 +794,8 @@ describe("GameScreen game state transfer", () => {
               "Content-Type": "application/json",
               "Content-Disposition":
                 'attachment; filename="diptych-picker-round-8.json"',
+              "X-Diptych-Export-Path":
+                "/repo/output/artifacts/diptych-picker-round-8.json",
             },
           })
         : json({ status: "ready", game: initializedGame }),
@@ -818,6 +820,9 @@ describe("GameScreen game state transfer", () => {
     await waitFor(() => expect(click).toHaveBeenCalledOnce());
     expect(createObjectURL).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:game-save");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /exported diptych-picker-round-8\.json.*\/repo\/output\/artifacts\/diptych-picker-round-8\.json/i,
+    );
     expect(fetchMock).toHaveBeenCalledWith("/api/game/snapshot", {
       cache: "no-store",
     });

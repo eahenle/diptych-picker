@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -112,6 +112,30 @@ describe("LocalAssetStore.verify", () => {
     await writeFile(join(directory, "challenger-job-1.png"), bytes);
 
     await expect(store.verify(metadata(bytes.length))).resolves.toBeUndefined();
+  });
+});
+
+describe("LocalAssetStore.save", () => {
+  it("stores and exports PNG bytes under their SHA-256 filename", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-assets-"));
+    const assets = join(root, "assets");
+    const exports = join(root, "exports");
+    const store = new LocalAssetStore(assets, exports);
+    const bytes = await squarePng();
+
+    const stored = await store.save({
+      id: "challenger-job-1",
+      bytes,
+      extension: "png",
+      contentType: "image/png",
+      width: 8,
+      height: 8,
+    });
+
+    expect(stored.filename).toMatch(/^[a-f0-9]{64}\.png$/);
+    expect(stored.url).toBe(`/api/assets/${stored.filename}`);
+    expect(await readFile(join(assets, stored.filename))).toEqual(bytes);
+    expect(await readFile(join(exports, stored.filename))).toEqual(bytes);
   });
 });
 

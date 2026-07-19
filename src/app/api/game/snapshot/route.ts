@@ -10,6 +10,7 @@ import {
   getBufferHealth,
   getDisplayedEloRatings,
   importGameSnapshot,
+  publishGameExport,
 } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
@@ -30,11 +31,13 @@ function errorResponse(error: unknown): NextResponse | null {
 export async function GET() {
   try {
     const snapshot = await exportGameSnapshot();
-    const filename = `diptych-picker-round-${snapshot.game.round.roundNumber}-${snapshot.exportedAt.slice(0, 10)}.json`;
-    return new NextResponse(`${JSON.stringify(snapshot, null, 2)}\n`, {
+    const body = `${JSON.stringify(snapshot, null, 2)}\n`;
+    const artifact = await publishGameExport(Buffer.from(body, "utf8"));
+    return new NextResponse(body, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${artifact.filename}"`,
+        "X-Diptych-Export-Path": artifact.path,
         "Cache-Control": "no-store",
       },
     });
