@@ -53,16 +53,17 @@ Resolve the data root as `${LOCAL_DATA_DIR:-.local-data}`. Create `<data-root>/a
 
 Give each worker the complete job JSON and these constraints:
 
-- Use the preference seed, retained-winner metadata, rejected-candidate metadata, recent history, and recent concepts to propose something novel.
+- Treat `preferenceSeed` as the authoritative creative brief. The proposal, visual prompt, and generated image must satisfy every explicit subject, count, medium, style, palette, content-level, and avoidance constraint it contains. Do not replace its requested subject with a metaphor, adjacent theme, or novel concept from prior rounds.
+- Retained-winner metadata, rejected-candidate metadata, history, and recent concepts are secondary. Use them only to choose a novel treatment that remains inside the preference seed; when they conflict, the preference seed wins.
 - Use the retained winner only as preference evidence. Do not modify it or generate a variation/edit of its image.
 - Avoid the rejected concept and recent concepts unless a genuinely different treatment is essential.
 - Produce exactly one standalone square PNG through native image generation, fully decoded and saved to a local path.
-- Write a strict proposal object with `concept`, `visualPrompt`, `styleTags`, and `reasoningSummary` to the assigned `proposal.json`, and return both work-file paths.
+- Write a strict proposal object with `concept`, `visualPrompt`, `styleTags`, and `reasoningSummary` to the assigned `proposal.json`. In `reasoningSummary`, state how the proposal follows the preference seed while remaining distinct from recent work, then return both work-file paths.
 
 For each claimed job (including every entry in a refill batch):
 
 1. Record `npm run agent:heartbeat -- --status generating --job <id>`.
-2. Delegate to a fresh worker and inspect its proposal and image path.
+2. Delegate to a fresh worker and inspect its proposal and image path. Reject the handoff if its proposal or visible image contradicts an explicit preference-seed constraint; ask that worker to revise or regenerate, and fail the job rather than publish an out-of-brief result if it cannot comply.
 3. Complete with `npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png"`. Let the helper validate the PNG, name it from its exact SHA-256 content digest, and publish immutable copies to local asset storage and `output/artifacts`; never copy it manually over an existing asset.
 4. If generation or validation cannot complete, write a concise reason to `<data-root>/agent-work/<id>/failure.txt`, then run `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt"`. Failures are retryable.
 5. Record the terminal outcome. For a refill batch, wait until every claimed entry has independently reached `completed` or `failed`. Return the heartbeat to `waiting`, and continue the loop.

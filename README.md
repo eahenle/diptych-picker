@@ -112,7 +112,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Read each candidate's current rounded Elo score from its lower-left overlay.
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
-- Shape future challengers through **Preferences**, with separate guidance for themes, media, visual style, palette, content range, and things to avoid. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
+- Shape future challengers through **Preferences**, with separate guidance for themes, media, visual style, palette, content range, and things to avoid. Saving a changed profile clears candidates buffered under the earlier brief, replaces their capacity with jobs carrying the new seed, and discards any earlier-brief result after its already-running worker exits. Image workers must treat the composed preference seed as authoritative; winner and history context may vary the treatment but cannot override explicit constraints. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
 - The quiet **Queue** and **Pool** readouts show ready challengers, active refill work, and reusable-image capacity without exposing mailbox or candidate details.
 - **New game** opens a save/restore dialog. Export the exact current game, load a prior JSON save, or start fresh; starting fresh clears the round, history, and preference profile while retaining learned pool ratings and immutable images.
 

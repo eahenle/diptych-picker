@@ -222,6 +222,131 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("replaces buffered capacity when preferences change", async () => {
+    const game = gameState({
+      round: {
+        ...gameState().round,
+        retainedCandidateId: "left",
+        winStreak: 1,
+      },
+    });
+    const staleJob: GenerationJob = {
+      id: "old-refill",
+      kind: "refill",
+      createdAt: NOW,
+      roundNumber: game.round.roundNumber,
+      winnerSide: "left",
+      retainedWinner: game.round.leftCandidate,
+      rejectedCandidate: game.round.rightCandidate,
+      selectionHistory: game.history,
+      recentConcepts: [],
+      preferenceSeed: game.preferenceSeed,
+      sessionId: "session-1",
+      pinnedWinnerId: "left",
+    };
+    const challengers = challengerState(game, {
+      ready: challengerState(game).ready.slice(0, 2),
+      refillJobs: [
+        {
+          jobId: staleJob.id,
+          pinnedWinnerId: "left",
+          enqueuedAt: NOW,
+          expectedJob: staleJob,
+        },
+      ],
+    });
+    const queue = mailbox();
+    queue.setWork(staleJob);
+    const context = serviceFor({
+      game,
+      challengers,
+      queue,
+      bufferTarget: 3,
+      createId: ids("new-refill-1", "new-refill-2", "new-refill-3"),
+    });
+
+    await context.service.updatePreferenceSeed(
+      "photographic portraits of clearly adult alternative women",
+    );
+
+    const persisted = await context.challengerRepository.load();
+    expect(persisted?.ready).toEqual([]);
+    expect(persisted?.refillJobs.map(({ jobId }) => jobId)).toEqual([
+      "old-refill",
+      "new-refill-1",
+      "new-refill-2",
+      "new-refill-3",
+    ]);
+    expect(queue.enqueue).toHaveBeenCalledTimes(3);
+    expect(queue.enqueue.mock.calls.map(([job]) => job.preferenceSeed)).toEqual(
+      Array(3).fill(
+        "photographic portraits of clearly adult alternative women",
+      ),
+    );
+  });
+
+  it("discards a completed refill from an earlier preference seed", async () => {
+    const game = gameState({
+      preferenceSeed:
+        "photographic portraits of clearly adult alternative women",
+      round: {
+        ...gameState().round,
+        retainedCandidateId: "left",
+        winStreak: 1,
+      },
+    });
+    const staleJob: GenerationJob = {
+      id: "old-refill",
+      kind: "refill",
+      createdAt: NOW,
+      roundNumber: game.round.roundNumber,
+      winnerSide: "left",
+      retainedWinner: game.round.leftCandidate,
+      rejectedCandidate: game.round.rightCandidate,
+      selectionHistory: game.history,
+      recentConcepts: [],
+      preferenceSeed: "the old preference seed",
+      sessionId: "session-1",
+      pinnedWinnerId: "left",
+    };
+    const challengers = challengerState(game, {
+      ready: [],
+      refillJobs: [
+        {
+          jobId: staleJob.id,
+          pinnedWinnerId: "left",
+          enqueuedAt: NOW,
+          expectedJob: staleJob,
+        },
+      ],
+    });
+    const queue = mailbox();
+    queue.setWork(staleJob);
+    queue.setResult(completedResult(staleJob.id));
+    const context = serviceFor({
+      game,
+      challengers,
+      queue,
+      bufferTarget: 1,
+      createId: ids("replacement-refill"),
+    });
+
+    await context.service.reconcile();
+
+    expect(context.assets.verify).not.toHaveBeenCalled();
+    expect(queue.archive).toHaveBeenCalledWith("old-refill");
+    expect(
+      (await context.challengerRepository.load())?.refillJobs,
+    ).toMatchObject([
+      {
+        jobId: "replacement-refill",
+        expectedJob: {
+          preferenceSeed: game.preferenceSeed,
+        },
+      },
+    ]);
+  });
+
   it("backfills existing zero-win generated candidates during reconciliation", async () => {
     const game = gameState();
     const overlooked = candidate("overlooked");

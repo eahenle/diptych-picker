@@ -5,7 +5,6 @@ import {
   admitGeneratedCandidate,
   backfillGeneratedPool,
   recordGenerationTurnaround,
-  refillDeficit,
   updateElo,
   type BufferedCandidate,
   type CandidateRating,
@@ -99,8 +98,11 @@ export class GameService {
       preferenceSeed,
     ),
   ): Promise<GameState> {
-    return this.gameRepository.withLock(async () => {
-      const current = await this.gameRepository.load();
+    return this.withStateLocks(async () => {
+      const [current, challengers] = await Promise.all([
+        this.gameRepository.load(),
+        this.challengerRepository.load(),
+      ]);
       if (!current) {
         throw new MissingGameError("Start a game before editing preferences");
       }
@@ -112,6 +114,22 @@ export class GameService {
 
       const updated = { ...current, preferenceSeed, preferenceProfile };
       await this.gameRepository.save(updated);
+      if (!challengers || current.preferenceSeed === preferenceSeed) {
+        return updated;
+      }
+
+      // Ready candidates and completed refill results were proposed against
+      // the previous brief. Keep unfinished records until their workers reach
+      // a terminal state, but exclude them from replacement capacity and
+      // discard their eventual results during reconciliation.
+      let refreshed: ChallengerState = { ...challengers, ready: [] };
+      const context = this.refillContext(updated, refreshed);
+      const capacity: CapacityResult = context
+        ? this.addRefillCapacity(refreshed, context)
+        : { state: refreshed, jobs: [] };
+      refreshed = capacity.state;
+      await this.challengerRepository.save(refreshed);
+      await this.ensureJobsEnqueued(capacity.jobs);
       return updated;
     });
   }
@@ -335,6 +353,16 @@ export class GameService {
     const { record, work, result } = observation;
     const expected = record.expectedJob;
 
+    if (expected.preferenceSeed !== game.preferenceSeed) {
+      // Do not interrupt a worker that already owns the old request. Once it
+      // terminates, archive the result without admitting it to the ready FIFO.
+      if (work && !result) return { game, challengers };
+      return {
+        game,
+        challengers: await this.archiveInvalidRefill(challengers, record),
+      };
+    }
+
     if (!result) {
       if (!work) {
         await this.ensureEnqueued(expected);
@@ -480,7 +508,14 @@ export class GameService {
   ): CapacityResult {
     const jobs: GenerationJob[] = [];
     const records: RefillJobRecord[] = [];
-    const deficit = refillDeficit(state, this.config.bufferTarget);
+    const currentPreferenceJobs = state.refillJobs.filter(
+      ({ expectedJob }) =>
+        expectedJob.preferenceSeed === context.game.preferenceSeed,
+    ).length;
+    const deficit = Math.max(
+      0,
+      this.config.bufferTarget - state.ready.length - currentPreferenceJobs,
+    );
 
     for (let index = 0; index < deficit; index += 1) {
       const id = this.createId();
