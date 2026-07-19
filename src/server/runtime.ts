@@ -13,6 +13,7 @@ import {
 } from "@/domain/challenger-state";
 import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
+import { publishExportArtifact } from "./artifact-store";
 import { JsonChallengerRepository } from "./challenger-repository";
 import { GameService } from "./game-service";
 import { GameSnapshotService, type GameSnapshot } from "./game-snapshot";
@@ -32,8 +33,17 @@ const dataDirectory = join(
   /* turbopackIgnore: true */ process.cwd(),
   process.env.LOCAL_DATA_DIR ?? ".local-data",
 );
+export const generationProvider: "agent" | "mock" =
+  process.env.GENERATION_PROVIDER === "mock" ? "mock" : "agent";
+const mockMode = generationProvider === "mock";
+const runtimeExportDirectory = mockMode
+  ? join(dataDirectory, "exports")
+  : join(/* turbopackIgnore: true */ process.cwd(), "output", "artifacts");
 
-export const assetStore = new LocalAssetStore(join(dataDirectory, "assets"));
+export const assetStore = new LocalAssetStore(
+  join(dataDirectory, "assets"),
+  runtimeExportDirectory,
+);
 export const repository = new JsonGameRepository(
   join(dataDirectory, "game-state.json"),
 );
@@ -45,10 +55,6 @@ export const initialBootstrapRepository = new JsonInitialBootstrapRepository(
 );
 const mailboxDirectory = join(dataDirectory, "agent-mailbox");
 const fileGenerationMailbox = new FileGenerationMailbox(mailboxDirectory);
-export const generationProvider: "agent" | "mock" =
-  process.env.GENERATION_PROVIDER === "mock" ? "mock" : "agent";
-const mockMode = generationProvider === "mock";
-
 if (mockMode && process.env.NODE_ENV === "production") {
   throw new Error("The deterministic mock worker is test-only");
 }
@@ -102,7 +108,10 @@ const gameSnapshotService = new GameSnapshotService({
   mailbox: generationMailbox,
   verifyCandidateAsset: async (candidate, source) => {
     if (source === "generated") {
-      await assetStore.verifyExistingPng(`${candidate.id}.png`);
+      const match = candidate.imageUrl.match(/^\/api\/assets\/([^/]+\.png)$/);
+      if (!match)
+        throw new Error(`Invalid generated asset URL for ${candidate.id}`);
+      await assetStore.verifyExistingPng(match[1]);
       return;
     }
     if (!/^\/seed-assets\/[a-zA-Z0-9-]+\.png$/.test(candidate.imageUrl))
@@ -136,6 +145,10 @@ export async function exportGameSnapshot(): Promise<GameSnapshot> {
     throw new Error("Wait for the initial comparison before exporting");
   }
   return gameSnapshotService.export();
+}
+
+export async function publishGameExport(contents: Buffer) {
+  return publishExportArtifact(contents, "json", runtimeExportDirectory);
 }
 
 export async function importGameSnapshot(value: unknown): Promise<GameState> {

@@ -33,7 +33,7 @@ Show each candidate's current rounded Elo score in a compact lower-left image ov
 
 ### Saved games
 
-The main header exposes direct Export and Load controls. Export downloads the exact current game without interrupting play. Load offers to export the current game first, then accepts a previous save. New Game remains an in-app decision point for exporting, loading, starting fresh, or canceling. A save preserves the round, history, detailed preferences, ready queue, Elo ratings, and pool membership while excluding session-bound generator jobs. Loading validates the entire document and every referenced immutable local image before changing current state, then creates a fresh refill session.
+The main header exposes direct Export and Load controls. Export content-addresses the exact JSON bytes, writes `<sha256>.json` to the configured artifact directory, downloads the same file without interrupting play, and reports the server-side path. Generated PNG artifacts use the same full SHA-256 naming contract. Load offers to export the current game first, then accepts a previous save. New Game remains an in-app decision point for exporting, loading, starting fresh, or canceling. A save preserves the round, history, detailed preferences, ready queue, Elo ratings, and pool membership while excluding session-bound generator jobs. Loading validates the entire document and every referenced immutable local image before changing current state, then creates a fresh refill session.
 
 ## Future feature ideas
 

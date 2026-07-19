@@ -109,7 +109,7 @@ export class MockAgentWorker {
       proposal,
       asset: {
         candidateId,
-        filename: `${candidateId}.png`,
+        filename: stored.filename,
         imageUrl: stored.url,
         contentType: "image/png",
         width: image.width,

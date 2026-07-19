@@ -99,7 +99,11 @@ function validateRestorableState(
     }
     if (
       rating.source === "generated" &&
-      rating.candidate.imageUrl !== `/api/assets/${rating.candidate.id}.png`
+      !(
+        rating.candidate.imageUrl ===
+          `/api/assets/${rating.candidate.id}.png` ||
+        /^\/api\/assets\/[a-f0-9]{64}\.png$/.test(rating.candidate.imageUrl)
+      )
     ) {
       invalid(`Candidate ${rating.candidate.id} has a non-canonical asset URL`);
     }

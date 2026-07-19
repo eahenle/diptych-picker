@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -8,6 +9,7 @@ import {
   atomicCreateFile,
   assertActiveJob,
   dataDirectory,
+  exportDirectory,
   JOB_ID,
   parseArgs,
   publishTerminal,
@@ -90,7 +92,7 @@ if (
 await reserveOutcome(mailbox, jobId, "completed");
 
 const candidateId = `challenger-${jobId}`;
-const filename = `${candidateId}.png`;
+const filename = `${createHash("sha256").update(source).digest("hex")}.png`;
 const assets = join(root, "assets");
 const assetPath = join(assets, filename);
 await mkdir(assets, { recursive: true });
@@ -98,6 +100,13 @@ if (!(await atomicCreateFile(assetPath, source))) {
   const existing = await readFile(assetPath);
   if (!existing.equals(source)) {
     throw new Error(`Existing immutable asset ${filename} differs from source`);
+  }
+}
+const exportedAssetPath = join(exportDirectory(), filename);
+if (!(await atomicCreateFile(exportedAssetPath, source))) {
+  const existing = await readFile(exportedAssetPath);
+  if (!existing.equals(source)) {
+    throw new Error(`Existing export artifact ${filename} differs from source`);
   }
 }
 

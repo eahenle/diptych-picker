@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -76,7 +77,11 @@ async function runScript(
     [join(scriptsDirectory, name), ...args],
     {
       cwd: process.cwd(),
-      env: { ...process.env, LOCAL_DATA_DIR: localDataDirectory },
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        LOCAL_DATA_DIR: localDataDirectory,
+      },
     },
   );
 }
@@ -129,9 +134,14 @@ async function expectNoCompletionArtifacts(
   root: string,
   id: string,
 ): Promise<void> {
+  await expect(readdir(join(root, "assets"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  await expect(readdir(join(root, "exports"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
   await Promise.all(
     [
-      join(root, "assets", `challenger-${id}.png`),
       join(root, "agent-mailbox", "outcomes", `${id}.json`),
       join(root, "agent-mailbox", "completed", `${id}.json`),
     ].map((path) =>
@@ -476,8 +486,12 @@ describe("agent mailbox scripts", () => {
     const first = await runScript("complete-job.mjs", args, root);
     const retry = await runScript("complete-job.mjs", args, root);
 
-    const assetPath = join(root, "assets", "challenger-job-1.png");
+    const filename = `${createHash("sha256").update(image.bytes).digest("hex")}.png`;
+    const assetPath = join(root, "assets", filename);
     await expect(readFile(assetPath)).resolves.toEqual(image.bytes);
+    await expect(readFile(join(root, "exports", filename))).resolves.toEqual(
+      image.bytes,
+    );
     expect(JSON.parse(retry.stdout)).toEqual(JSON.parse(first.stdout));
     const result = JSON.parse(
       await readFile(
@@ -491,8 +505,8 @@ describe("agent mailbox scripts", () => {
       proposal,
       asset: {
         candidateId: "challenger-job-1",
-        filename: "challenger-job-1.png",
-        imageUrl: "/api/assets/challenger-job-1.png",
+        filename,
+        imageUrl: `/api/assets/${filename}`,
         contentType: "image/png",
         width: 32,
         height: 32,
@@ -583,6 +597,7 @@ describe("agent mailbox scripts", () => {
     const root = await createDataDirectory();
     await putJob(root, "active", job("job-resume"));
     const image = await squareImage(root, "job-resume");
+    const filename = `${createHash("sha256").update(image.bytes).digest("hex")}.png`;
     const proposalPath = await proposalFile(root, "job-resume");
     await mkdir(join(root, "agent-mailbox", "outcomes"), { recursive: true });
     await mkdir(join(root, "assets"), { recursive: true });
@@ -590,10 +605,7 @@ describe("agent mailbox scripts", () => {
       join(root, "agent-mailbox", "outcomes", "job-resume.json"),
       `${JSON.stringify({ jobId: "job-resume", outcome: "completed" })}\n`,
     );
-    await writeFile(
-      join(root, "assets", "challenger-job-resume.png"),
-      image.bytes,
-    );
+    await writeFile(join(root, "assets", filename), image.bytes);
 
     await runScript(
       "complete-job.mjs",
@@ -621,7 +633,8 @@ describe("agent mailbox scripts", () => {
     await putJob(root, "active", job("job-conflict"));
     const image = await squareImage(root, "job-conflict");
     const proposalPath = await proposalFile(root, "job-conflict");
-    const assetPath = join(root, "assets", "challenger-job-conflict.png");
+    const filename = `${createHash("sha256").update(image.bytes).digest("hex")}.png`;
+    const assetPath = join(root, "assets", filename);
     const existing = Buffer.from("different immutable bytes");
     await mkdir(join(root, "assets"), { recursive: true });
     await writeFile(assetPath, existing);

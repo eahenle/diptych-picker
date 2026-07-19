@@ -11,25 +11,44 @@ npm install
 cp .env.example .env.local
 ```
 
-Then open an interactive Codex CLI session in the repository root:
+Launch a dedicated interactive Codex session with eight agent threads and the required monitor-to-worker nesting:
 
 ```bash
-codex
+npm run codex:play
 ```
 
-Ask Codex to run Diptych Picker or invoke `$run-diptych-picker`. The repo-local skill in `.agents/skills/run-diptych-picker/` starts the Next.js app, remains active, monitors the durable mailbox, and uses the current CLI session plus native image-generation subagents as the AI backend. Open <http://localhost:3000> after the skill reports readiness.
+Pass another thread count after `--`, or set `DIPTYCH_CODEX_THREADS`:
+
+```bash
+npm run codex:play -- 12
+DIPTYCH_CODEX_THREADS=12 npm run codex:play
+```
+
+The script starts the `codex/personal` profile through `multi-cli`, applies per-launch `features.multi_agent_v2.max_concurrent_threads_per_session` and `agents.max_depth=2` overrides, and sends the initial `$run-diptych-picker` prompt. It reserves one thread for the root, one for the monitor, and up to three for fresh image workers, so the launcher requires at least five total threads. The v2 thread setting is a ceiling rather than a request to create idle agents; all three workers are active only while at least three independent mailbox jobs are pending. The script does not modify global Codex configuration. Open <http://localhost:3000> after the skill reports readiness.
+
+To inspect the exact command without launching Codex, run `./dev-and-play --print-command [thread-count]`.
 
 The web server never launches `codex`, calls an OpenAI API, or receives an API key. Model choice, authentication, permissions, and subagent execution belong to the interactive CLI session.
+
+## Development checks
+
+Install the repository's pre-commit hook once per clone:
+
+```bash
+npm run hooks:install
+```
+
+The hook runs formatting, lint, and unit/integration tests through `npm run check`. Pull requests and pushes to `main` run the same focused check in GitHub Actions.
 
 ## Challenger buffer and generation loop
 
 An ordinary new game starts with two displayed candidates and a durable FIFO of five ready challengers. A selection consumes the FIFO head immediately, preloads that one image in the browser, and swaps only the losing card. Ready and in-flight candidates stay valid when the winner changes, so older work drains in FIFO order instead of being discarded.
 
-Each selection restores the configured buffer deficit by writing `refill` requests under `.local-data/agent-mailbox/`. The persistent coordinator claims up to three independent refills at a time, delegates one standalone image to one fresh subagent per request, validates each result independently, and publishes immutable PNGs under `.local-data/assets/`. Keep the interactive Codex session and `$run-diptych-picker` coordinator alive while playing if you want generated refills to arrive in the background.
+Each selection restores the configured buffer deficit by writing `refill` requests under `.local-data/agent-mailbox/`. The root Codex session supervises one persistent mailbox-monitor subagent. That monitor claims only as many independent refills as it has fresh image-worker slots, delegates one standalone image per request, validates each result independently, and publishes immutable PNGs under `.local-data/assets/`. Keep the interactive Codex session and `$run-diptych-picker` monitor alive while playing if you want generated refills to arrive in the background.
 
 The selected winner is never sent through an image-editing model. Its candidate ID, URL, bytes, metadata, side, object identity in the active browser state, and `<img>` node remain unchanged.
 
-If Codex closes during a job, the current images, ready queue, pool, and mailbox remain on disk. Reopen `codex` in the repository and run the skill again; startup recovery resumes unfinished refill batches and ordinary jobs. Completion and failure helpers are idempotent, and opposite terminal outcomes cannot both win.
+If Codex closes during a job, the current images, ready queue, pool, and mailbox remain on disk. Reopen the `codex/personal` profile through `multi-cli` in the repository and run the skill again; startup recovery resumes unfinished refill batches and ordinary jobs. Completion and failure helpers are idempotent, and opposite terminal outcomes cannot both win.
 
 ## Curated and learned pools
 
@@ -52,13 +71,15 @@ When no ready challenger exists, the service keeps the exact winner visible and 
 - `initial-bootstrap.json`: restart-safe generated-initial batch state.
 - `agent-mailbox/`: pending, active, outcome, terminal-result, heartbeat, and ID-tombstone files.
 - `agent-work/`: per-job proposal, failure, and generated-image handoff files.
-- `assets/`: immutable generated PNGs served through stable `/api/assets/...` URLs.
+- `assets/`: immutable generated PNGs named `<sha256-of-bytes>.png` and served through stable `/api/assets/...` URLs. Legacy UUID-named assets remain readable.
 
 Game, challenger, and bootstrap repositories use atomic writes and a fixed local lock order. Mailbox IDs remain tombstoned after archival to prevent replay. Asset verification fully decodes PNGs and checks canonical URL, byte count, dimensions, and square format before state changes.
 
 `GET /api/game` and `POST /api/game/start` return a tagged state: `{ status: "ready", game }`, `{ status: "initializing", ... }`, or `{ status: "initialization-error", ... }`.
 
-`GET /api/game/snapshot` downloads a versioned JSON save containing the restorable round, history, preference profile, ready queue, Elo ratings, and pool membership. `PUT /api/game/snapshot` validates the complete document and every referenced immutable local image before replacing state. In-flight job IDs are deliberately excluded; restored games start a fresh session and request any missing refill capacity safely. Save files therefore reload on installations that still have their referenced local image library.
+The git-ignored `output/artifacts/` directory is the discoverable export location. Every completed generated PNG is copied there under its SHA-256 filename. `GET /api/game/snapshot` writes the exact JSON response there under `<sha256-of-bytes>.json` and downloads the same file in the browser; the UI reports the server-side path after export.
+
+The versioned JSON save contains the restorable round, history, preference profile, ready queue, Elo ratings, and pool membership. `PUT /api/game/snapshot` validates the complete document and every referenced immutable local image before replacing state. In-flight job IDs are deliberately excluded; restored games start a fresh session and request any missing refill capacity safely. Save files therefore reload on installations that still have their referenced local image library.
 
 ## Mock mode
 
@@ -68,7 +89,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 
 ## Controls
 
-- **Export** downloads the exact current game as JSON without interrupting play.
+- **Export** writes the exact current game to `output/artifacts/<sha256>.json`, downloads the same file, and reports the path without interrupting play.
 - **Load** opens a restore dialog with the option to export the current game first, then choose a prior JSON save.
 
 - Click the complete A or B card.

@@ -32,6 +32,7 @@ export interface ImageProvider {
 }
 
 export interface StoredAsset {
+  filename: string;
   url: string;
   byteLength: number;
 }

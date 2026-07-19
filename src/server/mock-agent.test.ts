@@ -84,15 +84,18 @@ describe("deterministic mock mailbox worker", () => {
 
     await mailbox.enqueue(refill);
 
+    let result = await fileMailbox.readResult(refill.id);
     await vi.waitFor(async () => {
-      expect(await fileMailbox.readResult(refill.id)).toMatchObject({
+      result = await fileMailbox.readResult(refill.id);
+      expect(result).toMatchObject({
         jobId: refill.id,
         status: "completed",
         asset: { candidateId: `challenger-${refill.id}` },
       });
     });
+    if (result?.status !== "completed") throw new Error("missing completion");
     expect(
-      await readFile(join(root, "assets", `challenger-${refill.id}.png`)),
+      await readFile(join(root, "assets", result.asset.filename)),
     ).not.toHaveLength(0);
     worker.dispose();
   });
@@ -204,23 +207,24 @@ describe("deterministic mock mailbox worker", () => {
       completedAt: "2026-07-16T01:00:01.000Z",
       asset: {
         candidateId: "challenger-job-1",
-        filename: "challenger-job-1.png",
-        imageUrl: "/api/assets/challenger-job-1.png",
+        filename: expect.stringMatching(/^[a-f0-9]{64}\.png$/),
+        imageUrl: expect.stringMatching(/^\/api\/assets\/[a-f0-9]{64}\.png$/),
         contentType: "image/png",
         width: 1024,
         height: 1024,
       },
     });
+    if (result?.status !== "completed") throw new Error("missing completion");
     const firstBytes = await readFile(
-      join(root, "assets", "challenger-job-1.png"),
+      join(root, "assets", result.asset.filename),
     );
 
     worker.schedule(job());
     worker.schedule(job());
 
-    expect(
-      await readFile(join(root, "assets", "challenger-job-1.png")),
-    ).toEqual(firstBytes);
+    expect(await readFile(join(root, "assets", result.asset.filename))).toEqual(
+      firstBytes,
+    );
     expect(await fileMailbox.readResult("job-1")).toEqual(result);
     worker.dispose();
   });

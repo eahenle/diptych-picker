@@ -211,9 +211,7 @@ test("exports the current game and restores it after later play", async ({
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export", exact: true }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(
-    /^diptych-picker-round-1-\d{4}-\d{2}-\d{2}\.json$/,
-  );
+  expect(download.suggestedFilename()).toMatch(/^[a-f0-9]{64}\.json$/);
   await download.saveAs(savePath);
 
   await select(page, "left", 2);

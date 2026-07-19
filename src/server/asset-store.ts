@@ -6,19 +6,45 @@ import type {
   CompletedAssetMetadata,
   GeneratedImage,
 } from "./providers";
+import {
+  contentAddressedFilename,
+  contentDigest,
+  publishExportArtifact,
+} from "./artifact-store";
 
 export class LocalAssetStore implements AssetStore {
-  constructor(private readonly directory: string) {}
+  constructor(
+    private readonly directory: string,
+    private readonly exportDirectory?: string,
+  ) {}
 
   async save(image: GeneratedImage & { id: string }) {
     await mkdir(this.directory, { recursive: true });
-    const filename = `${image.id}.${image.extension}`;
-    await writeFile(
-      join(/* turbopackIgnore: true */ this.directory, filename),
-      image.bytes,
-      { flag: "wx" },
-    );
-    return { url: `/api/assets/${filename}`, byteLength: image.bytes.length };
+    const filename = contentAddressedFilename(image.bytes, image.extension);
+    const path = join(/* turbopackIgnore: true */ this.directory, filename);
+    try {
+      await writeFile(path, image.bytes, { flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const existing = await readFile(path);
+      if (!existing.equals(image.bytes)) {
+        throw new Error(
+          `Existing immutable asset ${filename} differs from source`,
+        );
+      }
+    }
+    if (this.exportDirectory) {
+      await publishExportArtifact(
+        image.bytes,
+        image.extension,
+        this.exportDirectory,
+      );
+    }
+    return {
+      filename,
+      url: `/api/assets/${filename}`,
+      byteLength: image.bytes.length,
+    };
   }
 
   async read(filename: string): Promise<Buffer> {
@@ -32,6 +58,14 @@ export class LocalAssetStore implements AssetStore {
     const maximumByteLength = 50 * 1024 * 1024;
     const maximumPixels = 4096 * 4096;
     const bytes = await this.read(filename);
+    if (
+      /^[a-f0-9]{64}\.png$/.test(filename) &&
+      filename !== `${contentDigest(bytes)}.png`
+    ) {
+      throw new Error(
+        "Content-addressed asset filename does not match its bytes",
+      );
+    }
     if (bytes.length > maximumByteLength) {
       throw new Error(
         `Asset byte length ${bytes.length} exceeds the ${maximumByteLength} byte limit`,
@@ -55,12 +89,15 @@ export class LocalAssetStore implements AssetStore {
   async verify(asset: CompletedAssetMetadata): Promise<void> {
     const maximumByteLength = 50 * 1024 * 1024;
     const maximumPixels = 4096 * 4096;
-    const canonicalFilename = `${asset.candidateId}.png`;
-    if (asset.filename !== canonicalFilename) {
-      throw new Error(`Asset filename must equal ${canonicalFilename}`);
+    const legacyFilename = `${asset.candidateId}.png`;
+    const contentAddressed = /^[a-f0-9]{64}\.png$/.test(asset.filename);
+    if (!contentAddressed && asset.filename !== legacyFilename) {
+      throw new Error(
+        `Asset filename must be a SHA-256 digest or equal legacy name ${legacyFilename}`,
+      );
     }
-    if (asset.imageUrl !== `/api/assets/${canonicalFilename}`) {
-      throw new Error(`Asset URL must be canonical for ${canonicalFilename}`);
+    if (asset.imageUrl !== `/api/assets/${asset.filename}`) {
+      throw new Error(`Asset URL must match ${asset.filename}`);
     }
     if (asset.contentType !== "image/png") {
       throw new Error("Completed asset must use image/png");
@@ -82,7 +119,7 @@ export class LocalAssetStore implements AssetStore {
 
     const assetPath = join(
       /* turbopackIgnore: true */ this.directory,
-      canonicalFilename,
+      asset.filename,
     );
     const file = await stat(assetPath);
     if (file.size > maximumByteLength) {
@@ -91,6 +128,11 @@ export class LocalAssetStore implements AssetStore {
       );
     }
     const bytes = await readFile(assetPath);
+    if (contentAddressed && asset.filename !== `${contentDigest(bytes)}.png`) {
+      throw new Error(
+        "Content-addressed asset filename does not match its bytes",
+      );
+    }
     if (bytes.length > maximumByteLength) {
       throw new Error(
         `Asset byte length ${bytes.length} exceeds the ${maximumByteLength} byte limit`,
