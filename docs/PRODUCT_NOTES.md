@@ -1,5 +1,22 @@
 # Product Notes
 
+## 2026-07-19
+
+### Comparison-loop follow-ups
+
+- Export must remain responsive while a challenger is loading. Exporting the last stable game state must not wait on or become disabled by generation work.
+- A champion reaching a ten-win streak should retire from the active comparison and be replaced. This is distinct from the depleted-buffer allowance of ten pool draws.
+
+### Deck-driven generation and agent transport
+
+Replace freeform generation as the primary interaction with a weighted deck of concise archetype and style cards. The Next.js app remains the proposed authority for deck state, verdicts, lineage, and learned preferences; `co-proc` supplies the live agent-control transport after it gains attachable cross-process endpoints.
+
+The detailed handoff, protocol, safety constraints, and staged migration are in [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md).
+
+### Winner-driven inspiration
+
+Eventually derive editable inspiration signals from winning generated images. Learn transferable attributes such as lighting, composition, palette, mood, medium, and concept—not a person's identity or likeness. Keep this inferred inspiration profile separate from explicit card weights and verdict edits, show which winners influenced it, and let the player weaken, edit, reset, or disable it.
+
 ## 2026-07-17
 
 ### Responsive comparison panels
