@@ -790,6 +790,104 @@ describe("GameService challenger buffer", () => {
     });
   });
 
+  it("loads two distinct pool images when a tied round has an empty queue", async () => {
+    let currentNow = NOW;
+    const now = () => currentNow;
+    const game = gameState();
+    const poolA = candidate("pool-a");
+    const poolB = candidate("pool-b");
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+        rating(poolA),
+        rating(poolB),
+      ],
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      now,
+      random: () => 0,
+      bufferTarget: 2,
+      createId: ids("tie-refill-1", "tie-refill-2"),
+    });
+
+    const waiting = await context.service.tie(3);
+    expect(waiting.round).toMatchObject({
+      status: "generating",
+      leftCandidate: { id: "left" },
+      rightCandidate: { id: "right" },
+    });
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      nextFallbackAt: "2026-07-16T01:00:03.000Z",
+      consecutiveFallbackDraws: 0,
+    });
+
+    currentNow = "2026-07-16T01:00:03.000Z";
+    const completed = await context.service.reconcile();
+    expect(completed?.round).toMatchObject({
+      status: "idle",
+      roundNumber: 4,
+      leftCandidate: { id: "pool-a" },
+      rightCandidate: { id: "pool-b" },
+    });
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      ready: [],
+      consecutiveFallbackDraws: 2,
+      nextFallbackAt: null,
+      pendingSelectionBaseline: null,
+    });
+  });
+
+  it("combines one queued image with one pool image after a tie", async () => {
+    let currentNow = NOW;
+    const now = () => currentNow;
+    const game = gameState();
+    const queued = candidate("queued");
+    const fallback = candidate("fallback");
+    const challengers = challengerState(game, {
+      ready: [
+        {
+          candidate: queued,
+          source: "seed",
+          pinnedWinnerId: null,
+          enqueuedAt: NOW,
+        },
+      ],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+        rating(queued),
+        rating(fallback),
+      ],
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      now,
+      random: () => 0,
+      bufferTarget: 2,
+      createId: ids("tie-refill-1"),
+    });
+
+    expect((await context.service.tie(3)).round.status).toBe("generating");
+    currentNow = "2026-07-16T01:00:03.000Z";
+    const completed = await context.service.reconcile();
+
+    expect(completed?.round).toMatchObject({
+      status: "idle",
+      leftCandidate: { id: "queued" },
+      rightCandidate: { id: "fallback" },
+    });
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      ready: [],
+      consecutiveFallbackDraws: 1,
+      nextFallbackAt: null,
+    });
+  });
+
   it("retires a ten-win champion and consumes two FIFO heads", async () => {
     const game = gameState();
     game.round.retainedCandidateId = game.round.leftCandidate.id;

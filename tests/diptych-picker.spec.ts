@@ -15,6 +15,10 @@ interface StoredChallengerState {
     candidate: { id: string; preferenceRevision?: Record<string, unknown> };
   }>;
   refillJobs: Array<{ jobId: string }>;
+  ratings: Array<{
+    candidate: { id: string };
+    poolMember: boolean;
+  }>;
   consecutiveFallbackDraws: number;
   nextFallbackAt: string | null;
 }
@@ -189,6 +193,45 @@ test("declares an equal-Elo tie and replaces both active candidates", async ({
     left: { id: originalIds[0] },
     right: { id: originalIds[1] },
   });
+});
+
+test("loads a distinct pair from the pool after tying with an empty queue", async ({
+  page,
+}) => {
+  const originalIds = await Promise.all([
+    page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
+    page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
+  ]);
+  const before = await challengerState();
+  const eligiblePoolIds = before.ratings
+    .filter(
+      ({ candidate, poolMember }) =>
+        poolMember && !originalIds.includes(candidate.id),
+    )
+    .map(({ candidate }) => candidate.id);
+  await updateChallengerState((state) => ({ ...state, ready: [] }));
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/select") &&
+      response.request().method() === "POST",
+  );
+
+  await page.getByRole("button", { name: /declare tie/i }).click();
+  expect((await responsePromise).status()).toBe(202);
+  await expect(page.getByTestId("loading-left")).toBeVisible();
+  await expect(page.getByTestId("loading-right")).toBeVisible();
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible({
+    timeout: 5_000,
+  });
+
+  const replacementIds = await Promise.all([
+    page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
+    page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
+  ]);
+  expect(new Set(replacementIds).size).toBe(2);
+  expect(replacementIds.every((id) => eligiblePoolIds.includes(id!))).toBe(
+    true,
+  );
 });
 
 test("opens either active image in a larger inspection view", async ({

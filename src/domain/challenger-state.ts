@@ -106,6 +106,11 @@ export interface CandidateDraw {
   state: ChallengerState;
 }
 
+export interface CandidateBatchDraw {
+  candidates: Candidate[];
+  state: ChallengerState;
+}
+
 export interface PoolLeaderboardEntry {
   rank: number;
   candidate: Pick<Candidate, "id" | "imageUrl" | "concept" | "style">;
@@ -379,12 +384,26 @@ export function drawFallback(
   state: ChallengerState,
   options: FallbackDrawOptions,
 ): CandidateDraw {
+  const draw = drawFallbackBatch(state, options, 1);
+  return { candidate: draw.candidates[0] ?? null, state: draw.state };
+}
+
+export function drawFallbackBatch(
+  state: ChallengerState,
+  options: FallbackDrawOptions,
+  count: number,
+): CandidateBatchDraw {
+  const requestedCount = Math.max(0, Math.floor(count));
+  if (requestedCount === 0) return { candidates: [], state };
+
   const delayMs = options.delayMs ?? FALLBACK_DRAW_DELAY_MS;
+  const maximumConsecutiveDraws =
+    options.maximumConsecutiveDraws ?? MAX_CONSECUTIVE_FALLBACK_DRAWS;
   if (
-    state.consecutiveFallbackDraws >=
-    (options.maximumConsecutiveDraws ?? MAX_CONSECUTIVE_FALLBACK_DRAWS)
+    state.consecutiveFallbackDraws + requestedCount >
+    maximumConsecutiveDraws
   ) {
-    return { candidate: null, state };
+    return { candidates: [], state };
   }
 
   const excludedIds = new Set([
@@ -394,11 +413,11 @@ export function drawFallback(
   const eligible = state.ratings.filter(
     (item) => item.poolMember && !excludedIds.has(item.candidate.id),
   );
-  if (eligible.length === 0) return { candidate: null, state };
+  if (eligible.length < requestedCount) return { candidates: [], state };
 
   if (state.nextFallbackAt === null) {
     return {
-      candidate: null,
+      candidates: [],
       state: {
         ...state,
         nextFallbackAt: new Date(
@@ -409,22 +428,29 @@ export function drawFallback(
   }
 
   if (Date.parse(options.now) < Date.parse(state.nextFallbackAt)) {
-    return { candidate: null, state };
+    return { candidates: [], state };
   }
 
-  const index = Math.min(
-    Math.floor(options.random() * eligible.length),
-    eligible.length - 1,
-  );
-  const selected = eligible[index];
+  const remaining = [...eligible];
+  const selected: CandidateRating[] = [];
+  for (let index = 0; index < requestedCount; index += 1) {
+    const selectedIndex = Math.min(
+      Math.floor(options.random() * remaining.length),
+      remaining.length - 1,
+    );
+    selected.push(remaining.splice(selectedIndex, 1)[0]);
+  }
+  const selectedIds = new Set(selected.map((item) => item.candidate.id));
   return {
-    candidate: selected.candidate,
+    candidates: selected.map((item) => item.candidate),
     state: {
       ...state,
       ratings: state.ratings.map((item) =>
-        item === selected ? { ...item, lastServedAt: options.now } : item,
+        selectedIds.has(item.candidate.id)
+          ? { ...item, lastServedAt: options.now }
+          : item,
       ),
-      consecutiveFallbackDraws: state.consecutiveFallbackDraws + 1,
+      consecutiveFallbackDraws: state.consecutiveFallbackDraws + requestedCount,
       nextFallbackAt: null,
     },
   };
