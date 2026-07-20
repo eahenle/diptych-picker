@@ -8,6 +8,7 @@ import type { GenerationJob } from "./agent-mailbox";
 import {
   JsonChallengerRepository,
   MemoryChallengerRepository,
+  parseChallengerState,
   type ChallengerRepository,
 } from "./challenger-repository";
 
@@ -91,6 +92,41 @@ async function expectSessionReset(
 }
 
 describe("JsonChallengerRepository", () => {
+  it("migrates transitional profile metadata inside durable refill intent", () => {
+    const transitional = structuredClone(populatedState) as unknown as {
+      refillJobs: Array<{
+        expectedJob: { preferenceProfile: unknown };
+      }>;
+    };
+    transitional.refillJobs[0].expectedJob.preferenceProfile = {
+      themes: "prefer carefully made unfamiliar scenes",
+      inspiration: "stark lighting",
+      inspirationBase: "stark lighting",
+      inspirationMode: "adaptive",
+      inspirationSourceWinnerIds: ["winner-1"],
+      mediaTypes: "photography",
+      visualStyle: "cinematic",
+      colorPalette: "oxblood",
+      contentLevel: "family-friendly",
+      avoid: "readable text",
+    };
+
+    expect(
+      parseChallengerState(transitional).refillJobs[0].expectedJob
+        .preferenceProfile,
+    ).toEqual({
+      themes: "prefer carefully made unfamiliar scenes",
+      inspiration: "stark lighting",
+      mediaTypes: "photography",
+      visualStyle: "cinematic",
+      colorPalette: "oxblood",
+      contentLevel: "family-friendly",
+      avoid: "readable text",
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["winner-1"],
+    });
+  });
+
   it("strictly persists the complete expected refill job snapshot", async () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-refill-intent-"));
     const file = join(directory, "challenger-state.json");

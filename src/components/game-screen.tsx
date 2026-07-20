@@ -250,6 +250,8 @@ export function GameScreen() {
   const [preferenceDraft, setPreferenceDraft] = useState<PreferenceProfile>(
     () => preferenceProfileFromSeed(""),
   );
+  const [preferenceDraftBaseProfile, setPreferenceDraftBaseProfile] =
+    useState<PreferenceProfile>(() => preferenceProfileFromSeed(""));
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [bufferHealth, setBufferHealth] = useState<BufferHealth | null>(null);
@@ -1048,7 +1050,10 @@ export function GameScreen() {
         await fetch("/api/game", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ preferenceProfile: preferenceDraft }),
+          body: JSON.stringify({
+            preferenceProfile: preferenceDraft,
+            expectedPreferenceProfile: preferenceDraftBaseProfile,
+          }),
         }),
       );
       commitGame(state);
@@ -1065,9 +1070,10 @@ export function GameScreen() {
 
   const openPreferences = () => {
     if (!game) return;
-    setPreferenceDraft(
-      game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed),
-    );
+    const currentProfile =
+      game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed);
+    setPreferenceDraft(currentProfile);
+    setPreferenceDraftBaseProfile(currentProfile);
     setPreferencesOpen(true);
   };
 
@@ -1075,7 +1081,20 @@ export function GameScreen() {
     key: Key,
     value: PreferenceProfile[Key],
   ) => {
-    setPreferenceDraft((current) => ({ ...current, [key]: value }));
+    setPreferenceDraft((current) => ({
+      ...current,
+      [key]: value,
+      adaptationSourceWinnerIds: [],
+    }));
+  };
+
+  const setAdaptationMode = (mode: PreferenceProfile["adaptationMode"]) => {
+    setPreferenceDraft((current) => ({
+      ...current,
+      adaptationMode: mode,
+      adaptationSourceWinnerIds:
+        mode === "static" ? [] : current.adaptationSourceWinnerIds,
+    }));
   };
 
   const retryAvailable =
@@ -1819,10 +1838,41 @@ export function GameScreen() {
             }
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <h2 id="preferences-title">Preference profile</h2>
+            <div className={styles.preferenceTitleRow}>
+              <h2 id="preferences-title">Preference profile</h2>
+              <fieldset
+                className={styles.adaptationMode}
+                aria-label="Preference behavior"
+              >
+                <label>
+                  <input
+                    type="radio"
+                    name="adaptation-mode"
+                    value="static"
+                    checked={preferenceDraft.adaptationMode === "static"}
+                    onChange={() => setAdaptationMode("static")}
+                  />
+                  <span>Static</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="adaptation-mode"
+                    value="adaptive"
+                    checked={preferenceDraft.adaptationMode === "adaptive"}
+                    onChange={() => setAdaptationMode("adaptive")}
+                  />
+                  <span>Adaptive</span>
+                </label>
+              </fieldset>
+            </div>
             <p id="preferences-description">
-              Shape future challengers with as much or as little detail as you
-              like. Novelty rules still take priority.
+              {preferenceDraft.adaptationMode === "static"
+                ? "Static preserves every field as entered."
+                : preferenceDraft.adaptationSourceWinnerIds.length > 0
+                  ? `Adaptive last revised this profile from ${preferenceDraft.adaptationSourceWinnerIds.length} winning image.`
+                  : "Adaptive lets the model revise this profile when a generated image wins."}{" "}
+              Novelty rules still take priority.
             </p>
             <div className={styles.preferenceGrid}>
               <div className={styles.fieldWide}>
@@ -1843,6 +1893,25 @@ export function GameScreen() {
                   autoFocus
                 />
                 <small id="preference-themes-hint">20–2,000 characters.</small>
+              </div>
+              <div className={styles.fieldWide}>
+                <label htmlFor="preference-inspiration">
+                  <span>Inspiration</span>
+                </label>
+                <textarea
+                  id="preference-inspiration"
+                  value={preferenceDraft.inspiration}
+                  onChange={(event) =>
+                    setPreferenceField("inspiration", event.target.value)
+                  }
+                  rows={3}
+                  maxLength={1000}
+                  placeholder="Optional composition, lighting, mood, or treatment cues"
+                  aria-describedby="preference-inspiration-hint"
+                />
+                <small id="preference-inspiration-hint">
+                  Optional composition, lighting, mood, or treatment cues.
+                </small>
               </div>
               <label className={styles.field}>
                 <span>Preferred media</span>

@@ -1,5 +1,6 @@
 import { link, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { preferenceProfileFromSeed } from "@/domain/game";
 import type {
   GenerationJob,
   GenerationMailbox,
@@ -87,6 +88,8 @@ export class MockAgentWorker {
       selectionHistory: job.selectionHistory,
       recentConcepts,
       preferenceSeed: job.preferenceSeed,
+      preferenceProfile:
+        job.preferenceProfile ?? preferenceProfileFromSeed(job.preferenceSeed),
     });
     const image = await this.imageProvider.generate(proposal.visualPrompt);
     if (

@@ -710,6 +710,71 @@ describe("GameScreen challenger reconciliation", () => {
     ).toBeVisible();
   });
 
+  it("keeps the original profile version when an open editor outlives an adaptive update", async () => {
+    installSuccessfulImagePreload();
+    const adaptiveCompletion = completedGame();
+    adaptiveCompletion.preferenceSeed = initializedGame.preferenceSeed;
+    adaptiveCompletion.preferenceProfile = {
+      themes: initializedGame.preferenceSeed,
+      inspiration: "",
+      mediaTypes: "",
+      visualStyle: "",
+      colorPalette: "",
+      contentLevel: "family-friendly",
+      avoid: "",
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["generated-left"],
+    };
+    let getCount = 0;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") return json(bufferedGeneratingGame(), 202);
+        if (init?.method === "PATCH") {
+          return json(
+            {
+              error:
+                "Preferences changed while this editor was open. Reopen Preferences and try again.",
+            },
+            409,
+          );
+        }
+        getCount += 1;
+        return json({
+          status: "ready",
+          game: getCount === 1 ? initializedGame : adaptiveCompletion,
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByTestId("candidate-card-left"));
+    await screen.findByTestId("loading-right");
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save profile" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    await screen.findByText(
+      "Preferences changed while this editor was open. Reopen Preferences and try again.",
+    );
+    const patchCall = fetchMock.mock.calls.find(
+      ([, init]) => init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
+      expectedPreferenceProfile: {
+        themes: initializedGame.preferenceSeed,
+        adaptationMode: "static",
+        adaptationSourceWinnerIds: [],
+      },
+    });
+  });
+
   it("keeps Preferences Save enabled outside a selection-bound wait", async () => {
     vi.stubGlobal(
       "fetch",
@@ -743,6 +808,11 @@ describe("GameScreen challenger reconciliation", () => {
     expect(screen.getByLabelText("Themes & subjects")).toHaveValue(
       initializedGame.preferenceSeed,
     );
+    expect(screen.getByRole("radio", { name: "Static" })).toBeChecked();
+    fireEvent.change(screen.getByLabelText("Inspiration"), {
+      target: { value: "high-contrast portrait lighting" },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "Adaptive" }));
     fireEvent.change(screen.getByLabelText("Preferred media"), {
       target: { value: "linocut and large-format photography" },
     });
@@ -768,8 +838,22 @@ describe("GameScreen challenger reconciliation", () => {
       ([, init]) => init?.method === "PATCH",
     );
     expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      expectedPreferenceProfile: {
+        themes: initializedGame.preferenceSeed,
+        inspiration: "",
+        adaptationMode: "static",
+        adaptationSourceWinnerIds: [],
+        mediaTypes: "",
+        visualStyle: "",
+        colorPalette: "",
+        contentLevel: "family-friendly",
+        avoid: "",
+      },
       preferenceProfile: {
         themes: initializedGame.preferenceSeed,
+        inspiration: "high-contrast portrait lighting",
+        adaptationMode: "adaptive",
+        adaptationSourceWinnerIds: [],
         mediaTypes: "linocut and large-format photography",
         visualStyle: "tactile and cinematic",
         colorPalette: "copper and ultraviolet",

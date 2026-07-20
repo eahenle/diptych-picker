@@ -21,12 +21,24 @@ const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_DIMENSION = 4096;
 const MAX_PIXELS = MAX_DIMENSION * MAX_DIMENSION;
 const nonBlankStringSchema = z.string().trim().min(1);
+const preferenceRevisionSchema = z
+  .object({
+    themes: nonBlankStringSchema.min(20).max(2_000),
+    inspiration: z.string().trim().max(1_000),
+    mediaTypes: z.string().trim().max(500),
+    visualStyle: z.string().trim().max(500),
+    colorPalette: z.string().trim().max(500),
+    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
+    avoid: z.string().trim().max(800),
+  })
+  .strict();
 const proposalSchema = z
   .object({
     concept: nonBlankStringSchema,
     visualPrompt: nonBlankStringSchema,
     styleTags: z.array(nonBlankStringSchema),
     reasoningSummary: nonBlankStringSchema,
+    preferenceRevision: preferenceRevisionSchema.optional(),
   })
   .strict();
 
@@ -40,7 +52,17 @@ const imagePath = required(args, "image");
 const root = dataDirectory();
 const mailbox = join(root, "agent-mailbox");
 
-await assertActiveJob(mailbox, jobId);
+const activeJob = await assertActiveJob(mailbox, jobId);
+const adaptationMode =
+  activeJob.preferenceProfile?.adaptationMode ??
+  activeJob.preferenceProfile?.inspirationMode ??
+  "static";
+if (adaptationMode === "adaptive" && !proposal.preferenceRevision) {
+  throw new Error("Adaptive jobs require a complete preferenceRevision");
+}
+if (adaptationMode !== "adaptive" && proposal.preferenceRevision) {
+  throw new Error("Static jobs must omit preferenceRevision");
+}
 const imageStat = await stat(imagePath);
 if (!imageStat.isFile()) throw new Error("Image path must be a regular file");
 if (imageStat.size > MAX_IMAGE_BYTES) {

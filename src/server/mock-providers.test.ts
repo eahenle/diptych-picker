@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { preferenceProfileFromSeed } from "@/domain/game";
 import {
   MockChallengerPromptProvider,
   MockImageProvider,
@@ -29,6 +30,7 @@ describe("mock providers", () => {
       selectionHistory: [],
       recentConcepts: ["Kinetic paper aviary", "Subterranean ceramic archive"],
       preferenceSeed: "novelty",
+      preferenceProfile: preferenceProfileFromSeed("novelty"),
     });
 
     expect([

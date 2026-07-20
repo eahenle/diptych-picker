@@ -266,6 +266,7 @@ export async function getDisplayedEloRatings(game: GameState) {
 export async function updatePreferenceSeed(
   preferenceSeed: string,
   preferenceProfile?: PreferenceProfile,
+  expectedPreferenceProfile?: PreferenceProfile,
 ): Promise<GameState> {
   const start = await getOrCreateGame();
   if (start.status !== "ready") {
@@ -273,5 +274,9 @@ export async function updatePreferenceSeed(
       "Wait for the initial candidates before editing preferences",
     );
   }
-  return gameService.updatePreferenceSeed(preferenceSeed, preferenceProfile);
+  return gameService.updatePreferenceSeed(
+    preferenceSeed,
+    preferenceProfile,
+    expectedPreferenceProfile,
+  );
 }

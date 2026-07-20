@@ -1,12 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChallengerState } from "@/domain/challenger-state";
-import type { Candidate, GameState } from "@/domain/game";
+import {
+  composePreferenceSeed,
+  preferenceProfileFromSeed,
+  type Candidate,
+  type GameState,
+} from "@/domain/game";
 import { MemoryChallengerRepository } from "./challenger-repository";
 import {
   GAME_SNAPSHOT_FORMAT,
   GameSnapshotService,
   GameSnapshotUnavailableError,
   InvalidGameSnapshotError,
+  parseGameSnapshot,
 } from "./game-snapshot";
 import { MemoryInitialBootstrapRepository } from "./initial-bootstrap";
 import { MemoryGameRepository } from "./repository";
@@ -22,10 +28,25 @@ function candidate(id: string): Candidate {
     style: ["photographic"],
     createdAt: NOW,
     winCount: 0,
+    preferenceRevision: {
+      themes: "Cinematic mechanical botany studies",
+      inspiration: "low-key lighting",
+      mediaTypes: "photography",
+      visualStyle: "cinematic",
+      colorPalette: "copper and ultraviolet",
+      contentLevel: "family-friendly",
+      avoid: "readable text",
+    },
   };
 }
 
 function gameState(): GameState {
+  const preferenceProfile = {
+    ...preferenceProfileFromSeed("Prefer cinematic mechanical botany"),
+    inspiration: "low-key lighting",
+    adaptationMode: "adaptive" as const,
+    adaptationSourceWinnerIds: ["left"],
+  };
   return {
     round: {
       leftCandidate: candidate("left"),
@@ -47,7 +68,8 @@ function gameState(): GameState {
         selectedAt: NOW,
       },
     ],
-    preferenceSeed: "Prefer cinematic mechanical botany",
+    preferenceSeed: composePreferenceSeed(preferenceProfile),
+    preferenceProfile,
   };
 }
 
@@ -151,6 +173,37 @@ function service(options: {
 }
 
 describe("GameSnapshotService", () => {
+  it.each([
+    [
+      "an oversized candidate preference revision",
+      (game: GameState) => {
+        game.round.leftCandidate.preferenceRevision!.themes = "x".repeat(2_001);
+      },
+    ],
+    [
+      "too many adaptive source winners",
+      (game: GameState) => {
+        game.preferenceProfile!.adaptationSourceWinnerIds = Array.from(
+          { length: 13 },
+          (_, index) => `winner-${index}`,
+        );
+      },
+    ],
+  ])("rejects %s in an imported snapshot", (_label, mutate) => {
+    const game = gameState();
+    mutate(game);
+
+    expect(() =>
+      parseGameSnapshot({
+        format: GAME_SNAPSHOT_FORMAT,
+        version: 1,
+        exportedAt: NOW,
+        game,
+        challengers: challengerState(),
+      }),
+    ).toThrow(InvalidGameSnapshotError);
+  });
+
   it("exports a versioned restorable snapshot without session-bound work", async () => {
     const context = service({
       game: gameState(),

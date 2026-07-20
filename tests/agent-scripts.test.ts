@@ -63,6 +63,25 @@ const proposal = {
   reasoningSummary: "Introduces warmth and craft.",
 };
 
+const preferenceRevision = {
+  themes: "clearly adult alternative portrait studies",
+  inspiration: "severe off-axis framing",
+  mediaTypes: "large-format photography",
+  visualStyle: "cinematic and tactile",
+  colorPalette: "ultraviolet and oxblood",
+  contentLevel: "adult-allowed",
+  avoid: "readable text",
+};
+
+const adaptiveJob = (id: string) => ({
+  ...job(id),
+  preferenceProfile: {
+    ...preferenceRevision,
+    adaptationMode: "adaptive" as const,
+    adaptationSourceWinnerIds: [],
+  },
+});
+
 async function createDataDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), "diptych-agent-scripts-"));
 }
@@ -89,7 +108,7 @@ async function runScript(
 async function putJob(
   root: string,
   directory: "pending" | "active",
-  value: ReturnType<typeof job>,
+  value: { id: string },
 ): Promise<void> {
   const target = join(root, "agent-mailbox", directory);
   await mkdir(target, { recursive: true });
@@ -544,6 +563,118 @@ describe("agent mailbox scripts", () => {
     );
 
     expect(completed.proposal).toEqual(proposal);
+  });
+
+  it("publishes a complete adaptive preference revision", async () => {
+    const root = await createDataDirectory();
+    await putJob(root, "active", adaptiveJob("job-adaptive"));
+    const image = await squareImage(root, "job-adaptive");
+    const proposalPath = await customProposalFile(root, "job-adaptive", {
+      ...proposal,
+      preferenceRevision,
+    });
+
+    const completed = JSON.parse(
+      (
+        await runScript(
+          "complete-job.mjs",
+          [
+            "--job",
+            "job-adaptive",
+            "--proposal-file",
+            proposalPath,
+            "--image",
+            image.path,
+          ],
+          root,
+        )
+      ).stdout,
+    );
+
+    expect(completed.proposal.preferenceRevision).toEqual(preferenceRevision);
+  });
+
+  it("rejects a partial adaptive preference revision", async () => {
+    const root = await createDataDirectory();
+    await putJob(root, "active", adaptiveJob("job-partial-profile"));
+    const image = await squareImage(root, "job-partial-profile");
+    const proposalPath = await customProposalFile(root, "job-partial-profile", {
+      ...proposal,
+      preferenceRevision: { themes: preferenceRevision.themes },
+    });
+
+    await expect(
+      runScript(
+        "complete-job.mjs",
+        [
+          "--job",
+          "job-partial-profile",
+          "--proposal-file",
+          proposalPath,
+          "--image",
+          image.path,
+        ],
+        root,
+      ),
+    ).rejects.toMatchObject({ stderr: expect.stringMatching(/invalid_type/i) });
+    await expectNoCompletionArtifacts(root, "job-partial-profile");
+  });
+
+  it("rejects a preference revision for a Static job", async () => {
+    const root = await createDataDirectory();
+    await putJob(root, "active", job("job-static-profile"));
+    const image = await squareImage(root, "job-static-profile");
+    const proposalPath = await customProposalFile(root, "job-static-profile", {
+      ...proposal,
+      preferenceRevision,
+    });
+
+    await expect(
+      runScript(
+        "complete-job.mjs",
+        [
+          "--job",
+          "job-static-profile",
+          "--proposal-file",
+          proposalPath,
+          "--image",
+          image.path,
+        ],
+        root,
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringMatching(/Static jobs must omit/i),
+    });
+    await expectNoCompletionArtifacts(root, "job-static-profile");
+  });
+
+  it("rejects an Adaptive job without a preference revision", async () => {
+    const root = await createDataDirectory();
+    await putJob(root, "active", adaptiveJob("job-adaptive-missing-profile"));
+    const image = await squareImage(root, "job-adaptive-missing-profile");
+    const proposalPath = await customProposalFile(
+      root,
+      "job-adaptive-missing-profile",
+      proposal,
+    );
+
+    await expect(
+      runScript(
+        "complete-job.mjs",
+        [
+          "--job",
+          "job-adaptive-missing-profile",
+          "--proposal-file",
+          proposalPath,
+          "--image",
+          image.path,
+        ],
+        root,
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringMatching(/Adaptive jobs require/i),
+    });
+    await expectNoCompletionArtifacts(root, "job-adaptive-missing-profile");
   });
 
   it.each([

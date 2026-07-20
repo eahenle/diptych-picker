@@ -1,17 +1,26 @@
 export type Side = "left" | "right";
 export type RoundStatus = "idle" | "generating" | "error";
 export type PreferenceContentLevel = "family-friendly" | "adult-allowed";
+export type PreferenceAdaptationMode = "static" | "adaptive";
 export const GENERATION_JOB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 export const CHAMPION_RETIREMENT_STREAK = 10;
 
 export interface PreferenceProfile {
   themes: string;
+  inspiration: string;
   mediaTypes: string;
   visualStyle: string;
   colorPalette: string;
   contentLevel: PreferenceContentLevel;
   avoid: string;
+  adaptationMode: PreferenceAdaptationMode;
+  adaptationSourceWinnerIds: string[];
 }
+
+export type PreferenceRevision = Omit<
+  PreferenceProfile,
+  "adaptationMode" | "adaptationSourceWinnerIds"
+>;
 
 export interface Candidate {
   id: string;
@@ -22,6 +31,7 @@ export interface Candidate {
   createdAt: string;
   winCount: number;
   reasoningSummary?: string;
+  preferenceRevision?: PreferenceRevision;
 }
 
 export interface Round {
@@ -82,17 +92,21 @@ export function preferenceProfileFromSeed(
 ): PreferenceProfile {
   return {
     themes: preferenceSeed,
+    inspiration: "",
     mediaTypes: "",
     visualStyle: "",
     colorPalette: "",
     contentLevel: "family-friendly",
     avoid: "",
+    adaptationMode: "static",
+    adaptationSourceWinnerIds: [],
   };
 }
 
 export function composePreferenceSeed(profile: PreferenceProfile): string {
   const sections = [
     ["Themes and subjects", profile.themes],
+    ["Inspiration", profile.inspiration],
     ["Preferred media", profile.mediaTypes],
     ["Visual style and mood", profile.visualStyle],
     ["Color palette", profile.colorPalette],
@@ -109,6 +123,20 @@ export function composePreferenceSeed(profile: PreferenceProfile): string {
     .filter(([, value]) => value.trim().length > 0)
     .map(([label, value]) => `${label}: ${value.trim()}`)
     .join("\n");
+}
+
+export function applyWinnerPreferenceRevision(
+  profile: PreferenceProfile,
+  winner: Candidate,
+): PreferenceProfile {
+  if (profile.adaptationMode !== "adaptive" || !winner.preferenceRevision) {
+    return profile;
+  }
+  return {
+    ...winner.preferenceRevision,
+    adaptationMode: "adaptive",
+    adaptationSourceWinnerIds: [winner.id],
+  };
 }
 
 export type GameStartState =
@@ -426,7 +454,28 @@ export function migratePendingSelectionState(state: GameState): GameState {
 }
 
 export function migratePreferenceProfileState(state: GameState): GameState {
-  if (state.preferenceProfile) return state;
+  if (state.preferenceProfile) {
+    const legacy = state.preferenceProfile as PreferenceProfile & {
+      inspirationMode?: PreferenceAdaptationMode;
+      inspirationSourceWinnerIds?: string[];
+    };
+    const preferenceProfile: PreferenceProfile = {
+      themes: legacy.themes,
+      inspiration: legacy.inspiration ?? "",
+      mediaTypes: legacy.mediaTypes,
+      visualStyle: legacy.visualStyle,
+      colorPalette: legacy.colorPalette,
+      contentLevel: legacy.contentLevel,
+      avoid: legacy.avoid,
+      adaptationMode:
+        legacy.adaptationMode ?? legacy.inspirationMode ?? "static",
+      adaptationSourceWinnerIds:
+        legacy.adaptationSourceWinnerIds ??
+        legacy.inspirationSourceWinnerIds ??
+        [],
+    };
+    return { ...state, preferenceProfile };
+  }
   return {
     ...state,
     preferenceProfile: preferenceProfileFromSeed(state.preferenceSeed),

@@ -8,6 +8,10 @@ The Round metric opens a newest-first timeline of prior decisions. Each row reso
 
 History and pool rows let the player favorite exceptional candidates. Favorite state belongs to the durable rating catalog, is shared across both views, survives new games and save-file round trips, and remains independent of Elo and reusable-pool membership. Richer lineage remains a separate follow-up.
 
+### Profile-wide adaptation
+
+The Preference profile title row exposes **Static / Adaptive** for the entire profile. Static is the default and prevents model mutation of every preference field. Adaptive lets each generated proposal carry a complete trajectory-conditioned profile revision; the app adopts it only if that candidate later wins, records the influencing winner ID, invalidates earlier-profile buffer capacity, and composes future jobs from the revised fields.
+
 ## 2026-07-19
 
 ### Comparison-loop follow-ups
@@ -29,7 +33,7 @@ The detailed handoff, protocol, safety constraints, and staged migration are in 
 
 Eventually derive editable inspiration signals from winning generated images. Learn transferable attributes such as lighting, composition, palette, mood, medium, and concept—not a person's identity or likeness. Keep this inferred inspiration profile separate from explicit card weights and verdict edits, show which winners influenced it, and let the player weaken, edit, reset, or disable it.
 
-Place a **Static / Adaptive** toggle beside the inspiration field. Static is the default and preserves the user's text exactly as entered. Adaptive explicitly permits the model to revise that field from the game trajectory; revisions remain attributable to the influencing winners and must not override the user's other explicit preference constraints.
+Place a **Static / Adaptive** toggle on the top line of the Preference profile modal and apply it to every preference field. Static is the default and preserves the profile as entered. Adaptive explicitly permits the model to revise the full profile from the game trajectory; revisions remain attributable to the influencing winners.
 
 ## 2026-07-17
 
@@ -76,9 +80,19 @@ Let a player optionally explain a choice with quick tags such as subject, compos
 
 Add **Skip / neither** and eventually **both** outcomes so the learning model does not have to treat every forced choice as a strong preference.
 
+Add a **Tie** action mapped to `C` and `3`. If the candidates have different Elo scores, update only the lower-rated candidate as though it won and leave the higher-rated candidate unchanged. If their scores are equal, neither score changes. In either case, clear both candidates from the active round.
+
+### Image inspection and score-state cues
+
+Add a magnifying-glass action that opens either candidate in a larger image view. Replace the visible Elo number with a distinct symbol when a candidate is appearing for the first time, and with another symbol when losing the current round would remove that candidate from the reusable pool.
+
 ### Preference presets and weighting
 
 Allow named profiles for different creative moods, with lightweight importance controls for fields that should act as firm constraints versus loose inspiration. A profile could be duplicated and adjusted without losing the original.
+
+### Source-image profile ingestion
+
+Let the player ingest a source image and derive an editable Preference profile aimed at generating variations on its depicted themes and content. The populated fields should describe transferable subject matter, composition, medium, style, palette, and constraints rather than asking future generations to reproduce a specific person's identity or exact likeness.
 
 ### History, lineage, and favorites
 

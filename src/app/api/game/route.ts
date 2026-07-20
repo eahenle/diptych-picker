@@ -17,19 +17,38 @@ export const dynamic = "force-dynamic";
 
 const preferenceProfileSchema = z
   .object({
-    themes: z.string().trim().min(20).max(2_000),
-    mediaTypes: z.string().trim().max(500),
-    visualStyle: z.string().trim().max(500),
-    colorPalette: z.string().trim().max(500),
+    themes: z
+      .string()
+      .max(2_000)
+      .refine((value) => value.trim().length >= 20),
+    inspiration: z.string().max(1_000).default(""),
+    adaptationMode: z.enum(["static", "adaptive"]).default("static"),
+    adaptationSourceWinnerIds: z
+      .array(z.string().trim().min(1).max(200))
+      .max(12)
+      .default([]),
+    mediaTypes: z.string().max(500),
+    visualStyle: z.string().max(500),
+    colorPalette: z.string().max(500),
     contentLevel: z.enum(["family-friendly", "adult-allowed"]),
-    avoid: z.string().trim().max(800),
+    avoid: z.string().max(800),
   })
   .strict();
 
 const preferencePatchSchema = z
   .union([
-    z.object({ preferenceProfile: preferenceProfileSchema }).strict(),
-    z.object({ preferenceSeed: z.string().trim().min(20).max(4_000) }).strict(),
+    z
+      .object({
+        preferenceProfile: preferenceProfileSchema,
+        expectedPreferenceProfile: preferenceProfileSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        preferenceSeed: z.string().trim().min(20).max(4_000),
+        expectedPreferenceProfile: preferenceProfileSchema.optional(),
+      })
+      .strict(),
   ])
   .transform((value) => {
     const preferenceProfile =
@@ -38,6 +57,7 @@ const preferencePatchSchema = z
         : preferenceProfileFromSeed(value.preferenceSeed);
     return {
       preferenceProfile,
+      expectedPreferenceProfile: value.expectedPreferenceProfile,
       preferenceSeed:
         "preferenceProfile" in value
           ? composePreferenceSeed(preferenceProfile)
@@ -85,6 +105,7 @@ export async function PATCH(request: Request) {
       await updatePreferenceSeed(
         parsed.data.preferenceSeed,
         parsed.data.preferenceProfile,
+        parsed.data.expectedPreferenceProfile,
       ),
     );
   } catch (error) {
