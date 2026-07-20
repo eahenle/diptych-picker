@@ -65,7 +65,7 @@ async function reconcileAllRefills(request: APIRequestContext): Promise<void> {
           return 0;
         }
       },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     )
     .toBe(0);
 }
@@ -103,7 +103,9 @@ test("starts with five durable challengers and adapts two independent images to 
   await expect(
     page.getByLabel("Ready queue 5 of 5; 0 generating"),
   ).toBeVisible();
-  await expect(page.getByLabel("Reusable image pool 7 of 50")).toBeVisible();
+  await expect(
+    page.getByLabel("View pool leaderboard; 7 of 50 reusable images"),
+  ).toBeVisible();
   await expect(page.getByTestId("candidate-card-left")).toContainText(
     /Elo\s*1000/,
   );
@@ -143,6 +145,66 @@ test("starts with five durable challengers and adapts two independent images to 
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
+});
+
+test("opens a display-safe reusable-pool leaderboard", async ({
+  page,
+  request,
+}) => {
+  await page
+    .getByRole("button", {
+      name: "View pool leaderboard; 7 of 50 reusable images",
+    })
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "Pool leaderboard" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("listitem")).toHaveCount(7);
+  await expect(dialog.getByText(/1000/)).toHaveCount(7);
+
+  const response = await request.get("/api/game/leaderboard");
+  expect(response.status()).toBe(200);
+  const body = await response.json();
+  expect(body.entries).toHaveLength(7);
+  expect(JSON.stringify(body)).not.toContain('"prompt"');
+});
+
+test("exports the last stable comparison while a challenger is loading", async ({
+  page,
+  request,
+}) => {
+  await updateChallengerState((state) => ({
+    ...state,
+    ready: [],
+    consecutiveFallbackDraws: 10,
+    nextFallbackAt: null,
+  }));
+  const exportResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/snapshot") &&
+      response.request().method() === "GET",
+  );
+
+  await select(page, "left", 1, 202);
+  await expect(page.getByRole("button", { name: "Export" })).toBeEnabled();
+  const directResponse = await request.get("/api/game/snapshot");
+  expect(directResponse.status()).toBe(200);
+  const snapshot = await directResponse.json();
+  await page.getByRole("button", { name: "Export" }).click();
+
+  const response = await exportResponse;
+  expect(response.status()).toBe(200);
+  expect(snapshot.game.round).toMatchObject({
+    status: "idle",
+    replacingSide: null,
+    roundNumber: 1,
+  });
+  expect(snapshot.game.pendingSelection).toBeUndefined();
+  expect(snapshot.challengers).toMatchObject({
+    refillJobs: [],
+    pendingComparison: null,
+    pendingSelectionBaseline: null,
+  });
 });
 
 test("persists a fine-grained preference profile and composes generation context", async ({

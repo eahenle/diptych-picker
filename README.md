@@ -113,7 +113,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
 - Shape future challengers through **Preferences**, with separate guidance for themes, media, visual style, palette, content range, and things to avoid. Saving a changed profile clears candidates buffered under the earlier brief, replaces their capacity with jobs carrying the new seed, and discards any earlier-brief result after its already-running worker exits. Image workers must treat the composed preference seed as authoritative; winner and history context may vary the treatment but cannot override explicit constraints. The modal stays openable while a selection waits; Save enables as soon as that challenger arrives.
-- The quiet **Queue** and **Pool** readouts show ready challengers, active refill work, and reusable-image capacity without exposing mailbox or candidate details.
+- The quiet **Queue** readout shows ready challengers and active refill work. Select **Pool** to open the reusable-image leaderboard, ranked by Elo with each candidate's thumbnail, concept, style, win–loss record, and curated/generated provenance; prompts and mailbox details remain private.
 - **New game** opens a save/restore dialog. Export the exact current game, load a prior JSON save, or start fresh; starting fresh clears the round, history, and preference profile while retaining learned pool ratings and immutable images.
 
 ## Verification
@@ -141,4 +141,5 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/asset-store.ts`: immutable PNG storage and verification.
 - `src/components/game-screen.tsx`: async polling, preload-before-swap, keyboard controls, and exactly two candidate images once ready.
 - `GET /api/game/health`: a narrow live snapshot of ready, in-flight, and reusable-pool counts for the UI status readout.
+- `GET /api/game/leaderboard`: the current reusable pool ranked by Elo with display-safe candidate metadata and no prompt or mailbox contents.
 - `GET` and `PUT /api/game/snapshot`: download and restore validated local game saves.

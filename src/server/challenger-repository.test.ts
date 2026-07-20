@@ -56,6 +56,7 @@ const populatedState: ChallengerState = {
     },
   ],
   pendingComparison: null,
+  pendingSelectionBaseline: null,
   ratings: [
     {
       candidate: candidate("winner-1"),

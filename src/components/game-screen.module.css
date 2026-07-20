@@ -113,6 +113,24 @@
   letter-spacing: 0.12em;
 }
 
+.poolMetric {
+  margin: 0;
+  padding: 4px 6px;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.poolMetric:hover,
+.poolMetric:focus-visible {
+  color: var(--text);
+  border-color: rgba(180, 104, 73, 0.55);
+  background: rgba(180, 104, 73, 0.08);
+  outline: none;
+}
+
 .supplyMetric strong {
   margin-left: 1px;
   color: #d9d2cb;
@@ -388,6 +406,104 @@
 .gameStateModal {
   width: min(680px, 100%);
 }
+.leaderboardModal {
+  width: min(820px, 100%);
+}
+.leaderboardClose {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  float: right;
+  width: 34px;
+  height: 34px;
+  margin: -6px -6px 0 12px;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+  background: rgba(17, 20, 23, 0.94);
+  border: 1px solid #383337;
+  cursor: pointer;
+}
+.leaderboardClose:hover,
+.leaderboardClose:focus-visible {
+  color: var(--text);
+  border-color: var(--copper-bright);
+  outline: none;
+}
+.leaderboardState {
+  padding: 24px 0;
+  text-align: center;
+}
+.leaderboardList {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.leaderboardList li {
+  display: grid;
+  grid-template-columns: 36px 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px 10px 8px;
+  border: 1px solid #383337;
+  background: #090b0d;
+}
+.leaderboardList img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.leaderboardRank {
+  color: var(--copper-bright);
+  font-family: Georgia, serif;
+  font-size: 24px;
+  text-align: center;
+}
+.leaderboardIdentity {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.leaderboardIdentity strong {
+  overflow: hidden;
+  color: #e4ddd5;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leaderboardIdentity small {
+  overflow: hidden;
+  color: #8f8984;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leaderboardIdentity em {
+  color: #9d7868;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.leaderboardScore {
+  min-width: 58px;
+  display: grid;
+  gap: 3px;
+  text-align: right;
+}
+.leaderboardScore strong {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 18px;
+}
+.leaderboardScore small {
+  color: #8f8984;
+  font-size: 10px;
+}
 .transferOptions {
   display: grid;
   gap: 10px;
@@ -619,6 +735,18 @@
   }
   .fieldWide {
     grid-column: 1;
+  }
+  .leaderboardList li {
+    grid-template-columns: 28px 56px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding-inline: 6px 10px;
+  }
+  .leaderboardList img {
+    width: 56px;
+    height: 56px;
+  }
+  .leaderboardIdentity small {
+    display: none;
   }
 }
 
