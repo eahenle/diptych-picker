@@ -9,6 +9,7 @@ import type {
 } from "@/domain/game";
 import {
   summarizeBufferHealth,
+  summarizeComparisonHistory,
   summarizeDisplayedEloRatings,
   summarizePoolLeaderboard,
 } from "@/domain/challenger-state";
@@ -209,6 +210,18 @@ export async function getPoolLeaderboard() {
   return {
     entries: summarizePoolLeaderboard(await challengerRepository.load()),
     poolMaximum: challengerConfig.poolMaximum,
+  };
+}
+
+export async function getComparisonHistory() {
+  const game = await gameService.reconcile();
+  const history = game?.history ?? [];
+  return {
+    entries: summarizeComparisonHistory(
+      history,
+      await challengerRepository.load(),
+    ),
+    total: history.length,
   };
 }
 

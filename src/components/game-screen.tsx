@@ -1,6 +1,6 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element -- Leaderboard thumbnails use immutable local candidate URLs. */
+/* eslint-disable @next/next/no-img-element -- History and leaderboard thumbnails use immutable local candidate URLs. */
 
 import {
   useCallback,
@@ -23,7 +23,10 @@ import {
   type PreferenceProfile,
   type Side,
 } from "@/domain/game";
-import type { PoolLeaderboardEntry } from "@/domain/challenger-state";
+import type {
+  ComparisonHistoryEntry,
+  PoolLeaderboardEntry,
+} from "@/domain/challenger-state";
 import { CandidateCard } from "./candidate-card";
 import styles from "./game-screen.module.css";
 
@@ -155,6 +158,15 @@ function matchingCompletedSelection(
   return history?.winnerId === winner.id && history.loserId === loser.id;
 }
 
+function formatSelectionTime(selectedAt: string): string {
+  const date = new Date(selectedAt);
+  if (Number.isNaN(date.valueOf())) return selectedAt;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 type HeaderPictographName = "export" | "load" | "preferences" | "new";
 
 function HeaderPictograph({ name }: { name: HeaderPictographName }) {
@@ -214,6 +226,13 @@ export function GameScreen() {
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [newGameOpen, setNewGameOpen] = useState(false);
   const [loadGameOpen, setLoadGameOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<
+    ComparisonHistoryEntry[]
+  >([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [leaderboardEntries, setLeaderboardEntries] = useState<
     PoolLeaderboardEntry[]
@@ -769,7 +788,13 @@ export function GameScreen() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (preferencesOpen || newGameOpen || loadGameOpen || leaderboardOpen) {
+      if (
+        preferencesOpen ||
+        newGameOpen ||
+        loadGameOpen ||
+        leaderboardOpen ||
+        historyOpen
+      ) {
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat)
@@ -782,7 +807,37 @@ export function GameScreen() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [leaderboardOpen, loadGameOpen, newGameOpen, preferencesOpen, select]);
+  }, [
+    historyOpen,
+    leaderboardOpen,
+    loadGameOpen,
+    newGameOpen,
+    preferencesOpen,
+    select,
+  ]);
+
+  const openComparisonHistory = async () => {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const response = await fetch("/api/game/history", {
+        cache: "no-store",
+      });
+      const data = await readJson<{
+        entries: ComparisonHistoryEntry[];
+        total: number;
+      }>(response);
+      setHistoryEntries(data.entries);
+      setHistoryTotal(data.total);
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error ? error.message : "Could not load history",
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const openPoolLeaderboard = async () => {
     setLeaderboardOpen(true);
@@ -1090,9 +1145,15 @@ export function GameScreen() {
       {game ? (
         <>
           <section className={styles.metrics} aria-label="Game status">
-            <span>
+            <button
+              type="button"
+              className={styles.metricButton}
+              aria-label={`View comparison history; ${game.history.length} decisions`}
+              title="View comparison history"
+              onClick={() => void openComparisonHistory()}
+            >
               Round <strong>{game.round.roundNumber}</strong>
-            </span>
+            </button>
             <i aria-hidden="true" />
             <span>
               Win streak <strong>{streak}</strong>
@@ -1121,7 +1182,7 @@ export function GameScreen() {
                 <i aria-hidden="true" />
                 <button
                   type="button"
-                  className={`${styles.supplyMetric} ${styles.poolMetric}`}
+                  className={`${styles.supplyMetric} ${styles.metricButton}`}
                   aria-label={`View pool leaderboard; ${bufferHealth.pool} of ${bufferHealth.poolMaximum} reusable images`}
                   title="View pool leaderboard"
                   onClick={() => void openPoolLeaderboard()}
@@ -1200,6 +1261,129 @@ export function GameScreen() {
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {historyOpen && game ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onMouseDown={() => setHistoryOpen(false)}
+        >
+          <section
+            className={`${styles.preferencesModal} ${styles.historyModal}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comparison-history-title"
+            aria-describedby="comparison-history-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className={styles.leaderboardClose}
+              aria-label="Close history"
+              onClick={() => setHistoryOpen(false)}
+            >
+              ×
+            </button>
+            <h2 id="comparison-history-title">Comparison history</h2>
+            <p id="comparison-history-description">
+              Newest choices first. Each row shows the selected winner and the
+              rejected candidate without exposing their generation prompts.
+            </p>
+            {historyLoading ? (
+              <p className={styles.leaderboardState} role="status">
+                Rebuilding the timeline…
+              </p>
+            ) : historyError ? (
+              <p className={styles.transferError} role="alert">
+                {historyError}
+              </p>
+            ) : historyEntries.length === 0 ? (
+              <p className={styles.leaderboardState}>
+                No comparisons have been decided yet.
+              </p>
+            ) : (
+              <>
+                <p className={styles.historyCount}>
+                  Showing {historyEntries.length} of {historyTotal} decisions
+                </p>
+                <ol className={styles.historyList}>
+                  {historyEntries.map((entry) => (
+                    <li key={`${entry.decisionNumber}-${entry.selectedAt}`}>
+                      <span className={styles.historyDecision}>
+                        #{entry.decisionNumber}
+                      </span>
+                      <span className={styles.historyCandidate}>
+                        {entry.winner.imageUrl ? (
+                          <img
+                            src={entry.winner.imageUrl}
+                            alt=""
+                            width={64}
+                            height={64}
+                          />
+                        ) : (
+                          <span
+                            className={styles.historyImagePlaceholder}
+                            aria-hidden="true"
+                          >
+                            —
+                          </span>
+                        )}
+                        <span>
+                          <strong>{entry.winner.concept}</strong>
+                          <small>
+                            {entry.winner.style.slice(0, 2).join(" · ")}
+                          </small>
+                          <em>Winner</em>
+                        </span>
+                      </span>
+                      <span className={styles.historyVersus} aria-hidden="true">
+                        over
+                      </span>
+                      <span className={styles.historyCandidate}>
+                        {entry.loser.imageUrl ? (
+                          <img
+                            src={entry.loser.imageUrl}
+                            alt=""
+                            width={64}
+                            height={64}
+                          />
+                        ) : (
+                          <span
+                            className={styles.historyImagePlaceholder}
+                            aria-hidden="true"
+                          >
+                            —
+                          </span>
+                        )}
+                        <span>
+                          <strong>{entry.loser.concept}</strong>
+                          <small>
+                            {entry.loser.style.slice(0, 2).join(" · ")}
+                          </small>
+                          <em>Rejected</em>
+                        </span>
+                      </span>
+                      <time dateTime={entry.selectedAt}>
+                        {formatSelectionTime(entry.selectedAt)}
+                      </time>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.utilityButton}
+                onClick={() => setHistoryOpen(false)}
+                autoFocus
+              >
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {leaderboardOpen && game ? (

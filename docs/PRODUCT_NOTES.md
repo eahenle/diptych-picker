@@ -1,5 +1,11 @@
 # Product Notes
 
+## 2026-07-20
+
+### Comparison history
+
+The Round metric opens a newest-first timeline of prior decisions. Each row resolves display-safe winner and rejected-candidate thumbnails, concepts, and concise style tags from the durable rating catalog without exposing prompts. The first iteration shows up to fifty decisions and retains a total count; richer lineage and favorites remain separate follow-ups.
+
 ## 2026-07-19
 
 ### Comparison-loop follow-ups
@@ -20,6 +26,8 @@ The detailed handoff, protocol, safety constraints, and staged migration are in 
 ### Winner-driven inspiration
 
 Eventually derive editable inspiration signals from winning generated images. Learn transferable attributes such as lighting, composition, palette, mood, medium, and concept—not a person's identity or likeness. Keep this inferred inspiration profile separate from explicit card weights and verdict edits, show which winners influenced it, and let the player weaken, edit, reset, or disable it.
+
+Place a **Static / Adaptive** toggle beside the inspiration field. Static is the default and preserves the user's text exactly as entered. Adaptive explicitly permits the model to revise that field from the game trajectory; revisions remain attributable to the influencing winners and must not override the user's other explicit preference constraints.
 
 ## 2026-07-17
 

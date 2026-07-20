@@ -94,6 +94,8 @@ The blender agent combines two cards into one prompt and records both parents. T
 
 Maintain a separate, editable inspiration profile inferred from winning generated images. It may describe lighting, composition, palette, mood, medium, pose, and concept. It must not encode facial identity or request a doppelganger. Each revision records its influencing winner IDs and can be weakened, reset, or disabled by the player.
 
+The inspiration field has an adjacent **Static / Adaptive** toggle. Static is the default and keeps the user's exact field value out of model mutation. Adaptive permits trajectory-conditioned model revisions and preserves the influencing winner IDs for each change. In either mode, explicit preference constraints remain authoritative over inferred inspiration.
+
 ## Safety and prompt quality
 
 - Cards describe generic archetypes and styles, not a private person's likeness.

@@ -476,6 +476,94 @@ describe("GameScreen challenger reconciliation", () => {
     expect(dialog).not.toBeInTheDocument();
   });
 
+  it("opens newest-first comparison history from the Round metric", async () => {
+    const game = cloneGame();
+    game.history = [
+      {
+        winnerId: "older-winner",
+        loserId: "older-loser",
+        winnerPrompt: "private older winner prompt",
+        loserPrompt: "private older loser prompt",
+        winnerConcept: "Older winner",
+        loserConcept: "Older rejected",
+        selectedAt: "2026-07-16T10:00:00.000Z",
+      },
+      {
+        winnerId: "latest-winner",
+        loserId: "latest-loser",
+        winnerPrompt: "private latest winner prompt",
+        loserPrompt: "private latest loser prompt",
+        winnerConcept: "Latest winner",
+        loserConcept: "Latest rejected",
+        selectedAt: "2026-07-16T11:00:00.000Z",
+      },
+    ];
+    game.round.roundNumber = 3;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/api/game/history")
+        ? json({
+            total: 2,
+            entries: [
+              {
+                decisionNumber: 2,
+                selectedAt: "2026-07-16T11:00:00.000Z",
+                winner: {
+                  id: "latest-winner",
+                  imageUrl: "/api/assets/latest-winner.png",
+                  concept: "Latest winner",
+                  style: ["editorial"],
+                },
+                loser: {
+                  id: "latest-loser",
+                  imageUrl: "/api/assets/latest-loser.png",
+                  concept: "Latest rejected",
+                  style: ["linocut"],
+                },
+              },
+              {
+                decisionNumber: 1,
+                selectedAt: "2026-07-16T10:00:00.000Z",
+                winner: {
+                  id: "older-winner",
+                  imageUrl: "/api/assets/older-winner.png",
+                  concept: "Older winner",
+                  style: [],
+                },
+                loser: {
+                  id: "older-loser",
+                  imageUrl: null,
+                  concept: "Older rejected",
+                  style: [],
+                },
+              },
+            ],
+          })
+        : json({ status: "ready", game }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "View comparison history; 2 decisions",
+      }),
+    );
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Comparison history",
+    });
+    expect(dialog).toHaveTextContent(
+      /#2.*Latest winner.*Winner.*over.*Latest rejected.*Rejected/i,
+    );
+    expect(dialog).toHaveTextContent(/Showing 2 of 2 decisions/);
+    expect(dialog.getElementsByTagName("li")).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/history", {
+      cache: "no-store",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close history" }));
+    expect(dialog).not.toBeInTheDocument();
+  });
+
   it("commits an instant buffered round after preloading only the losing asset", async () => {
     const preloadedUrls: string[] = [];
     installRecordedImagePreload(preloadedUrls);
