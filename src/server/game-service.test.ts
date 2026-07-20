@@ -411,6 +411,35 @@ describe("GameService challenger buffer", () => {
     expect(context.queue.enqueue).not.toHaveBeenCalled();
   });
 
+  it("clears a moderation notice when preferences are saved or the notice is dismissed", async () => {
+    const profile = preferenceProfileFromSeed(
+      "industrial, gothic, natural, and surprising",
+    );
+    const game = gameState({
+      preferenceProfile: profile,
+      generationNotice: {
+        kind: "moderation-block",
+        jobId: "blocked-refill",
+        occurredAt: NOW,
+        occurrenceCount: 1,
+      },
+    });
+    const context = serviceFor({ game });
+
+    const saved = await context.service.updatePreferenceSeed(
+      game.preferenceSeed,
+      profile,
+    );
+    expect(saved.generationNotice).toBeUndefined();
+
+    await context.gameRepository.save(game);
+    const dismissed = await context.service.dismissGenerationNotice();
+    expect(dismissed.generationNotice).toBeUndefined();
+    expect(
+      (await context.gameRepository.load())?.generationNotice,
+    ).toBeUndefined();
+  });
+
   it("reconciles a pre-feature profile-less generation work file", async () => {
     const game = gameState({
       round: {
@@ -1277,6 +1306,47 @@ describe("GameService challenger buffer", () => {
     expect(context.queue.enqueue).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: "replacement-refill", kind: "refill" }),
     );
+  });
+
+  it("surfaces a moderation-blocked refill while restoring queue capacity", async () => {
+    const game = gameState();
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+      ],
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      bufferTarget: 1,
+      createId: ids("blocked-refill", "replacement-refill"),
+    });
+    await context.service.select("right", 3);
+    context.queue.setResult({
+      jobId: "blocked-refill",
+      status: "failed",
+      completedAt: "2026-07-16T01:01:40.000Z",
+      message: "Image provider rejected this request",
+      retryable: true,
+      category: "moderation",
+    });
+
+    const notified = await context.service.reconcile();
+
+    expect(notified?.generationNotice).toEqual({
+      kind: "moderation-block",
+      jobId: "blocked-refill",
+      occurredAt: "2026-07-16T01:01:40.000Z",
+      occurrenceCount: 1,
+    });
+    await expect(context.gameRepository.load()).resolves.toMatchObject({
+      generationNotice: { jobId: "blocked-refill", occurrenceCount: 1 },
+    });
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      refillJobs: [{ jobId: "replacement-refill" }],
+    });
   });
 
   it("rejects mismatched refill work metadata and restores capacity", async () => {

@@ -98,6 +98,18 @@ export class GameService {
     });
   }
 
+  async dismissGenerationNotice(): Promise<GameState> {
+    return this.gameRepository.withLock(async () => {
+      const current = await this.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError("Start a game before dismissing a notice");
+      }
+      const updated = this.withoutGenerationNotice(current);
+      if (updated !== current) await this.gameRepository.save(updated);
+      return updated;
+    });
+  }
+
   async updatePreferenceSeed(
     preferenceSeed: string,
     preferenceProfile: PreferenceProfile = preferenceProfileFromSeed(
@@ -131,7 +143,11 @@ export class GameService {
         );
       }
 
-      const updated = { ...current, preferenceSeed, preferenceProfile };
+      const updated = this.withoutGenerationNotice({
+        ...current,
+        preferenceSeed,
+        preferenceProfile,
+      });
       await this.gameRepository.save(updated);
       const generationPreferencesChanged =
         current.preferenceSeed !== preferenceSeed ||
@@ -451,8 +467,21 @@ export class GameService {
     }
 
     if (result.status === "failed") {
+      let notifiedGame = game;
+      if (this.isModerationFailure(result)) {
+        notifiedGame = {
+          ...game,
+          generationNotice: {
+            kind: "moderation-block",
+            jobId: result.jobId,
+            occurredAt: result.completedAt,
+            occurrenceCount: (game.generationNotice?.occurrenceCount ?? 0) + 1,
+          },
+        };
+        await this.gameRepository.save(notifiedGame);
+      }
       return {
-        game,
+        game: notifiedGame,
         challengers: await this.archiveInvalidRefill(challengers, record),
       };
     }
@@ -1037,6 +1066,24 @@ export class GameService {
 
   private sameJob(left: GenerationJob, right: GenerationJob): boolean {
     return isDeepStrictEqual(left, right);
+  }
+
+  private isModerationFailure(
+    result: Extract<GenerationResult, { status: "failed" }>,
+  ): boolean {
+    return (
+      result.category === "moderation" ||
+      /moderation|content policy|safety (?:policy|filter)|blocked by (?:a )?(?:policy|safety)/i.test(
+        result.message,
+      )
+    );
+  }
+
+  private withoutGenerationNotice(game: GameState): GameState {
+    if (!game.generationNotice) return game;
+    const updated = { ...game };
+    delete updated.generationNotice;
+    return updated;
   }
 
   private jobMatchesGenerationPreferences(

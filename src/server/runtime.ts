@@ -280,3 +280,7 @@ export async function updatePreferenceSeed(
     expectedPreferenceProfile,
   );
 }
+
+export async function dismissGenerationNotice(): Promise<GameState> {
+  return gameService.dismissGenerationNotice();
+}

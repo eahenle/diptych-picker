@@ -72,6 +72,7 @@ export interface GameState {
   pendingSelection?: PendingSelection;
   mailboxCleanupJobId?: string;
   errorMessage?: string;
+  generationNotice?: GenerationNotice;
 }
 
 export interface BufferHealth {
@@ -85,6 +86,13 @@ export interface BufferHealth {
 export interface DisplayedEloRatings {
   left: number;
   right: number;
+}
+
+export interface GenerationNotice {
+  kind: "moderation-block";
+  jobId: string;
+  occurredAt: string;
+  occurrenceCount: number;
 }
 
 export function preferenceProfileFromSeed(

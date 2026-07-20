@@ -858,6 +858,47 @@ describe("GameScreen challenger reconciliation", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("surfaces a moderation notice and opens Preferences to adjust it", async () => {
+    const blocked = cloneGame();
+    blocked.generationNotice = {
+      kind: "moderation-block",
+      jobId: "blocked-refill",
+      occurredAt: "2026-07-16T12:00:02.000Z",
+      occurrenceCount: 2,
+    };
+    const cleared = cloneGame();
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (
+          String(input).endsWith("/api/game/notice") &&
+          init?.method === "DELETE"
+        ) {
+          return json(cleared);
+        }
+        return json({ status: "ready", game: blocked });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+
+    expect(await screen.findByText("Generation was blocked")).toBeVisible();
+    expect(screen.getByText(/2 recent attempts/i)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Adjust preferences" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Preference profile" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/game/notice", {
+        method: "DELETE",
+      }),
+    );
+    expect(
+      screen.queryByText("Generation was blocked"),
+    ).not.toBeInTheDocument();
+  });
+
   it("saves fine-grained preference fields as one profile", async () => {
     const updated = cloneGame();
     const fetchMock = vi.fn(

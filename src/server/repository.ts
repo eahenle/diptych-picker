@@ -180,6 +180,15 @@ const gameStateSchema: z.ZodType<GameState> = z
     pendingSelection: pendingSelectionSchema.optional(),
     mailboxCleanupJobId: z.string().trim().min(1).optional(),
     errorMessage: z.string().trim().min(1).optional(),
+    generationNotice: z
+      .object({
+        kind: z.literal("moderation-block"),
+        jobId: z.string().trim().min(1),
+        occurredAt: z.string().trim().min(1),
+        occurrenceCount: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

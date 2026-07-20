@@ -1107,6 +1107,22 @@ export function GameScreen() {
     setPreferencesOpen(true);
   };
 
+  const dismissGenerationNotice = async () => {
+    try {
+      const state = await readJson<GameState>(
+        await fetch("/api/game/notice", { method: "DELETE" }),
+      );
+      commitGame(state);
+      setLocalError(null);
+    } catch (error) {
+      setLocalError(
+        error instanceof Error
+          ? error.message
+          : "Could not dismiss the generation notice",
+      );
+    }
+  };
+
   const setPreferenceField = <Key extends keyof PreferenceProfile>(
     key: Key,
     value: PreferenceProfile[Key],
@@ -1348,6 +1364,36 @@ export function GameScreen() {
               </>
             )}
           </p>
+
+          {game.generationNotice?.kind === "moderation-block" ? (
+            <div className={styles.generationNotice} role="status">
+              <span>
+                <strong>Generation was blocked</strong>A safety check rejected
+                {game.generationNotice.occurrenceCount > 1
+                  ? ` ${game.generationNotice.occurrenceCount} recent attempts`
+                  : " a recent attempt"}
+                . Adjust the profile to steer future challengers toward allowed
+                content.
+              </span>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => void dismissGenerationNotice()}
+                >
+                  Dismiss
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openPreferences();
+                    void dismissGenerationNotice();
+                  }}
+                >
+                  Adjust preferences
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {status === "error" || localError ? (
             <div className={styles.errorBar} role="alert">

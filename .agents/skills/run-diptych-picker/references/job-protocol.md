@@ -177,7 +177,7 @@ The four base proposal fields are always required. `preferenceRevision` must be 
 
 ## Failed result and heartbeat
 
-Write the reason to `<data-root>/agent-work/<id>/failure.txt`. `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt"` requires the matching active job, reserves the `failed` outcome, and atomically publishes a result with `status: "failed"`, an ISO timestamp, the non-empty `message`, and `retryable: true`.
+Write the reason to `<data-root>/agent-work/<id>/failure.txt`. `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt" --category <category>` requires the matching active job, reserves the `failed` outcome, and atomically publishes a result with `status: "failed"`, an ISO timestamp, the non-empty `message`, `retryable: true`, and its category. Use `moderation` only for a provider safety or moderation block, `invalid-output` for an unusable worker handoff, and `operational` for interruptions or infrastructure failures. The UI surfaces moderation failures so the player can adjust their profile.
 
 Only one outcome reservation can exist for a job. A retry matching that outcome resumes safely and returns an already-published result unchanged. The opposite outcome is rejected. Completion also resumes when its deterministic asset already exists only if the existing bytes exactly equal the validated source; differing bytes are never overwritten.
 
