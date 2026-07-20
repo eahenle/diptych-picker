@@ -79,6 +79,7 @@ const adaptiveJob = (id: string) => ({
     ...preferenceRevision,
     adaptationMode: "adaptive" as const,
     adaptationSourceWinnerIds: [],
+    adaptationSourceRejectedIds: [],
   },
 });
 

@@ -24,6 +24,7 @@ import {
   failSelection,
   oppositeSide,
   recentConcepts,
+  recordRejectedPreferenceEvidence,
   preferenceProfileFromSeed,
   willRetireChampion,
   type Candidate,
@@ -908,11 +909,26 @@ export class GameService {
     }
     const winner = challengers.ratings.find(
       ({ candidate }) => candidate.id === selection.winnerId,
-    )?.candidate;
-    if (!winner) return { game, challengers };
-    const nextProfile = applyWinnerPreferenceRevision(profile, winner);
+    );
+    const rejected = challengers.ratings.find(
+      ({ candidate }) => candidate.id === selection.loserId,
+    );
+    let nextProfile = winner
+      ? applyWinnerPreferenceRevision(profile, winner.candidate)
+      : profile;
+    if (rejected?.source === "generated") {
+      nextProfile = recordRejectedPreferenceEvidence(
+        nextProfile,
+        rejected.candidate.id,
+      );
+    }
     if (nextProfile === profile) return { game, challengers };
-    const preferenceSeed = composePreferenceSeed(nextProfile);
+    const composedProfile = composePreferenceSeed(profile);
+    const composedNextProfile = composePreferenceSeed(nextProfile);
+    const preferenceSeed =
+      composedNextProfile === composedProfile
+        ? game.preferenceSeed
+        : composedNextProfile;
     return {
       game: { ...game, preferenceProfile: nextProfile, preferenceSeed },
       challengers:

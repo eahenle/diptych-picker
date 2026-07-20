@@ -65,7 +65,8 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
     "contentLevel": "family-friendly",
     "avoid": "readable text",
     "adaptationMode": "static",
-    "adaptationSourceWinnerIds": []
+    "adaptationSourceWinnerIds": [],
+    "adaptationSourceRejectedIds": []
   }
 }
 ```
@@ -85,7 +86,7 @@ The remaining request fields carry the same preference context. A missing `kind`
 
 The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the image proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
 
-New jobs include the structured `preferenceProfile`; legacy jobs may omit it and are treated as Static. In Static mode, omit `preferenceRevision` and preserve every preference field exactly. In Adaptive mode, the worker must add a complete `preferenceRevision` conditioned on the retained winner and selection history. The app adopts that revision only if this generated candidate later wins, records that winner's ID as its source, and rebuilds future generation capacity from the revised profile.
+New jobs include the structured `preferenceProfile`; legacy jobs may omit it and are treated as Static. In Static mode, omit `preferenceRevision` and preserve every preference field exactly. In Adaptive mode, the worker must add a complete `preferenceRevision` conditioned on the retained winner and selection history, treating winners as positive evidence and generated losers as negative evidence. The profile carries separate bounded source-ID lists for both outcomes. The app adopts a model-authored revision only if its generated candidate later wins, while every generated loser is recorded immediately as negative provenance for future jobs.
 
 Refill jobs carry the same preference context plus durable session and pinned-winner ownership:
 
@@ -137,7 +138,7 @@ Write this strict JSON object to `<data-root>/agent-work/<jobId>/proposal.json`:
 }
 ```
 
-The four base proposal fields are always required. `preferenceRevision` must be omitted for Static jobs and is required for Adaptive jobs; it must contain every preference field except the mode and source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed while staying distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
+The four base proposal fields are always required. `preferenceRevision` must be omitted for Static jobs and is required for Adaptive jobs; it must contain every preference field except the mode and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed, responds to winner/rejection evidence, and stays distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
 
 ## Completed result
 

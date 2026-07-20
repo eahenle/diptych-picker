@@ -1131,6 +1131,7 @@ export function GameScreen() {
       ...current,
       [key]: value,
       adaptationSourceWinnerIds: [],
+      adaptationSourceRejectedIds: [],
     }));
   };
 
@@ -1140,6 +1141,8 @@ export function GameScreen() {
       adaptationMode: mode,
       adaptationSourceWinnerIds:
         mode === "static" ? [] : current.adaptationSourceWinnerIds,
+      adaptationSourceRejectedIds:
+        mode === "static" ? [] : current.adaptationSourceRejectedIds,
     }));
   };
 
@@ -1965,9 +1968,11 @@ export function GameScreen() {
             <p id="preferences-description">
               {preferenceDraft.adaptationMode === "static"
                 ? "Static preserves every field as entered."
-                : preferenceDraft.adaptationSourceWinnerIds.length > 0
-                  ? `Adaptive last revised this profile from ${preferenceDraft.adaptationSourceWinnerIds.length} winning image.`
-                  : "Adaptive lets the model revise this profile when a generated image wins."}{" "}
+                : preferenceDraft.adaptationSourceWinnerIds.length +
+                      preferenceDraft.adaptationSourceRejectedIds.length >
+                    0
+                  ? `Adaptive evidence from generated images — winners: ${preferenceDraft.adaptationSourceWinnerIds.length}; rejected: ${preferenceDraft.adaptationSourceRejectedIds.length}.`
+                  : "Adaptive lets the model revise this profile from winning and rejected generated images."}{" "}
               Novelty rules still take priority.
             </p>
             <div className={styles.preferenceGrid}>

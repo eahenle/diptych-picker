@@ -124,6 +124,7 @@ describe("JsonChallengerRepository", () => {
       avoid: "readable text",
       adaptationMode: "adaptive",
       adaptationSourceWinnerIds: ["winner-1"],
+      adaptationSourceRejectedIds: [],
     });
   });
 

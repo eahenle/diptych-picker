@@ -36,6 +36,10 @@ const preferenceRevisionSchema = z
 const currentPreferenceProfileSchema = preferenceRevisionSchema.extend({
   adaptationMode: z.enum(["static", "adaptive"]),
   adaptationSourceWinnerIds: z.array(nonBlankStringSchema.max(200)).max(12),
+  adaptationSourceRejectedIds: z
+    .array(nonBlankStringSchema.max(200))
+    .max(12)
+    .default([]),
 });
 
 const transitionalPreferenceProfileSchema = preferenceRevisionSchema
@@ -48,6 +52,10 @@ const transitionalPreferenceProfileSchema = preferenceRevisionSchema
       .optional(),
     adaptationMode: z.enum(["static", "adaptive"]).optional(),
     adaptationSourceWinnerIds: z
+      .array(nonBlankStringSchema.max(200))
+      .max(12)
+      .optional(),
+    adaptationSourceRejectedIds: z
       .array(nonBlankStringSchema.max(200))
       .max(12)
       .optional(),
@@ -65,6 +73,7 @@ const transitionalPreferenceProfileSchema = preferenceRevisionSchema
       profile.adaptationSourceWinnerIds ??
       profile.inspirationSourceWinnerIds ??
       [],
+    adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds ?? [],
   }));
 
 const preferenceProfileSchema = z.union([

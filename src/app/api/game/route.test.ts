@@ -218,6 +218,7 @@ describe("PATCH /api/game", () => {
       inspiration: "  sharp off-axis lighting  ",
       adaptationMode: "adaptive" as const,
       adaptationSourceWinnerIds: [],
+      adaptationSourceRejectedIds: [],
       mediaTypes: "large-format photography",
       visualStyle: "cinematic and tactile",
       colorPalette: "ultraviolet, copper, and oxblood",

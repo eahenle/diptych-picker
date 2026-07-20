@@ -10,9 +10,7 @@ History and pool rows let the player favorite exceptional candidates. Favorite s
 
 ### Profile-wide adaptation
 
-The Preference profile title row exposes **Static / Adaptive** for the entire profile. Static is the default and prevents model mutation of every preference field. Adaptive lets each generated proposal carry a complete trajectory-conditioned profile revision; the app adopts it only if that candidate later wins, records the influencing winner ID, invalidates earlier-profile buffer capacity, and composes future jobs from the revised fields.
-
-Extend Adaptive mode to incorporate generated candidates that the player rejects as negative preference evidence, not only winning candidates as positive evidence. Preserve which candidate and comparison outcome supplied each signal so later revisions can distinguish “more like this” from “less like this.” Generation failures, cancellations, moderation blocks, and invalid worker output are operational outcomes rather than player rejections and must not influence taste preferences.
+The Preference profile title row exposes **Static / Adaptive** for the entire profile. Static is the default and prevents model mutation of every preference field. Adaptive lets each generated proposal carry a complete trajectory-conditioned profile revision; the app adopts it only if that candidate later wins. Separate bounded winner and rejected-generated-candidate source lists preserve which comparison outcome supplied each signal. Future workers receive those lists plus recent comparison history and must treat winners as positive evidence and generated losers as negative evidence when authoring the next revision. Provenance-only updates do not flush already-buffered work, while a model-authored field revision still invalidates earlier-profile capacity and composes future jobs from the revised fields. Generation failures, cancellations, moderation blocks, and invalid worker output remain operational outcomes and do not influence taste preferences.
 
 ### Moderation feedback
 

@@ -268,6 +268,7 @@ describe("GameService challenger buffer", () => {
       mediaTypes: "large-format photography",
       adaptationMode: "adaptive",
       adaptationSourceWinnerIds: ["left"],
+      adaptationSourceRejectedIds: [],
     });
     expect(updated.preferenceSeed).toContain(
       "Inspiration: Favor ultraviolet rim light and severe off-axis framing.",
@@ -283,6 +284,47 @@ describe("GameService challenger buffer", () => {
     expect(
       context.queue.enqueue.mock.calls.map(([job]) => job.preferenceSeed),
     ).toEqual([updated.preferenceSeed, updated.preferenceSeed]);
+  });
+
+  it("records a generated loser as negative adaptive evidence for future jobs", async () => {
+    const baseProfile = preferenceProfileFromSeed(
+      "industrial, gothic, natural, and surprising",
+    );
+    const game = gameState({
+      preferenceProfile: { ...baseProfile, adaptationMode: "adaptive" },
+    });
+    const initialChallengers = challengerState(game);
+    const context = serviceFor({
+      game,
+      challengers: {
+        ...initialChallengers,
+        ratings: initialChallengers.ratings.map((item) =>
+          item.candidate.id === game.round.rightCandidate.id
+            ? { ...item, source: "generated" }
+            : item,
+        ),
+      },
+      createId: ids("negative-evidence-refill"),
+    });
+
+    const updated = await context.service.select("left", 3);
+
+    expect(updated.preferenceSeed).toBe(game.preferenceSeed);
+    expect(updated.preferenceProfile).toMatchObject({
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: [],
+      adaptationSourceRejectedIds: ["right"],
+    });
+    expect(context.queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferenceProfile: expect.objectContaining({
+          adaptationSourceRejectedIds: ["right"],
+        }),
+        selectionHistory: expect.arrayContaining([
+          expect.objectContaining({ loserId: "right" }),
+        ]),
+      }),
+    );
   });
 
   it("replaces buffered capacity when preferences change", async () => {

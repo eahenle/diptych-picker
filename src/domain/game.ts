@@ -15,11 +15,12 @@ export interface PreferenceProfile {
   avoid: string;
   adaptationMode: PreferenceAdaptationMode;
   adaptationSourceWinnerIds: string[];
+  adaptationSourceRejectedIds: string[];
 }
 
 export type PreferenceRevision = Omit<
   PreferenceProfile,
-  "adaptationMode" | "adaptationSourceWinnerIds"
+  "adaptationMode" | "adaptationSourceWinnerIds" | "adaptationSourceRejectedIds"
 >;
 
 export interface Candidate {
@@ -108,6 +109,7 @@ export function preferenceProfileFromSeed(
     avoid: "",
     adaptationMode: "static",
     adaptationSourceWinnerIds: [],
+    adaptationSourceRejectedIds: [],
   };
 }
 
@@ -143,8 +145,35 @@ export function applyWinnerPreferenceRevision(
   return {
     ...winner.preferenceRevision,
     adaptationMode: "adaptive",
-    adaptationSourceWinnerIds: [winner.id],
+    adaptationSourceWinnerIds: appendAdaptationSource(
+      profile.adaptationSourceWinnerIds,
+      winner.id,
+    ),
+    adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds,
   };
+}
+
+export function recordRejectedPreferenceEvidence(
+  profile: PreferenceProfile,
+  rejectedCandidateId: string,
+): PreferenceProfile {
+  if (
+    profile.adaptationMode !== "adaptive" ||
+    profile.adaptationSourceRejectedIds.includes(rejectedCandidateId)
+  ) {
+    return profile;
+  }
+  return {
+    ...profile,
+    adaptationSourceRejectedIds: appendAdaptationSource(
+      profile.adaptationSourceRejectedIds,
+      rejectedCandidateId,
+    ),
+  };
+}
+
+function appendAdaptationSource(ids: string[], candidateId: string): string[] {
+  return [...ids.filter((id) => id !== candidateId), candidateId].slice(-12);
 }
 
 export type GameStartState =
@@ -466,6 +495,7 @@ export function migratePreferenceProfileState(state: GameState): GameState {
     const legacy = state.preferenceProfile as PreferenceProfile & {
       inspirationMode?: PreferenceAdaptationMode;
       inspirationSourceWinnerIds?: string[];
+      adaptationSourceRejectedIds?: string[];
     };
     const preferenceProfile: PreferenceProfile = {
       themes: legacy.themes,
@@ -481,6 +511,7 @@ export function migratePreferenceProfileState(state: GameState): GameState {
         legacy.adaptationSourceWinnerIds ??
         legacy.inspirationSourceWinnerIds ??
         [],
+      adaptationSourceRejectedIds: legacy.adaptationSourceRejectedIds ?? [],
     };
     return { ...state, preferenceProfile };
   }
