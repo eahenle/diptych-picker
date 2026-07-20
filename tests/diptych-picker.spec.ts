@@ -114,11 +114,12 @@ test("starts with five durable challengers and adapts two independent images to 
   await expect(
     page.getByLabel("View pool leaderboard; 7 of 50 reusable images"),
   ).toBeVisible();
-  await expect(page.getByTestId("candidate-card-left")).toContainText(
-    /Elo\s*1000/,
+  await expect(page.getByTitle("First appearance")).toHaveCount(2);
+  await expect(page.getByTestId("candidate-card-left")).not.toContainText(
+    "Elo",
   );
-  await expect(page.getByTestId("candidate-card-right")).toContainText(
-    /Elo\s*1000/,
+  await expect(page.getByTestId("candidate-card-right")).not.toContainText(
+    "Elo",
   );
   expect(stored.ready.map(({ candidate }) => candidate.id)).not.toContain(
     displayedIds[0],

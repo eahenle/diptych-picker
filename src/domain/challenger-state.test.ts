@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Candidate } from "./game";
+import type { Candidate, GameState, SelectionHistory } from "./game";
 import {
   admitGeneratedCandidate,
   backfillGeneratedPool,
@@ -11,6 +11,7 @@ import {
   summarizeBufferHealth,
   summarizeComparisonHistory,
   summarizeDisplayedEloRatings,
+  summarizeDisplayedScores,
   summarizePoolLeaderboard,
   updateElo,
   type BufferedCandidate,
@@ -62,6 +63,30 @@ const state = (overrides: Partial<ChallengerState> = {}): ChallengerState => ({
   consecutiveFallbackDraws: 0,
   nextFallbackAt: null,
   ...overrides,
+});
+
+const game = (history: SelectionHistory[] = []): GameState => ({
+  round: {
+    leftCandidate: candidate("left"),
+    rightCandidate: candidate("right"),
+    status: "idle",
+    replacingSide: null,
+    roundNumber: history.length + 1,
+    retainedCandidateId: null,
+    winStreak: 0,
+  },
+  history,
+  preferenceSeed: "novel test preferences",
+});
+
+const priorComparison = (): SelectionHistory => ({
+  winnerId: "left",
+  loserId: "right",
+  winnerPrompt: "left prompt",
+  loserPrompt: "right prompt",
+  winnerConcept: "left concept",
+  loserConcept: "right concept",
+  selectedAt: "2026-07-16T00:00:00.000Z",
 });
 
 const refillJob = (id: string): RefillJobRecord => ({
@@ -148,6 +173,51 @@ describe("challenger state", () => {
         1000,
       ),
     ).toEqual({ left: 1016, right: 1000 });
+  });
+
+  it("replaces Elo with a first-appearance cue before either candidate has history", () => {
+    expect(
+      summarizeDisplayedScores(
+        state({ ratings: [rating("left", 1000), rating("right", 1000)] }),
+        game(),
+      ),
+    ).toEqual({ left: "new", right: "new" });
+  });
+
+  it("marks a prior candidate whose next loss will evict it from a full pool", () => {
+    expect(
+      summarizeDisplayedScores(
+        state({
+          ratings: [
+            rating("left", 900),
+            rating("right", 950, { poolMember: false }),
+            rating("incumbent", 1000),
+          ],
+        }),
+        game([priorComparison()]),
+        1000,
+        32,
+        2,
+      ),
+    ).toEqual({ left: "pool-exit", right: 950 });
+  });
+
+  it("keeps numeric Elo when a loss cannot evict the candidate", () => {
+    expect(
+      summarizeDisplayedScores(
+        state({
+          ratings: [
+            rating("left", 900),
+            rating("right", 950, { poolMember: false }),
+            rating("incumbent", 1000),
+          ],
+        }),
+        game([priorComparison()]),
+        1000,
+        32,
+        3,
+      ),
+    ).toEqual({ left: 900, right: 950 });
   });
 
   it("promotes a generated winner into a non-full pool without duplicating its ID", () => {

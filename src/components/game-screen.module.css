@@ -327,6 +327,19 @@
   letter-spacing: 0;
 }
 
+.eloLabel .scoreSymbol {
+  display: block;
+  min-width: 16px;
+  margin-left: 0;
+  font-size: 17px;
+  line-height: 1;
+  text-align: center;
+}
+
+.eloLabel[data-score-state="pool-exit"] .scoreSymbol {
+  color: #d17d72;
+}
+
 .loadingVeil {
   position: absolute;
   inset: 7px;
