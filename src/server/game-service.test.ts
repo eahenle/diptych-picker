@@ -762,6 +762,81 @@ describe("GameService challenger buffer", () => {
     ]);
   });
 
+  it("records both candidates as rejected without changing Elo", async () => {
+    const game = gameState({
+      preferenceProfile: {
+        ...preferenceProfileFromSeed(
+          "industrial, gothic, natural, and surprising",
+        ),
+        adaptationMode: "adaptive",
+      },
+    });
+    const challengers = challengerState(game, {
+      ratings: [
+        rating(game.round.leftCandidate, {
+          rating: 900,
+          source: "generated",
+        }),
+        rating(game.round.rightCandidate, {
+          rating: 1100,
+          source: "generated",
+        }),
+        ...challengerState(game).ready.map(({ candidate: item }) =>
+          rating(item),
+        ),
+      ],
+    });
+    const context = serviceFor({ game, challengers });
+
+    const rejected = await context.service.bothLose(3);
+
+    expect(rejected.round).toMatchObject({
+      status: "idle",
+      roundNumber: 4,
+      leftCandidate: { id: "buffer-1" },
+      rightCandidate: { id: "buffer-2" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+    expect(rejected.history.at(-1)).toMatchObject({
+      outcome: "both-lose",
+      leftId: "left",
+      rightId: "right",
+    });
+    expect(rejected.preferenceProfile).toMatchObject({
+      adaptationSourceWinnerIds: [],
+      adaptationSourceRejectedIds: ["left", "right"],
+    });
+
+    await context.service.reconcile();
+    const persisted = await context.challengerRepository.load();
+    expect(
+      persisted?.ratings.find(({ candidate: item }) => item.id === "left"),
+    ).toMatchObject({
+      rating: 900,
+      wins: 0,
+      losses: 1,
+      poolMember: false,
+      poolEligible: false,
+    });
+    expect(
+      persisted?.ratings.find(({ candidate: item }) => item.id === "right"),
+    ).toMatchObject({
+      rating: 1100,
+      wins: 0,
+      losses: 1,
+      poolMember: false,
+      poolEligible: false,
+    });
+    expect(context.queue.enqueue).toHaveBeenCalledTimes(2);
+    expect(context.queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "refill",
+        comparisonOutcome: "both-lose",
+      }),
+    );
+  });
+
   it("keeps tied cards visible until two generated replacements are ready", async () => {
     const game = gameState();
     const challengers = challengerState(game, { ready: [] });

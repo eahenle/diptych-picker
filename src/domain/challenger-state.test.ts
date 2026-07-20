@@ -237,6 +237,33 @@ describe("challenger state", () => {
     ).toBe(false);
   });
 
+  it("never backfills a candidate permanently rejected from the pool", () => {
+    const initial = state({
+      ratings: [
+        rating("incumbent", 1000),
+        rating("dual-rejected", 1200, {
+          source: "generated",
+          poolMember: false,
+          poolEligible: false,
+          losses: 1,
+        }),
+        rating("eligible", 900, {
+          source: "generated",
+          poolMember: false,
+        }),
+      ],
+    });
+
+    const next = backfillGeneratedPool(initial, 2);
+
+    expect(
+      next.ratings.find((item) => item.candidate.id === "dual-rejected"),
+    ).toMatchObject({ poolMember: false, poolEligible: false });
+    expect(
+      next.ratings.find((item) => item.candidate.id === "eligible"),
+    ).toMatchObject({ poolMember: true });
+  });
+
   it("displaces only the lowest-rated member when a full pool has a strict-higher winner", () => {
     const members = Array.from({ length: 50 }, (_, index) =>
       rating(`member-${index}`, 900 + index),
@@ -659,7 +686,7 @@ describe("challenger state", () => {
           selectedAt: "2026-07-16T00:03:00.000Z",
         },
       ],
-      state({ ratings: [rating("left"), rating("right")] }),
+      state({ ratings: [rating("left", 1000), rating("right", 1000)] }),
     );
 
     expect(entries).toEqual([
@@ -667,6 +694,35 @@ describe("challenger state", () => {
         outcome: "tie",
         decisionNumber: 1,
         selectedAt: "2026-07-16T00:03:00.000Z",
+        left: expect.objectContaining({ id: "left" }),
+        right: expect.objectContaining({ id: "right" }),
+      },
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("prompt");
+  });
+
+  it("keeps dual rejections display-safe in comparison history", () => {
+    const entries = summarizeComparisonHistory(
+      [
+        {
+          outcome: "both-lose",
+          leftId: "left",
+          rightId: "right",
+          leftPrompt: "private left prompt",
+          rightPrompt: "private right prompt",
+          leftConcept: "stored left",
+          rightConcept: "stored right",
+          selectedAt: "2026-07-16T00:04:00.000Z",
+        },
+      ],
+      state({ ratings: [rating("left", 1000), rating("right", 1000)] }),
+    );
+
+    expect(entries).toEqual([
+      {
+        outcome: "both-lose",
+        decisionNumber: 1,
+        selectedAt: "2026-07-16T00:04:00.000Z",
         left: expect.objectContaining({ id: "left" }),
         right: expect.objectContaining({ id: "right" }),
       },

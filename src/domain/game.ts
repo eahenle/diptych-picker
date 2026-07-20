@@ -67,7 +67,19 @@ export interface TieSelectionHistory {
   selectedAt: string;
 }
 
-export type SelectionHistory = WinningSelectionHistory | TieSelectionHistory;
+export interface BothLoseSelectionHistory {
+  outcome: "both-lose";
+  leftId: string;
+  rightId: string;
+  leftPrompt: string;
+  rightPrompt: string;
+  leftConcept: string;
+  rightConcept: string;
+  selectedAt: string;
+}
+
+export type SelectionHistory =
+  WinningSelectionHistory | TieSelectionHistory | BothLoseSelectionHistory;
 
 export type PendingSelection =
   | {
@@ -78,7 +90,8 @@ export type PendingSelection =
     }
   | { kind: "buffer"; winnerSide: Side; selectedAt: string }
   | { kind: "retirement"; winnerSide: Side; selectedAt: string }
-  | { kind: "tie"; referenceSide: Side; selectedAt: string };
+  | { kind: "tie"; referenceSide: Side; selectedAt: string }
+  | { kind: "both-lose"; referenceSide: Side; selectedAt: string };
 
 export interface GameState {
   round: Round;
@@ -317,6 +330,25 @@ export function beginTie(
   };
 }
 
+export function beginBothLose(
+  state: GameState,
+  referenceSide: Side,
+  selectedAt: string,
+): GameState | null {
+  if (state.round.status === "generating") return null;
+
+  return {
+    ...state,
+    round: {
+      ...state.round,
+      status: "generating",
+      replacingSide: null,
+    },
+    pendingSelection: { kind: "both-lose", referenceSide, selectedAt },
+    errorMessage: undefined,
+  };
+}
+
 export function completeSelection(
   state: GameState,
   challenger: Candidate,
@@ -325,7 +357,8 @@ export function completeSelection(
   if (
     state.round.status !== "generating" ||
     !pending ||
-    pending.kind === "tie"
+    pending.kind === "tie" ||
+    pending.kind === "both-lose"
   ) {
     throw new Error("No selection is awaiting a challenger");
   }
@@ -467,6 +500,59 @@ export function completeTie(
   };
 }
 
+export function completeBothLose(
+  state: GameState,
+  leftCandidate: Candidate,
+  rightCandidate: Candidate,
+): GameState {
+  const pending = state.pendingSelection;
+  if (state.round.status !== "generating" || pending?.kind !== "both-lose") {
+    throw new Error("No dual rejection is awaiting replacements");
+  }
+
+  const currentIds = new Set([
+    state.round.leftCandidate.id,
+    state.round.rightCandidate.id,
+  ]);
+  if (
+    leftCandidate.id === rightCandidate.id ||
+    currentIds.has(leftCandidate.id) ||
+    currentIds.has(rightCandidate.id)
+  ) {
+    throw new Error("A dual rejection requires two distinct replacements");
+  }
+
+  const rejectedLeft = state.round.leftCandidate;
+  const rejectedRight = state.round.rightCandidate;
+  return {
+    ...state,
+    round: {
+      leftCandidate,
+      rightCandidate,
+      status: "idle",
+      replacingSide: null,
+      roundNumber: state.round.roundNumber + 1,
+      retainedCandidateId: null,
+      winStreak: 0,
+    },
+    history: [
+      ...state.history,
+      {
+        outcome: "both-lose",
+        leftId: rejectedLeft.id,
+        rightId: rejectedRight.id,
+        leftPrompt: rejectedLeft.prompt,
+        rightPrompt: rejectedRight.prompt,
+        leftConcept: rejectedLeft.concept,
+        rightConcept: rejectedRight.concept,
+        selectedAt: pending.selectedAt,
+      },
+    ],
+    pendingSelection: undefined,
+    errorMessage: undefined,
+  };
+}
+
 export function failSelection(state: GameState, message: string): GameState {
   if (!state.pendingSelection) {
     throw new Error("No selection is available to retry");
@@ -496,7 +582,7 @@ export function recentConcepts(state: GameState, limit = 8): string[] {
   for (let index = state.history.length - 1; index >= 0; index -= 1) {
     const item = state.history[index];
     const itemConcepts =
-      item.outcome === "tie"
+      item.outcome === "tie" || item.outcome === "both-lose"
         ? [item.rightConcept, item.leftConcept]
         : [item.loserConcept, item.winnerConcept];
     for (const concept of itemConcepts) {

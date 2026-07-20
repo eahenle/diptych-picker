@@ -10,6 +10,7 @@ const importGameSnapshot = vi.fn();
 const publishGameExport = vi.fn();
 const select = vi.fn();
 const tie = vi.fn();
+const bothLose = vi.fn();
 const updatePreferenceSeed = vi.fn();
 const dismissGenerationNotice = vi.fn();
 
@@ -23,7 +24,7 @@ vi.mock("@/server/runtime", () => ({
   exportGameSnapshot,
   importGameSnapshot,
   publishGameExport,
-  gameService: { select, tie },
+  gameService: { select, tie, bothLose },
   updatePreferenceSeed,
   dismissGenerationNotice,
 }));
@@ -317,6 +318,7 @@ describe("POST /api/game/select", () => {
   beforeEach(() => {
     select.mockReset();
     tie.mockReset();
+    bothLose.mockReset();
   });
 
   it("returns 200 when a buffered challenger completes the round", async () => {
@@ -369,6 +371,23 @@ describe("POST /api/game/select", () => {
 
     expect(response.status).toBe(200);
     expect(tie).toHaveBeenCalledWith(5);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("rejects both candidates without inventing a winner side", async () => {
+    bothLose.mockResolvedValue({ round: { status: "idle" } });
+    const { POST } = await import("./select/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/game/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome: "both-lose", roundNumber: 6 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(bothLose).toHaveBeenCalledWith(6);
     expect(select).not.toHaveBeenCalled();
   });
 });

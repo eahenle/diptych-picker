@@ -125,6 +125,7 @@ const candidateRatingSchema = z
     losses: z.number().int().nonnegative(),
     source: z.enum(["curated", "generated"]),
     poolMember: z.boolean(),
+    poolEligible: z.boolean().optional(),
     lastServedAt: z.string().min(1).nullable(),
     favorite: z.boolean().optional(),
   })
@@ -145,7 +146,7 @@ const selectionHistorySchema = z.union([
     .strict(),
   z
     .object({
-      outcome: z.literal("tie"),
+      outcome: z.enum(["tie", "both-lose"]),
       leftId: z.string().min(1),
       rightId: z.string().min(1),
       leftPrompt: z.string().min(1),
@@ -172,7 +173,7 @@ const refillGenerationJobSnapshotSchema = z
     preferenceProfile: preferenceProfileSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
     pinnedWinnerId: z.string().min(1),
-    comparisonOutcome: z.literal("tie").optional(),
+    comparisonOutcome: z.enum(["tie", "both-lose"]).optional(),
   })
   .strict()
   .refine((job) => job.pinnedWinnerId === job.retainedWinner.id, {
@@ -232,7 +233,7 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
           .strict(),
         z
           .object({
-            kind: z.literal("tie"),
+            kind: z.enum(["tie", "both-lose"]),
             selectedAt: z.string().min(1),
             roundNumber: z.number().int().positive(),
             leftId: z.string().min(1),

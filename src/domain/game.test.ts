@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   beginChampionRetirement,
   beginBufferedSelection,
+  beginBothLose,
   beginSelection,
   beginTie,
   applyWinnerPreferenceRevision,
   completeChampionRetirement,
+  completeBothLose,
   completeSelection,
   completeTie,
   composePreferenceSeed,
@@ -401,6 +403,37 @@ describe("round transitions", () => {
     });
   });
 
+  it("records a dual rejection and clears both active candidates", () => {
+    const current = game();
+    current.round.retainedCandidateId = current.round.leftCandidate.id;
+    current.round.winStreak = 4;
+    const pending = beginBothLose(current, "left", "2026-07-16T00:00:02.000Z")!;
+    const next = completeBothLose(
+      pending,
+      candidate("fresh-left", "left"),
+      candidate("fresh-right", "right"),
+    );
+
+    expect(next.round).toMatchObject({
+      status: "idle",
+      roundNumber: 2,
+      leftCandidate: { id: "fresh-left" },
+      rightCandidate: { id: "fresh-right" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+    expect(next.history.at(-1)).toEqual({
+      outcome: "both-lose",
+      leftId: "left-1",
+      rightId: "right-1",
+      leftPrompt: "left prompt",
+      rightPrompt: "right prompt",
+      leftConcept: "left concept",
+      rightConcept: "right concept",
+      selectedAt: "2026-07-16T00:00:02.000Z",
+    });
+  });
+
   it("refuses a second selection while generation is already in progress", () => {
     const initial = game();
     const inFlight = beginSelection(
@@ -447,7 +480,7 @@ describe("round transitions", () => {
     expect(recovered.round.status).toBe("error");
     expect(recovered.round.leftCandidate).toBe(initial.round.leftCandidate);
     expect(recovered.round.rightCandidate).toBe(initial.round.rightCandidate);
-    expect(recovered.pendingSelection?.winnerSide).toBe("left");
+    expect(recovered.pendingSelection).toMatchObject({ winnerSide: "left" });
     expect(recovered.errorMessage).toMatch(/interrupted/i);
   });
 

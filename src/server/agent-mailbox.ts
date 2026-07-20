@@ -110,7 +110,7 @@ const selectionHistorySchema = z.union([
     .strict(),
   z
     .object({
-      outcome: z.literal("tie"),
+      outcome: z.enum(["tie", "both-lose"]),
       leftId: nonBlankStringSchema,
       rightId: nonBlankStringSchema,
       leftPrompt: nonBlankStringSchema,
@@ -157,7 +157,7 @@ const refillGenerationJobSchema = z
     kind: z.literal("refill"),
     sessionId: jobIdSchema,
     pinnedWinnerId: nonBlankStringSchema,
-    comparisonOutcome: z.literal("tie").optional(),
+    comparisonOutcome: z.enum(["tie", "both-lose"]).optional(),
   })
   .strict()
   .refine((job) => job.pinnedWinnerId === job.retainedWinner.id, {

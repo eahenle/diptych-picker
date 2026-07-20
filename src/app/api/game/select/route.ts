@@ -14,7 +14,7 @@ const SelectionSchema = z.union([
     roundNumber: z.number().int().positive(),
   }),
   z.object({
-    outcome: z.literal("tie"),
+    outcome: z.enum(["tie", "both-lose"]),
     roundNumber: z.number().int().positive(),
   }),
 ]);
@@ -27,7 +27,9 @@ export async function POST(request: Request) {
   try {
     const game =
       "outcome" in parsed.data
-        ? await gameService.tie(parsed.data.roundNumber)
+        ? parsed.data.outcome === "tie"
+          ? await gameService.tie(parsed.data.roundNumber)
+          : await gameService.bothLose(parsed.data.roundNumber)
         : await gameService.select(
             parsed.data.winnerSide,
             parsed.data.roundNumber,

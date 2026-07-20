@@ -10,6 +10,10 @@ Each active candidate has a magnifying-glass control that opens its immutable im
 
 The comparison screen exposes **Declare tie**, mapped to `C` and `3`. A tie clears both active candidates and records a neutral history decision. When Elo scores differ, only the lower-rated candidate gains the score it would have received for a win; the higher-rated candidate is unchanged. Equal scores do not change. Tie decisions do not alter win/loss counts or supply positive or negative adaptive-preference evidence, and tie-triggered refill work carries an explicit neutral outcome marker.
 
+### Both-lose decisions
+
+The comparison screen exposes **Both lose**, mapped to `D` and `4`. This is a true dual rejection: each active candidate receives one loss, neither Elo score changes because no relative winner was chosen, and both candidates are removed from the reusable pool. Generated candidates become negative adaptive-preference evidence. Both cards remain visible while a complete fresh pair is prepared, and depleted queues use the same paced, distinct pool fallback as ties.
+
 ### Comparison history
 
 The Round metric opens a newest-first timeline of prior decisions. Each row resolves display-safe winner and rejected-candidate thumbnails, concepts, and concise style tags from the durable rating catalog without exposing prompts. The first iteration shows up to fifty decisions and retains a total count.
@@ -94,9 +98,7 @@ Exploration only; these are not yet roadmap commitments.
 
 Let a player optionally explain a choice with quick tags such as subject, composition, palette, medium, mood, or character. Keep the A/B decision instant, then use any extra signal to distinguish what the winner got right.
 
-Add **Skip / neither** and eventually **both** outcomes so the learning model does not have to treat every forced choice as a strong preference.
-
-Add a distinct **Both lose** action mapped to `D` and `4`. Record that the player rejected both images and clear both candidates from the active round. Define its Elo and reusable-pool removal behavior explicitly before implementation rather than treating it as a tie or silently choosing a winner.
+Add **Skip / neither** outcomes so the learning model does not have to treat every forced choice as a strong preference.
 
 ### Image inspection and score-state cues
 

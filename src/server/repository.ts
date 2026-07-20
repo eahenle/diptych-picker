@@ -164,6 +164,13 @@ const pendingSelectionSchema = z.discriminatedUnion("kind", [
       selectedAt: z.string().trim().min(1),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("both-lose"),
+      referenceSide: z.enum(["left", "right"]),
+      selectedAt: z.string().trim().min(1),
+    })
+    .strict(),
 ]);
 
 const selectionHistorySchema = z.union([
@@ -181,7 +188,7 @@ const selectionHistorySchema = z.union([
     .strict(),
   z
     .object({
-      outcome: z.literal("tie"),
+      outcome: z.enum(["tie", "both-lose"]),
       leftId: z.string().trim().min(1),
       rightId: z.string().trim().min(1),
       leftPrompt: z.string().trim().min(1),
