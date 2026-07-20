@@ -2,6 +2,10 @@
 
 ## 2026-07-20
 
+### Tie decisions
+
+The comparison screen exposes **Declare tie**, mapped to `C` and `3`. A tie clears both active candidates and records a neutral history decision. When Elo scores differ, only the lower-rated candidate gains the score it would have received for a win; the higher-rated candidate is unchanged. Equal scores do not change. Tie decisions do not alter win/loss counts or supply positive or negative adaptive-preference evidence, and tie-triggered refill work carries an explicit neutral outcome marker.
+
 ### Comparison history
 
 The Round metric opens a newest-first timeline of prior decisions. Each row resolves display-safe winner and rejected-candidate thumbnails, concepts, and concise style tags from the durable rating catalog without exposing prompts. The first iteration shows up to fifty decisions and retains a total count.
@@ -87,8 +91,6 @@ Exploration only; these are not yet roadmap commitments.
 Let a player optionally explain a choice with quick tags such as subject, composition, palette, medium, mood, or character. Keep the A/B decision instant, then use any extra signal to distinguish what the winner got right.
 
 Add **Skip / neither** and eventually **both** outcomes so the learning model does not have to treat every forced choice as a strong preference.
-
-Add a **Tie** action mapped to `C` and `3`. If the candidates have different Elo scores, update only the lower-rated candidate as though it won and leave the higher-rated candidate unchanged. If their scores are equal, neither score changes. In either case, clear both candidates from the active round.
 
 Add a distinct **Both lose** action mapped to `D` and `4`. Record that the player rejected both images and clear both candidates from the active round. Define its Elo and reusable-pool removal behavior explicitly before implementation rather than treating it as a tie or silently choosing a winner.
 

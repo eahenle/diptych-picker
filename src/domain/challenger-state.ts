@@ -52,15 +52,28 @@ export interface RefillGenerationJobSnapshot {
   preferenceProfile?: PreferenceProfile;
   sessionId: string;
   pinnedWinnerId: string;
+  comparisonOutcome?: "tie";
 }
 
-export interface PendingComparisonReceipt {
+export interface WinningComparisonReceipt {
+  kind?: "selection";
   selectedAt: string;
   roundNumber: number;
   winnerSide: Side;
   winnerId: string;
   loserId: string;
 }
+
+export interface TieComparisonReceipt {
+  kind: "tie";
+  selectedAt: string;
+  roundNumber: number;
+  leftId: string;
+  rightId: string;
+}
+
+export type PendingComparisonReceipt =
+  WinningComparisonReceipt | TieComparisonReceipt;
 
 export interface PendingSelectionBaseline {
   ready: BufferedCandidate[];
@@ -111,12 +124,24 @@ export interface ComparisonHistoryCandidate {
   favorite: boolean | null;
 }
 
-export interface ComparisonHistoryEntry {
+export interface WinningComparisonHistoryEntry {
+  outcome: "selection";
   decisionNumber: number;
   selectedAt: string;
   winner: ComparisonHistoryCandidate;
   loser: ComparisonHistoryCandidate;
 }
+
+export interface TieComparisonHistoryEntry {
+  outcome: "tie";
+  decisionNumber: number;
+  selectedAt: string;
+  left: ComparisonHistoryCandidate;
+  right: ComparisonHistoryCandidate;
+}
+
+export type ComparisonHistoryEntry =
+  WinningComparisonHistoryEntry | TieComparisonHistoryEntry;
 
 export interface FallbackDrawOptions {
   now: string;
@@ -208,12 +233,26 @@ export function summarizeComparisonHistory(
   };
 
   return history
-    .map((selection, index) => ({
-      decisionNumber: index + 1,
-      selectedAt: selection.selectedAt,
-      winner: displayCandidate(selection.winnerId, selection.winnerConcept),
-      loser: displayCandidate(selection.loserId, selection.loserConcept),
-    }))
+    .map((selection, index): ComparisonHistoryEntry =>
+      selection.outcome === "tie"
+        ? {
+            outcome: "tie",
+            decisionNumber: index + 1,
+            selectedAt: selection.selectedAt,
+            left: displayCandidate(selection.leftId, selection.leftConcept),
+            right: displayCandidate(selection.rightId, selection.rightConcept),
+          }
+        : {
+            outcome: "selection",
+            decisionNumber: index + 1,
+            selectedAt: selection.selectedAt,
+            winner: displayCandidate(
+              selection.winnerId,
+              selection.winnerConcept,
+            ),
+            loser: displayCandidate(selection.loserId, selection.loserConcept),
+          },
+    )
     .toReversed()
     .slice(0, Math.max(0, Math.floor(limit)));
 }

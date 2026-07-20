@@ -568,6 +568,7 @@ describe("challenger state", () => {
 
     expect(entries).toEqual([
       {
+        outcome: "selection",
         decisionNumber: 2,
         selectedAt: "2026-07-16T00:02:00.000Z",
         winner: {
@@ -589,6 +590,35 @@ describe("challenger state", () => {
         decisionNumber: 1,
         winner: expect.objectContaining({ id: "first-winner" }),
       }),
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("prompt");
+  });
+
+  it("keeps ties neutral and display-safe in comparison history", () => {
+    const entries = summarizeComparisonHistory(
+      [
+        {
+          outcome: "tie",
+          leftId: "left",
+          rightId: "right",
+          leftPrompt: "private left prompt",
+          rightPrompt: "private right prompt",
+          leftConcept: "stored left",
+          rightConcept: "stored right",
+          selectedAt: "2026-07-16T00:03:00.000Z",
+        },
+      ],
+      state({ ratings: [rating("left"), rating("right")] }),
+    );
+
+    expect(entries).toEqual([
+      {
+        outcome: "tie",
+        decisionNumber: 1,
+        selectedAt: "2026-07-16T00:03:00.000Z",
+        left: expect.objectContaining({ id: "left" }),
+        right: expect.objectContaining({ id: "right" }),
+      },
     ]);
     expect(JSON.stringify(entries)).not.toContain("prompt");
   });

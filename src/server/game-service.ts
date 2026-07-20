@@ -16,11 +16,13 @@ import {
 import {
   beginChampionRetirement,
   beginBufferedSelection,
+  beginTie,
   applyWinnerPreferenceRevision,
   candidateAt,
   composePreferenceSeed,
   completeChampionRetirement,
   completeSelection,
+  completeTie,
   failSelection,
   oppositeSide,
   recentConcepts,
@@ -61,6 +63,7 @@ interface RefillContext {
   winnerSide: Side;
   retainedWinner: Candidate;
   rejectedCandidate: Candidate;
+  comparisonOutcome?: "tie";
 }
 
 interface CapacityResult {
@@ -269,6 +272,100 @@ export class GameService {
       // Persist a replayable selection before committing either side of the
       // cross-repository transition. A prepared FIFO head remains durable
       // until the completed game round is safely stored.
+      await this.gameRepository.save(inFlight);
+      await this.challengerRepository.save(durableChallengers);
+      await this.gameRepository.save(nextGame);
+      if (nextGame.round.status === "idle") {
+        await this.challengerRepository.save({
+          ...capacity.state,
+          pendingComparison: null,
+          pendingSelectionBaseline: null,
+        });
+      }
+      await this.ensureJobsEnqueued(capacity.jobs);
+      return nextGame;
+    });
+  }
+
+  async tie(expectedRoundNumber: number): Promise<GameState> {
+    return this.withStateLocks(async () => {
+      const current = await this.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError("Start a game before declaring a tie");
+      }
+      if (current.round.roundNumber !== expectedRoundNumber) {
+        throw new SelectionConflictError(
+          "The round changed before this tie arrived",
+        );
+      }
+
+      const challengerState = await this.challengerRepository.load();
+      if (!challengerState) {
+        throw new MissingGameError(
+          "Start a game before replacing tied candidates",
+        );
+      }
+
+      const selectedAt = this.now();
+      const referenceSide = this.tieReferenceSide(current, challengerState);
+      const inFlight = beginTie(current, referenceSide, selectedAt);
+      if (!inFlight) {
+        throw new SelectionConflictError(
+          "A challenger is already being generated",
+        );
+      }
+
+      const left = current.round.leftCandidate;
+      const right = current.round.rightCandidate;
+      let nextChallengers = this.recordTie(
+        {
+          ...challengerState,
+          pendingSelectionBaseline:
+            this.pendingSelectionBaseline(challengerState),
+        },
+        left,
+        right,
+        {
+          kind: "tie",
+          selectedAt,
+          roundNumber: current.round.roundNumber,
+          leftId: left.id,
+          rightId: right.id,
+        },
+      );
+      let preparedReadyHeads: BufferedCandidate[] = [];
+      let nextGame = inFlight;
+      if (nextChallengers.ready.length >= 2) {
+        preparedReadyHeads = nextChallengers.ready.slice(0, 2);
+        const leftDraw = popReady(nextChallengers);
+        const rightDraw = popReady(leftDraw.state);
+        nextChallengers = rightDraw.state;
+        nextGame = completeTie(
+          inFlight,
+          leftDraw.candidate!,
+          rightDraw.candidate!,
+        );
+      }
+
+      const reference = candidateAt(current.round, referenceSide);
+      const contrasted = candidateAt(
+        current.round,
+        oppositeSide(referenceSide),
+      );
+      const capacity = this.addRefillCapacity(nextChallengers, {
+        game: nextGame,
+        winnerSide: referenceSide,
+        retainedWinner: reference,
+        rejectedCandidate: contrasted,
+        comparisonOutcome: "tie",
+      });
+      const durableChallengers =
+        preparedReadyHeads.length > 0
+          ? {
+              ...capacity.state,
+              ready: [...preparedReadyHeads, ...capacity.state.ready],
+            }
+          : capacity.state;
       await this.gameRepository.save(inFlight);
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
@@ -626,6 +723,7 @@ export class GameService {
           preferenceProfileFromSeed(context.game.preferenceSeed),
         sessionId: state.sessionId,
         pinnedWinnerId: context.retainedWinner.id,
+        comparisonOutcome: context.comparisonOutcome,
       };
       jobs.push(job);
       records.push({
@@ -717,6 +815,69 @@ export class GameService {
     );
   }
 
+  private recordTie(
+    state: ChallengerState,
+    left: Candidate,
+    right: Candidate,
+    receipt: PendingComparisonReceipt,
+  ): ChallengerState {
+    let ratings = state.ratings;
+    for (const candidate of [left, right]) {
+      if (!ratings.some((item) => item.candidate.id === candidate.id)) {
+        const source = this.sourceOf(candidate);
+        ratings = [
+          ...ratings,
+          this.newRating(candidate, source, source === "curated"),
+        ];
+      }
+    }
+
+    const ratedLeft = ratings.find(
+      ({ candidate }) => candidate.id === left.id,
+    )!;
+    const ratedRight = ratings.find(
+      ({ candidate }) => candidate.id === right.id,
+    )!;
+    let lower: CandidateRating | null = null;
+    let higher: CandidateRating | null = null;
+    if (ratedLeft.rating < ratedRight.rating) {
+      lower = ratedLeft;
+      higher = ratedRight;
+    } else if (ratedRight.rating < ratedLeft.rating) {
+      lower = ratedRight;
+      higher = ratedLeft;
+    }
+    const lowerRating =
+      lower && higher
+        ? updateElo(lower.rating, higher.rating, this.config.eloKFactor).winner
+        : null;
+    const updated: ChallengerState = {
+      ...state,
+      pendingComparison: receipt,
+      ratings: ratings.map((item) =>
+        item === lower ? { ...item, rating: lowerRating! } : item,
+      ),
+    };
+    const withLeft = admitGeneratedCandidate(
+      updated,
+      left.id,
+      this.config.poolMaximum,
+    );
+    return admitGeneratedCandidate(withLeft, right.id, this.config.poolMaximum);
+  }
+
+  private tieReferenceSide(game: GameState, state: ChallengerState): Side {
+    const leftRating =
+      state.ratings.find(
+        ({ candidate }) => candidate.id === game.round.leftCandidate.id,
+      )?.rating ?? this.config.initialRating;
+    const rightRating =
+      state.ratings.find(
+        ({ candidate }) => candidate.id === game.round.rightCandidate.id,
+      )?.rating ?? this.config.initialRating;
+    return rightRating < leftRating ? "right" : "left";
+  }
+
   private comparisonReceipt(
     game: GameState,
     winnerSide: Side,
@@ -739,7 +900,9 @@ export class GameService {
     if (
       game.round.status !== "generating" ||
       !pending ||
-      (pending.kind !== "buffer" && pending.kind !== "retirement")
+      (pending.kind !== "buffer" &&
+        pending.kind !== "retirement" &&
+        pending.kind !== "tie")
     ) {
       if (
         challengers.pendingComparison === null &&
@@ -756,11 +919,16 @@ export class GameService {
       return cleaned;
     }
 
-    const receipt = this.comparisonReceipt(
-      game,
-      pending.winnerSide,
-      pending.selectedAt,
-    );
+    const receipt: PendingComparisonReceipt =
+      pending.kind === "tie"
+        ? {
+            kind: "tie",
+            selectedAt: pending.selectedAt,
+            roundNumber: game.round.roundNumber,
+            leftId: game.round.leftCandidate.id,
+            rightId: game.round.rightCandidate.id,
+          }
+        : this.comparisonReceipt(game, pending.winnerSide, pending.selectedAt);
     if (isDeepStrictEqual(challengers.pendingComparison, receipt)) {
       return challengers;
     }
@@ -770,18 +938,26 @@ export class GameService {
       );
     }
 
-    const compared = this.recordComparison(
-      challengers.pendingSelectionBaseline
-        ? challengers
-        : {
-            ...challengers,
-            pendingSelectionBaseline:
-              this.pendingSelectionBaseline(challengers),
-          },
-      candidateAt(game.round, pending.winnerSide),
-      candidateAt(game.round, oppositeSide(pending.winnerSide)),
-      receipt,
-    );
+    const baseline = challengers.pendingSelectionBaseline
+      ? challengers
+      : {
+          ...challengers,
+          pendingSelectionBaseline: this.pendingSelectionBaseline(challengers),
+        };
+    const compared =
+      pending.kind === "tie"
+        ? this.recordTie(
+            baseline,
+            game.round.leftCandidate,
+            game.round.rightCandidate,
+            receipt,
+          )
+        : this.recordComparison(
+            baseline,
+            candidateAt(game.round, pending.winnerSide),
+            candidateAt(game.round, oppositeSide(pending.winnerSide)),
+            receipt,
+          );
     await this.challengerRepository.save(compared);
     return compared;
   }
@@ -803,6 +979,17 @@ export class GameService {
       };
     }
 
+    if (game.pendingSelection?.kind === "tie") {
+      const referenceSide = game.pendingSelection.referenceSide;
+      return {
+        game,
+        winnerSide: referenceSide,
+        retainedWinner: candidateAt(game.round, referenceSide),
+        rejectedCandidate: candidateAt(game.round, oppositeSide(referenceSide)),
+        comparisonOutcome: "tie",
+      };
+    }
+
     const retainedId = game.round.retainedCandidateId;
     if (!retainedId) return null;
     const winnerSide: Side | null =
@@ -814,11 +1001,12 @@ export class GameService {
     if (!winnerSide) return null;
 
     const lastSelection = game.history.at(-1);
-    const rejectedCandidate = lastSelection
-      ? challengers.ratings.find(
-          ({ candidate }) => candidate.id === lastSelection.loserId,
-        )?.candidate
-      : undefined;
+    const rejectedCandidate =
+      lastSelection && lastSelection.outcome !== "tie"
+        ? challengers.ratings.find(
+            ({ candidate }) => candidate.id === lastSelection.loserId,
+          )?.candidate
+        : undefined;
     return {
       game,
       winnerSide,
@@ -856,6 +1044,25 @@ export class GameService {
       };
       await this.challengerRepository.save(finalized);
       return { game: adapted.game, challengers: finalized };
+    }
+
+    if (game.pendingSelection.kind === "tie") {
+      if (challengers.ready.length < 2) return { game, challengers };
+      const leftDraw = popReady(challengers);
+      const rightDraw = popReady(leftDraw.state);
+      const completed = completeTie(
+        game,
+        leftDraw.candidate!,
+        rightDraw.candidate!,
+      );
+      await this.gameRepository.save(completed);
+      const finalized = {
+        ...rightDraw.state,
+        pendingComparison: null,
+        pendingSelectionBaseline: null,
+      };
+      await this.challengerRepository.save(finalized);
+      return { game: completed, challengers: finalized };
     }
 
     if (game.pendingSelection.kind !== "buffer") {
@@ -904,7 +1111,12 @@ export class GameService {
   ): { game: GameState; challengers: ChallengerState } {
     const selection = game.history.at(-1);
     const profile = game.preferenceProfile;
-    if (!selection || !profile || profile.adaptationMode !== "adaptive") {
+    if (
+      !selection ||
+      selection.outcome === "tie" ||
+      !profile ||
+      profile.adaptationMode !== "adaptive"
+    ) {
       return { game, challengers };
     }
     const winner = challengers.ratings.find(
@@ -962,7 +1174,11 @@ export class GameService {
   ): ReturnType<typeof drawFallback> {
     const recentCandidateIds = game.history
       .slice(-10)
-      .flatMap(({ winnerId, loserId }) => [winnerId, loserId]);
+      .flatMap((decision) =>
+        decision.outcome === "tie"
+          ? [decision.leftId, decision.rightId]
+          : [decision.winnerId, decision.loserId],
+      );
     return drawFallback(state, {
       now: this.now(),
       currentCandidateIds: [

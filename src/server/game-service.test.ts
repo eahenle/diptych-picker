@@ -685,6 +685,111 @@ describe("GameService challenger buffer", () => {
     },
   );
 
+  it("raises only the lower Elo score on a tie and clears both candidates", async () => {
+    const game = gameState({
+      preferenceProfile: {
+        ...preferenceProfileFromSeed(
+          "industrial, gothic, natural, and surprising",
+        ),
+        adaptationMode: "adaptive",
+      },
+    });
+    const challengers = challengerState(game, {
+      ratings: [
+        rating(game.round.leftCandidate, { rating: 900 }),
+        rating(game.round.rightCandidate, { rating: 1100 }),
+        ...challengerState(game).ready.map(({ candidate: item }) =>
+          rating(item),
+        ),
+      ],
+    });
+    const context = serviceFor({ game, challengers });
+
+    const tied = await context.service.tie(3);
+
+    expect(tied.round).toMatchObject({
+      status: "idle",
+      roundNumber: 4,
+      leftCandidate: { id: "buffer-1" },
+      rightCandidate: { id: "buffer-2" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+    expect(tied.history.at(-1)).toMatchObject({
+      outcome: "tie",
+      leftId: "left",
+      rightId: "right",
+    });
+    expect(tied.preferenceProfile?.adaptationSourceWinnerIds).toEqual([]);
+    expect(tied.preferenceProfile?.adaptationSourceRejectedIds).toEqual([]);
+
+    const persisted = await context.challengerRepository.load();
+    expect(
+      persisted?.ratings.find(({ candidate: item }) => item.id === "left"),
+    ).toMatchObject({ rating: 924.311902, wins: 0, losses: 0 });
+    expect(
+      persisted?.ratings.find(({ candidate: item }) => item.id === "right"),
+    ).toMatchObject({ rating: 1100, wins: 0, losses: 0 });
+    expect(persisted?.ready.map(({ candidate: item }) => item.id)).toEqual([
+      "buffer-3",
+      "buffer-4",
+      "buffer-5",
+    ]);
+    expect(context.queue.enqueue).toHaveBeenCalledTimes(2);
+    expect(context.queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "refill",
+        comparisonOutcome: "tie",
+        pinnedWinnerId: "left",
+      }),
+    );
+  });
+
+  it("leaves equal Elo scores unchanged on a tie", async () => {
+    const game = gameState();
+    const context = serviceFor({ game, challengers: challengerState(game) });
+
+    await context.service.tie(3);
+
+    const persisted = await context.challengerRepository.load();
+    expect(
+      persisted?.ratings
+        .filter(({ candidate: item }) => ["left", "right"].includes(item.id))
+        .map(({ rating: value, wins, losses }) => ({ value, wins, losses })),
+    ).toEqual([
+      { value: 1000, wins: 0, losses: 0 },
+      { value: 1000, wins: 0, losses: 0 },
+    ]);
+  });
+
+  it("keeps tied cards visible until two generated replacements are ready", async () => {
+    const game = gameState();
+    const challengers = challengerState(game, { ready: [] });
+    const context = serviceFor({
+      game,
+      challengers,
+      bufferTarget: 3,
+      createId: ids("tie-refill-1", "tie-refill-2", "tie-refill-3"),
+    });
+
+    const waiting = await context.service.tie(3);
+    expect(waiting.round.status).toBe("generating");
+    expect(waiting.pendingSelection).toMatchObject({ kind: "tie" });
+    expect(context.queue.enqueue).toHaveBeenCalledTimes(3);
+
+    context.queue.setResult(completedResult("tie-refill-1"));
+    expect((await context.service.reconcile())?.round.status).toBe(
+      "generating",
+    );
+    context.queue.setResult(completedResult("tie-refill-2"));
+    const completed = await context.service.reconcile();
+    expect(completed?.round).toMatchObject({
+      status: "idle",
+      leftCandidate: { id: "challenger-tie-refill-1" },
+      rightCandidate: { id: "challenger-tie-refill-2" },
+    });
+  });
+
   it("retires a ten-win champion and consumes two FIFO heads", async () => {
     const game = gameState();
     game.round.retainedCandidateId = game.round.leftCandidate.id;

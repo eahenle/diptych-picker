@@ -3,9 +3,11 @@ import {
   beginChampionRetirement,
   beginBufferedSelection,
   beginSelection,
+  beginTie,
   applyWinnerPreferenceRevision,
   completeChampionRetirement,
   completeSelection,
+  completeTie,
   composePreferenceSeed,
   failSelection,
   isSelectionBoundWait,
@@ -366,6 +368,37 @@ describe("round transitions", () => {
         replacement,
       ),
     ).toThrow(/two distinct replacements/i);
+  });
+
+  it("records a tie and clears both active candidates", () => {
+    const current = game();
+    current.round.retainedCandidateId = current.round.leftCandidate.id;
+    current.round.winStreak = 4;
+    const pending = beginTie(current, "left", "2026-07-16T00:00:01.000Z")!;
+    const next = completeTie(
+      pending,
+      candidate("fresh-left", "left"),
+      candidate("fresh-right", "right"),
+    );
+
+    expect(next.round).toMatchObject({
+      status: "idle",
+      roundNumber: 2,
+      leftCandidate: { id: "fresh-left" },
+      rightCandidate: { id: "fresh-right" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+    expect(next.history.at(-1)).toEqual({
+      outcome: "tie",
+      leftId: "left-1",
+      rightId: "right-1",
+      leftPrompt: "left prompt",
+      rightPrompt: "right prompt",
+      leftConcept: "left concept",
+      rightConcept: "right concept",
+      selectedAt: "2026-07-16T00:00:01.000Z",
+    });
   });
 
   it("refuses a second selection while generation is already in progress", () => {

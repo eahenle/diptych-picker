@@ -130,17 +130,32 @@ const candidateRatingSchema = z
   })
   .strict();
 
-const selectionHistorySchema = z
-  .object({
-    winnerId: z.string().min(1),
-    loserId: z.string().min(1),
-    winnerPrompt: z.string().min(1),
-    loserPrompt: z.string().min(1),
-    winnerConcept: z.string().min(1),
-    loserConcept: z.string().min(1),
-    selectedAt: z.string().min(1),
-  })
-  .strict();
+const selectionHistorySchema = z.union([
+  z
+    .object({
+      outcome: z.literal("selection").optional(),
+      winnerId: z.string().min(1),
+      loserId: z.string().min(1),
+      winnerPrompt: z.string().min(1),
+      loserPrompt: z.string().min(1),
+      winnerConcept: z.string().min(1),
+      loserConcept: z.string().min(1),
+      selectedAt: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("tie"),
+      leftId: z.string().min(1),
+      rightId: z.string().min(1),
+      leftPrompt: z.string().min(1),
+      rightPrompt: z.string().min(1),
+      leftConcept: z.string().min(1),
+      rightConcept: z.string().min(1),
+      selectedAt: z.string().min(1),
+    })
+    .strict(),
+]);
 
 const refillGenerationJobSnapshotSchema = z
   .object({
@@ -157,6 +172,7 @@ const refillGenerationJobSnapshotSchema = z
     preferenceProfile: preferenceProfileSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
     pinnedWinnerId: z.string().min(1),
+    comparisonOutcome: z.literal("tie").optional(),
   })
   .strict()
   .refine((job) => job.pinnedWinnerId === job.retainedWinner.id, {
@@ -203,14 +219,27 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
         }),
     ),
     pendingComparison: z
-      .object({
-        selectedAt: z.string().min(1),
-        roundNumber: z.number().int().positive(),
-        winnerSide: z.enum(["left", "right"]),
-        winnerId: z.string().min(1),
-        loserId: z.string().min(1),
-      })
-      .strict()
+      .union([
+        z
+          .object({
+            kind: z.literal("selection").optional(),
+            selectedAt: z.string().min(1),
+            roundNumber: z.number().int().positive(),
+            winnerSide: z.enum(["left", "right"]),
+            winnerId: z.string().min(1),
+            loserId: z.string().min(1),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("tie"),
+            selectedAt: z.string().min(1),
+            roundNumber: z.number().int().positive(),
+            leftId: z.string().min(1),
+            rightId: z.string().min(1),
+          })
+          .strict(),
+      ])
       .nullable()
       .default(null),
     pendingSelectionBaseline: z

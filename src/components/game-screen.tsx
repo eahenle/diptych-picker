@@ -12,6 +12,7 @@ import {
 import {
   beginChampionRetirement,
   beginSelection,
+  beginTie,
   isSelectionBoundWait,
   mergeServerResult,
   preferenceProfileFromSeed,
@@ -48,6 +49,7 @@ interface ActiveSelection {
   expectedRound: number;
   generationJobId: string | null;
   retirement: boolean;
+  tie: boolean;
   controller: AbortController;
   polling: boolean;
   retryAttempt: number;
@@ -117,9 +119,16 @@ function matchingPendingSelection(
   selection: ActiveSelection,
 ): boolean {
   const pending = server.pendingSelection;
+  if (selection.tie) {
+    return (
+      server.round.roundNumber === selection.expectedRound &&
+      pending?.kind === "tie"
+    );
+  }
   if (
     server.round.roundNumber !== selection.expectedRound ||
     !pending ||
+    pending.kind === "tie" ||
     pending.winnerSide !== selection.winnerSide
   ) {
     return false;
@@ -147,6 +156,13 @@ function matchingCompletedSelection(
     return false;
   }
   const history = server.history.at(-1);
+  if (selection.tie) {
+    return (
+      history?.outcome === "tie" &&
+      history.leftId === selection.original.round.leftCandidate.id &&
+      history.rightId === selection.original.round.rightCandidate.id
+    );
+  }
   const winner =
     selection.winnerSide === "left"
       ? selection.original.round.leftCandidate
@@ -155,7 +171,11 @@ function matchingCompletedSelection(
     selection.winnerSide === "left"
       ? selection.original.round.rightCandidate
       : selection.original.round.leftCandidate;
-  return history?.winnerId === winner.id && history.loserId === loser.id;
+  return (
+    history?.outcome !== "tie" &&
+    history?.winnerId === winner.id &&
+    history.loserId === loser.id
+  );
 }
 
 function formatSelectionTime(selectedAt: string): string {
@@ -391,7 +411,7 @@ export function GameScreen() {
           }
 
           if (matchingCompletedSelection(server, selection)) {
-            if (selection.retirement) {
+            if (selection.retirement || selection.tie) {
               await preloadChangedAssets(
                 selection.original,
                 server,
@@ -568,13 +588,17 @@ export function GameScreen() {
     const selection: ActiveSelection = {
       token: crypto.randomUUID(),
       original: game,
-      winnerSide: game.pendingSelection.winnerSide,
+      winnerSide:
+        game.pendingSelection.kind === "tie"
+          ? game.pendingSelection.referenceSide
+          : game.pendingSelection.winnerSide,
       expectedRound: game.round.roundNumber,
       generationJobId:
         game.pendingSelection.kind === "generation"
           ? game.pendingSelection.generationJobId
           : null,
       retirement: game.pendingSelection.kind === "retirement",
+      tie: game.pendingSelection.kind === "tie",
       controller: new AbortController(),
       polling: false,
       retryAttempt: 0,
@@ -608,6 +632,7 @@ export function GameScreen() {
         expectedRound: current.round.roundNumber,
         generationJobId: null,
         retirement,
+        tie: false,
         controller: new AbortController(),
         polling: false,
         retryAttempt: 0,
@@ -638,7 +663,7 @@ export function GameScreen() {
           selection.retirement = true;
         }
         if (matchingCompletedSelection(server, selection)) {
-          if (selection.retirement) {
+          if (selection.retirement || selection.tie) {
             await preloadChangedAssets(
               current,
               server,
@@ -675,6 +700,67 @@ export function GameScreen() {
     [commitGame, startPolling],
   );
 
+  const submitTie = useCallback(
+    async (current: GameState) => {
+      const selectedAt = new Date().toISOString();
+      const optimistic = beginTie(current, "left", selectedAt);
+      if (!optimistic) return;
+
+      selectionLocked.current = true;
+      setLocalError(null);
+      setConnectionStatus(null);
+      const selection: ActiveSelection = {
+        token: crypto.randomUUID(),
+        original: current,
+        winnerSide: "left",
+        expectedRound: current.round.roundNumber,
+        generationJobId: null,
+        retirement: false,
+        tie: true,
+        controller: new AbortController(),
+        polling: false,
+        retryAttempt: 0,
+      };
+      activeSelectionRef.current = selection;
+      commitGame(optimistic);
+
+      try {
+        const response = await fetch("/api/game/select", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            outcome: "tie",
+            roundNumber: current.round.roundNumber,
+          }),
+          signal: selection.controller.signal,
+        });
+        const server = await readJson<RatedGameState>(response);
+        if (activeSelectionRef.current?.token !== selection.token) return;
+        setEloRatings(server.eloRatings ?? null);
+        if (matchingCompletedSelection(server, selection)) {
+          await preloadChangedAssets(
+            current,
+            server,
+            selection.controller.signal,
+          );
+          if (activeSelectionRef.current?.token !== selection.token) return;
+          activeSelectionRef.current = null;
+          selectionLocked.current = false;
+          setConnectionStatus(null);
+          setLocalError(null);
+          commitGame(server);
+          return;
+        }
+        startPolling(selection, server);
+      } catch {
+        if (selection.controller.signal.aborted) return;
+        setConnectionStatus(RECONNECT_MESSAGE);
+        startPolling(selection);
+      }
+    },
+    [commitGame, startPolling],
+  );
+
   const select = useCallback(
     (winnerSide: Side) => {
       const current = gameRef.current;
@@ -689,6 +775,18 @@ export function GameScreen() {
     },
     [submitSelection],
   );
+
+  const tie = useCallback(() => {
+    const current = gameRef.current;
+    if (
+      !current ||
+      selectionLocked.current ||
+      current.round.status === "generating"
+    ) {
+      return;
+    }
+    void submitTie(current);
+  }, [submitTie]);
 
   const retrySelection = useCallback(() => {
     const failed = gameRef.current;
@@ -743,13 +841,17 @@ export function GameScreen() {
           const selection: ActiveSelection = {
             token: crypto.randomUUID(),
             original: server,
-            winnerSide: server.pendingSelection.winnerSide,
+            winnerSide:
+              server.pendingSelection.kind === "tie"
+                ? server.pendingSelection.referenceSide
+                : server.pendingSelection.winnerSide,
             expectedRound: server.round.roundNumber,
             generationJobId:
               server.pendingSelection.kind === "generation"
                 ? server.pendingSelection.generationJobId
                 : null,
             retirement: server.pendingSelection.kind === "retirement",
+            tie: server.pendingSelection.kind === "tie",
             controller: new AbortController(),
             polling: false,
             retryAttempt: 0,
@@ -761,13 +863,13 @@ export function GameScreen() {
           return;
         }
 
-        if (
-          server.round.status === "error" &&
-          server.pendingSelection?.kind === "generation"
-        ) {
+        if (server.round.status === "error" && server.pendingSelection) {
           setReconcilingRetry(false);
           commitGame(server);
-          void submitSelection(server, server.pendingSelection.winnerSide);
+          if (server.pendingSelection.kind === "tie") void submitTie(server);
+          else if (server.pendingSelection.kind === "generation")
+            void submitSelection(server, server.pendingSelection.winnerSide);
+          else selectionLocked.current = false;
           return;
         }
 
@@ -791,7 +893,7 @@ export function GameScreen() {
     };
 
     void reconcile();
-  }, [commitGame, commitStartState, startPolling, submitSelection]);
+  }, [commitGame, commitStartState, startPolling, submitSelection, submitTie]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -811,6 +913,7 @@ export function GameScreen() {
       const key = event.key.toLowerCase();
       if (key === "a" || key === "1") void select("left");
       if (key === "b" || key === "2") void select("right");
+      if (key === "c" || key === "3") void tie();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -821,6 +924,7 @@ export function GameScreen() {
     newGameOpen,
     preferencesOpen,
     select,
+    tie,
   ]);
 
   const openComparisonHistory = async () => {
@@ -882,17 +986,31 @@ export function GameScreen() {
         }),
       );
       setHistoryEntries((entries) =>
-        entries.map((entry) => ({
-          ...entry,
-          winner:
-            entry.winner.id === candidateId
-              ? { ...entry.winner, favorite }
-              : entry.winner,
-          loser:
-            entry.loser.id === candidateId
-              ? { ...entry.loser, favorite }
-              : entry.loser,
-        })),
+        entries.map((entry) =>
+          entry.outcome === "tie"
+            ? {
+                ...entry,
+                left:
+                  entry.left.id === candidateId
+                    ? { ...entry.left, favorite }
+                    : entry.left,
+                right:
+                  entry.right.id === candidateId
+                    ? { ...entry.right, favorite }
+                    : entry.right,
+              }
+            : {
+                ...entry,
+                winner:
+                  entry.winner.id === candidateId
+                    ? { ...entry.winner, favorite }
+                    : entry.winner,
+                loser:
+                  entry.loser.id === candidateId
+                    ? { ...entry.loser, favorite }
+                    : entry.loser,
+              },
+        ),
       );
       setLeaderboardEntries((entries) =>
         entries.map((entry) =>
@@ -1153,6 +1271,9 @@ export function GameScreen() {
   const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
   const retirementLoading =
     status === "generating" && game?.pendingSelection?.kind === "retirement";
+  const tieLoading =
+    status === "generating" && game?.pendingSelection?.kind === "tie";
+  const bothCandidatesLoading = retirementLoading || tieLoading;
   const bufferStatus = bufferHealth
     ? bufferHealth.ready >= bufferHealth.target
       ? "ready"
@@ -1333,7 +1454,7 @@ export function GameScreen() {
                 side="left"
                 label="A"
                 loading={
-                  retirementLoading ||
+                  bothCandidatesLoading ||
                   (status === "generating" &&
                     game.round.replacingSide === "left")
                 }
@@ -1346,7 +1467,7 @@ export function GameScreen() {
                 side="right"
                 label="B"
                 loading={
-                  retirementLoading ||
+                  bothCandidatesLoading ||
                   (status === "generating" &&
                     game.round.replacingSide === "right")
                 }
@@ -1357,13 +1478,32 @@ export function GameScreen() {
             </section>
           </div>
 
+          <div className={styles.roundActions}>
+            <button
+              type="button"
+              className={styles.tieButton}
+              disabled={status === "generating" || reconcilingRetry}
+              onClick={tie}
+            >
+              Declare tie{" "}
+              <span>
+                <kbd>C</kbd> / <kbd>3</kbd>
+              </span>
+            </button>
+          </div>
+
           <p className={styles.shortcuts}>
-            {retirementLoading ? (
-              "Ten-win champion retired — preparing a fresh matchup…"
+            {bothCandidatesLoading ? (
+              tieLoading ? (
+                "Tie recorded — preparing a fresh matchup…"
+              ) : (
+                "Ten-win champion retired — preparing a fresh matchup…"
+              )
             ) : (
               <>
                 Choose with <kbd>A</kbd> or <kbd>1</kbd> for left <span>•</span>{" "}
-                <kbd>B</kbd> or <kbd>2</kbd> for right
+                <kbd>B</kbd> or <kbd>2</kbd> for right <span>•</span> tie with{" "}
+                <kbd>C</kbd> or <kbd>3</kbd>
               </>
             )}
           </p>
@@ -1444,8 +1584,8 @@ export function GameScreen() {
             </button>
             <h2 id="comparison-history-title">Comparison history</h2>
             <p id="comparison-history-description">
-              Newest choices first. Each row shows the selected winner and the
-              rejected candidate without exposing their generation prompts.
+              Newest choices first. Each row shows the two candidates and the
+              decision without exposing their generation prompts.
             </p>
             {favoriteError ? (
               <p className={styles.transferError} role="alert">
@@ -1470,115 +1610,128 @@ export function GameScreen() {
                   Showing {historyEntries.length} of {historyTotal} decisions
                 </p>
                 <ol className={styles.historyList}>
-                  {historyEntries.map((entry) => (
-                    <li key={`${entry.decisionNumber}-${entry.selectedAt}`}>
-                      <span className={styles.historyDecision}>
-                        #{entry.decisionNumber}
-                      </span>
-                      <span className={styles.historyCandidate}>
-                        {entry.winner.imageUrl ? (
-                          <img
-                            src={entry.winner.imageUrl}
-                            alt=""
-                            width={64}
-                            height={64}
-                          />
-                        ) : (
-                          <span
-                            className={styles.historyImagePlaceholder}
-                            aria-hidden="true"
-                          >
-                            —
-                          </span>
-                        )}
-                        <span>
-                          <strong>{entry.winner.concept}</strong>
-                          <small>
-                            {entry.winner.style.slice(0, 2).join(" · ")}
-                          </small>
-                          <span className={styles.candidateFooter}>
-                            <em>Winner</em>
-                            {entry.winner.favorite !== null ? (
-                              <button
-                                type="button"
-                                className={styles.favoriteButton}
-                                aria-label={`${entry.winner.favorite ? "Remove" : "Add"} ${entry.winner.concept} ${entry.winner.favorite ? "from" : "to"} favorites`}
-                                title={
-                                  entry.winner.favorite
-                                    ? "Remove from favorites"
-                                    : "Add to favorites"
-                                }
-                                aria-pressed={entry.winner.favorite}
-                                disabled={favoriteSaving === entry.winner.id}
-                                onClick={() =>
-                                  void updateFavorite(
-                                    entry.winner.id,
-                                    !entry.winner.favorite,
-                                  )
-                                }
-                              >
-                                {entry.winner.favorite ? "★" : "☆"}
-                              </button>
-                            ) : null}
+                  {historyEntries.map((entry) => {
+                    const primary =
+                      entry.outcome === "tie" ? entry.left : entry.winner;
+                    const secondary =
+                      entry.outcome === "tie" ? entry.right : entry.loser;
+                    return (
+                      <li key={`${entry.decisionNumber}-${entry.selectedAt}`}>
+                        <span className={styles.historyDecision}>
+                          #{entry.decisionNumber}
+                        </span>
+                        <span className={styles.historyCandidate}>
+                          {primary.imageUrl ? (
+                            <img
+                              src={primary.imageUrl}
+                              alt=""
+                              width={64}
+                              height={64}
+                            />
+                          ) : (
+                            <span
+                              className={styles.historyImagePlaceholder}
+                              aria-hidden="true"
+                            >
+                              —
+                            </span>
+                          )}
+                          <span>
+                            <strong>{primary.concept}</strong>
+                            <small>
+                              {primary.style.slice(0, 2).join(" · ")}
+                            </small>
+                            <span className={styles.candidateFooter}>
+                              <em>
+                                {entry.outcome === "tie" ? "Tied" : "Winner"}
+                              </em>
+                              {primary.favorite !== null ? (
+                                <button
+                                  type="button"
+                                  className={styles.favoriteButton}
+                                  aria-label={`${primary.favorite ? "Remove" : "Add"} ${primary.concept} ${primary.favorite ? "from" : "to"} favorites`}
+                                  title={
+                                    primary.favorite
+                                      ? "Remove from favorites"
+                                      : "Add to favorites"
+                                  }
+                                  aria-pressed={primary.favorite}
+                                  disabled={favoriteSaving === primary.id}
+                                  onClick={() =>
+                                    void updateFavorite(
+                                      primary.id,
+                                      !primary.favorite,
+                                    )
+                                  }
+                                >
+                                  {primary.favorite ? "★" : "☆"}
+                                </button>
+                              ) : null}
+                            </span>
                           </span>
                         </span>
-                      </span>
-                      <span className={styles.historyVersus} aria-hidden="true">
-                        over
-                      </span>
-                      <span className={styles.historyCandidate}>
-                        {entry.loser.imageUrl ? (
-                          <img
-                            src={entry.loser.imageUrl}
-                            alt=""
-                            width={64}
-                            height={64}
-                          />
-                        ) : (
-                          <span
-                            className={styles.historyImagePlaceholder}
-                            aria-hidden="true"
-                          >
-                            —
-                          </span>
-                        )}
-                        <span>
-                          <strong>{entry.loser.concept}</strong>
-                          <small>
-                            {entry.loser.style.slice(0, 2).join(" · ")}
-                          </small>
-                          <span className={styles.candidateFooter}>
-                            <em>Rejected</em>
-                            {entry.loser.favorite !== null ? (
-                              <button
-                                type="button"
-                                className={styles.favoriteButton}
-                                aria-label={`${entry.loser.favorite ? "Remove" : "Add"} ${entry.loser.concept} ${entry.loser.favorite ? "from" : "to"} favorites`}
-                                title={
-                                  entry.loser.favorite
-                                    ? "Remove from favorites"
-                                    : "Add to favorites"
-                                }
-                                aria-pressed={entry.loser.favorite}
-                                disabled={favoriteSaving === entry.loser.id}
-                                onClick={() =>
-                                  void updateFavorite(
-                                    entry.loser.id,
-                                    !entry.loser.favorite,
-                                  )
-                                }
-                              >
-                                {entry.loser.favorite ? "★" : "☆"}
-                              </button>
-                            ) : null}
+                        <span
+                          className={styles.historyVersus}
+                          aria-hidden="true"
+                        >
+                          {entry.outcome === "tie" ? "with" : "over"}
+                        </span>
+                        <span className={styles.historyCandidate}>
+                          {secondary.imageUrl ? (
+                            <img
+                              src={secondary.imageUrl}
+                              alt=""
+                              width={64}
+                              height={64}
+                            />
+                          ) : (
+                            <span
+                              className={styles.historyImagePlaceholder}
+                              aria-hidden="true"
+                            >
+                              —
+                            </span>
+                          )}
+                          <span>
+                            <strong>{secondary.concept}</strong>
+                            <small>
+                              {secondary.style.slice(0, 2).join(" · ")}
+                            </small>
+                            <span className={styles.candidateFooter}>
+                              <em>
+                                {entry.outcome === "tie" ? "Tied" : "Rejected"}
+                              </em>
+                              {secondary.favorite !== null ? (
+                                <button
+                                  type="button"
+                                  className={styles.favoriteButton}
+                                  aria-label={`${secondary.favorite ? "Remove" : "Add"} ${secondary.concept} ${secondary.favorite ? "from" : "to"} favorites`}
+                                  title={
+                                    secondary.favorite
+                                      ? "Remove from favorites"
+                                      : "Add to favorites"
+                                  }
+                                  aria-pressed={secondary.favorite}
+                                  disabled={favoriteSaving === secondary.id}
+                                  onClick={() =>
+                                    void updateFavorite(
+                                      secondary.id,
+                                      !secondary.favorite,
+                                    )
+                                  }
+                                >
+                                  {secondary.favorite ? "★" : "☆"}
+                                </button>
+                              ) : null}
+                            </span>
                           </span>
                         </span>
-                      </span>
-                      <time dateTime={entry.selectedAt}>
-                        {formatSelectionTime(entry.selectedAt)}
-                      </time>
-                    </li>
-                  ))}
+                        <time dateTime={entry.selectedAt}>
+                          {formatSelectionTime(entry.selectedAt)}
+                        </time>
+                      </li>
+                    );
+                  })}
                 </ol>
               </>
             )}
