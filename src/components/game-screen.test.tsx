@@ -83,6 +83,25 @@ function bufferedGeneratingGame(
   return game;
 }
 
+function retirementGeneratingGame(
+  winnerSide: "left" | "right" = "left",
+): GameState {
+  const game = cloneGame();
+  game.round.status = "generating";
+  game.round.replacingSide = null;
+  game.round.retainedCandidateId =
+    winnerSide === "left"
+      ? game.round.leftCandidate.id
+      : game.round.rightCandidate.id;
+  game.round.winStreak = 9;
+  game.pendingSelection = {
+    kind: "retirement",
+    winnerSide,
+    selectedAt: "2026-07-16T12:00:01.000Z",
+  };
+  return game;
+}
+
 function bufferedErrorGame(): GameState {
   const game = cloneGame();
   game.round.status = "error";
@@ -120,6 +139,49 @@ function completedGame(winnerSide: "left" | "right" = "left"): GameState {
     roundNumber: 2,
     retainedCandidateId: winner.id,
     winStreak: 1,
+  };
+  game.history = [
+    {
+      winnerId: winner.id,
+      loserId: loser.id,
+      winnerPrompt: winner.prompt,
+      loserPrompt: loser.prompt,
+      winnerConcept: winner.concept,
+      loserConcept: loser.concept,
+      selectedAt: "2026-07-16T12:00:01.000Z",
+    },
+  ];
+  return game;
+}
+
+function completedRetirementGame(
+  winnerSide: "left" | "right" = "left",
+): GameState {
+  const game = cloneGame();
+  const winner =
+    winnerSide === "left"
+      ? game.round.leftCandidate
+      : game.round.rightCandidate;
+  const loser =
+    winnerSide === "left"
+      ? game.round.rightCandidate
+      : game.round.leftCandidate;
+  game.round = {
+    leftCandidate: {
+      ...game.round.leftCandidate,
+      id: "retirement-left",
+      imageUrl: "/api/assets/retirement-left.png",
+    },
+    rightCandidate: {
+      ...game.round.rightCandidate,
+      id: "retirement-right",
+      imageUrl: "/api/assets/retirement-right.png",
+    },
+    status: "idle",
+    replacingSide: null,
+    roundNumber: 2,
+    retainedCandidateId: null,
+    winStreak: 0,
   };
   game.history = [
     {
@@ -450,6 +512,64 @@ describe("GameScreen challenger reconciliation", () => {
     );
     expect(preloadedUrls).toEqual(["/api/assets/challenger-job-1.png"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows both cards loading while a champion waits for retirement replacements", async () => {
+    const initial = cloneGame();
+    initial.round.retainedCandidateId = initial.round.leftCandidate.id;
+    initial.round.winStreak = 9;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json(retirementGeneratingGame(), 202)
+          : json({ status: "ready", game: initial }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByTestId("candidate-card-left"));
+
+    expect(await screen.findByTestId("loading-left")).toBeVisible();
+    expect(screen.getByTestId("loading-right")).toBeVisible();
+    expect(screen.getAllByTestId("candidate-image")).toHaveLength(2);
+    expect(
+      screen.getByText("Ten-win champion retired — preparing a fresh matchup…"),
+    ).toBeVisible();
+  });
+
+  it("preloads and commits both replacements after instant retirement", async () => {
+    const preloadedUrls: string[] = [];
+    installRecordedImagePreload(preloadedUrls);
+    const initial = cloneGame();
+    initial.round.retainedCandidateId = initial.round.rightCandidate.id;
+    initial.round.winStreak = 9;
+    const completed = completedRetirementGame("right");
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json({ ...completed, eloRatings: { left: 1000, right: 1016 } })
+          : json({ status: "ready", game: initial }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    const originalImages = await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByTestId("candidate-card-right"));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Game status")).toHaveTextContent("Round 2"),
+    );
+    const replacements = screen.getAllByTestId("candidate-image");
+    expect(replacements[0]).not.toBe(originalImages[0]);
+    expect(replacements[1]).not.toBe(originalImages[1]);
+    expect(preloadedUrls).toEqual([
+      "/api/assets/retirement-left.png",
+      "/api/assets/retirement-right.png",
+    ]);
+    expect(screen.getByLabelText("Game status")).toHaveTextContent(
+      "Win streak 0",
+    );
   });
 
   it("opens Preferences during a selection wait and defers Save", async () => {

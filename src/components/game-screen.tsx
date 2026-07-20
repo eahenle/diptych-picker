@@ -10,10 +10,12 @@ import {
   type ReactNode,
 } from "react";
 import {
+  beginChampionRetirement,
   beginSelection,
   isSelectionBoundWait,
   mergeServerResult,
   preferenceProfileFromSeed,
+  willRetireChampion,
   type BufferHealth,
   type DisplayedEloRatings,
   type GameStartState,
@@ -42,6 +44,7 @@ interface ActiveSelection {
   winnerSide: Side;
   expectedRound: number;
   generationJobId: string | null;
+  retirement: boolean;
   controller: AbortController;
   polling: boolean;
   retryAttempt: number;
@@ -118,10 +121,15 @@ function matchingPendingSelection(
   ) {
     return false;
   }
-  if (pending.kind === "buffer") return selection.generationJobId === null;
+  if (pending.kind === "generation") {
+    return (
+      selection.generationJobId !== null &&
+      pending.generationJobId === selection.generationJobId
+    );
+  }
   return (
-    selection.generationJobId !== null &&
-    pending.generationJobId === selection.generationJobId
+    selection.generationJobId === null &&
+    (pending.kind === "retirement") === selection.retirement
   );
 }
 
@@ -357,6 +365,18 @@ export function GameScreen() {
           }
 
           if (matchingCompletedSelection(server, selection)) {
+            if (selection.retirement) {
+              await preloadChangedAssets(
+                selection.original,
+                server,
+                selection.controller.signal,
+              );
+              if (!isCurrent()) return;
+              commitGame(server);
+              setLocalError(null);
+              finish();
+              return;
+            }
             const challenger =
               selection.winnerSide === "left"
                 ? server.round.rightCandidate
@@ -528,6 +548,7 @@ export function GameScreen() {
         game.pendingSelection.kind === "generation"
           ? game.pendingSelection.generationJobId
           : null,
+      retirement: game.pendingSelection.kind === "retirement",
       controller: new AbortController(),
       polling: false,
       retryAttempt: 0,
@@ -539,12 +560,16 @@ export function GameScreen() {
 
   const submitSelection = useCallback(
     async (current: GameState, winnerSide: Side) => {
-      const optimistic = beginSelection(
-        current,
-        winnerSide,
-        new Date().toISOString(),
-        `optimistic-${crypto.randomUUID()}`,
-      );
+      const retirement = willRetireChampion(current, winnerSide);
+      const selectedAt = new Date().toISOString();
+      const optimistic = retirement
+        ? beginChampionRetirement(current, winnerSide, selectedAt)
+        : beginSelection(
+            current,
+            winnerSide,
+            selectedAt,
+            `optimistic-${crypto.randomUUID()}`,
+          );
       if (!optimistic) return;
 
       selectionLocked.current = true;
@@ -556,6 +581,7 @@ export function GameScreen() {
         winnerSide,
         expectedRound: current.round.roundNumber,
         generationJobId: null,
+        retirement,
         controller: new AbortController(),
         polling: false,
         retryAttempt: 0,
@@ -582,7 +608,24 @@ export function GameScreen() {
         ) {
           selection.generationJobId = server.pendingSelection.generationJobId;
         }
+        if (server.pendingSelection?.kind === "retirement") {
+          selection.retirement = true;
+        }
         if (matchingCompletedSelection(server, selection)) {
+          if (selection.retirement) {
+            await preloadChangedAssets(
+              current,
+              server,
+              selection.controller.signal,
+            );
+            if (activeSelectionRef.current?.token !== selection.token) return;
+            activeSelectionRef.current = null;
+            selectionLocked.current = false;
+            setConnectionStatus(null);
+            setLocalError(null);
+            commitGame(server);
+            return;
+          }
           const challenger =
             winnerSide === "left"
               ? server.round.rightCandidate
@@ -680,6 +723,7 @@ export function GameScreen() {
               server.pendingSelection.kind === "generation"
                 ? server.pendingSelection.generationJobId
                 : null,
+            retirement: server.pendingSelection.kind === "retirement",
             controller: new AbortController(),
             polling: false,
             retryAttempt: 0,
@@ -942,6 +986,8 @@ export function GameScreen() {
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
   const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
+  const retirementLoading =
+    status === "generating" && game?.pendingSelection?.kind === "retirement";
   const bufferStatus = bufferHealth
     ? bufferHealth.ready >= bufferHealth.target
       ? "ready"
@@ -1099,7 +1145,9 @@ export function GameScreen() {
                 side="left"
                 label="A"
                 loading={
-                  status === "generating" && game.round.replacingSide === "left"
+                  retirementLoading ||
+                  (status === "generating" &&
+                    game.round.replacingSide === "left")
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
@@ -1110,8 +1158,9 @@ export function GameScreen() {
                 side="right"
                 label="B"
                 loading={
-                  status === "generating" &&
-                  game.round.replacingSide === "right"
+                  retirementLoading ||
+                  (status === "generating" &&
+                    game.round.replacingSide === "right")
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
@@ -1121,8 +1170,14 @@ export function GameScreen() {
           </div>
 
           <p className={styles.shortcuts}>
-            Choose with <kbd>A</kbd> or <kbd>1</kbd> for left <span>•</span>{" "}
-            <kbd>B</kbd> or <kbd>2</kbd> for right
+            {retirementLoading ? (
+              "Ten-win champion retired — preparing a fresh matchup…"
+            ) : (
+              <>
+                Choose with <kbd>A</kbd> or <kbd>1</kbd> for left <span>•</span>{" "}
+                <kbd>B</kbd> or <kbd>2</kbd> for right
+              </>
+            )}
           </p>
 
           {status === "error" || localError ? (

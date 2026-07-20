@@ -64,6 +64,13 @@ const pendingSelectionSchema = z.discriminatedUnion("kind", [
       selectedAt: z.string().trim().min(1),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("retirement"),
+      winnerSide: z.enum(["left", "right"]),
+      selectedAt: z.string().trim().min(1),
+    })
+    .strict(),
 ]);
 
 const gameStateSchema: z.ZodType<GameState> = z

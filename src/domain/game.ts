@@ -2,6 +2,7 @@ export type Side = "left" | "right";
 export type RoundStatus = "idle" | "generating" | "error";
 export type PreferenceContentLevel = "family-friendly" | "adult-allowed";
 export const GENERATION_JOB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+export const CHAMPION_RETIREMENT_STREAK = 10;
 
 export interface PreferenceProfile {
   themes: string;
@@ -50,7 +51,8 @@ export type PendingSelection =
       selectedAt: string;
       generationJobId: string;
     }
-  | { kind: "buffer"; winnerSide: Side; selectedAt: string };
+  | { kind: "buffer"; winnerSide: Side; selectedAt: string }
+  | { kind: "retirement"; winnerSide: Side; selectedAt: string };
 
 export interface GameState {
   round: Round;
@@ -183,6 +185,39 @@ export function beginBufferedSelection(
   };
 }
 
+export function willRetireChampion(
+  state: GameState,
+  winnerSide: Side,
+): boolean {
+  const winner = candidateAt(state.round, winnerSide);
+  return (
+    state.round.retainedCandidateId === winner.id &&
+    state.round.winStreak + 1 >= CHAMPION_RETIREMENT_STREAK
+  );
+}
+
+export function beginChampionRetirement(
+  state: GameState,
+  winnerSide: Side,
+  selectedAt: string,
+): GameState | null {
+  if (state.round.status === "generating") return null;
+  if (!willRetireChampion(state, winnerSide)) {
+    throw new Error("The selected candidate has not reached retirement");
+  }
+
+  return {
+    ...state,
+    round: {
+      ...state.round,
+      status: "generating",
+      replacingSide: null,
+    },
+    pendingSelection: { kind: "retirement", winnerSide, selectedAt },
+    errorMessage: undefined,
+  };
+}
+
 export function completeSelection(
   state: GameState,
   challenger: Candidate,
@@ -206,6 +241,58 @@ export function completeSelection(
       roundNumber: state.round.roundNumber + 1,
       retainedCandidateId: winner.id,
       winStreak: continuesStreak ? (state.round.winStreak ?? 0) + 1 : 1,
+    },
+    history: [
+      ...state.history,
+      {
+        winnerId: winner.id,
+        loserId: loser.id,
+        winnerPrompt: winner.prompt,
+        loserPrompt: loser.prompt,
+        winnerConcept: winner.concept,
+        loserConcept: loser.concept,
+        selectedAt: pending.selectedAt,
+      },
+    ],
+    pendingSelection: undefined,
+    errorMessage: undefined,
+  };
+}
+
+export function completeChampionRetirement(
+  state: GameState,
+  leftCandidate: Candidate,
+  rightCandidate: Candidate,
+): GameState {
+  const pending = state.pendingSelection;
+  if (state.round.status !== "generating" || pending?.kind !== "retirement") {
+    throw new Error("No champion retirement is awaiting replacements");
+  }
+
+  const currentIds = new Set([
+    state.round.leftCandidate.id,
+    state.round.rightCandidate.id,
+  ]);
+  if (
+    leftCandidate.id === rightCandidate.id ||
+    currentIds.has(leftCandidate.id) ||
+    currentIds.has(rightCandidate.id)
+  ) {
+    throw new Error("Champion retirement requires two distinct replacements");
+  }
+
+  const winner = candidateAt(state.round, pending.winnerSide);
+  const loser = candidateAt(state.round, oppositeSide(pending.winnerSide));
+  return {
+    ...state,
+    round: {
+      leftCandidate,
+      rightCandidate,
+      status: "idle",
+      replacingSide: null,
+      roundNumber: state.round.roundNumber + 1,
+      retainedCandidateId: null,
+      winStreak: 0,
     },
     history: [
       ...state.history,

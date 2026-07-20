@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  beginChampionRetirement,
   beginBufferedSelection,
   beginSelection,
+  completeChampionRetirement,
   completeSelection,
   composePreferenceSeed,
   failSelection,
@@ -10,6 +12,7 @@ import {
   preferenceProfileFromSeed,
   recentConcepts,
   recoverInterruptedSelection,
+  willRetireChampion,
   type Candidate,
   type GameState,
 } from "./game";
@@ -198,6 +201,72 @@ describe("round transitions", () => {
       winStreak: 1,
     });
     expect(retained).toEqual(retainedMetadata);
+  });
+
+  it("retires a champion after its tenth consecutive win", () => {
+    const initial = game();
+    initial.round.retainedCandidateId = initial.round.leftCandidate.id;
+    initial.round.winStreak = 9;
+    const leftReplacement = candidate("left-2", "left");
+    const rightReplacement = candidate("right-2", "right");
+
+    expect(willRetireChampion(initial, "left")).toBe(true);
+    const pending = beginChampionRetirement(
+      initial,
+      "left",
+      "2026-07-16T00:10:00.000Z",
+    )!;
+    expect(pending.round).toMatchObject({
+      status: "generating",
+      replacingSide: null,
+    });
+    expect(pending.pendingSelection).toEqual({
+      kind: "retirement",
+      winnerSide: "left",
+      selectedAt: "2026-07-16T00:10:00.000Z",
+    });
+
+    const next = completeChampionRetirement(
+      pending,
+      leftReplacement,
+      rightReplacement,
+    );
+    expect(next.round).toMatchObject({
+      leftCandidate: leftReplacement,
+      rightCandidate: rightReplacement,
+      status: "idle",
+      roundNumber: 2,
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+    expect(next.history.at(-1)).toMatchObject({
+      winnerId: "left-1",
+      loserId: "right-1",
+      selectedAt: "2026-07-16T00:10:00.000Z",
+    });
+  });
+
+  it("requires two fresh distinct candidates to finish retirement", () => {
+    const initial = game();
+    initial.round.retainedCandidateId = initial.round.rightCandidate.id;
+    initial.round.winStreak = 9;
+    const pending = beginChampionRetirement(
+      initial,
+      "right",
+      "2026-07-16T00:10:00.000Z",
+    )!;
+    const replacement = candidate("new", "left");
+
+    expect(() =>
+      completeChampionRetirement(pending, replacement, replacement),
+    ).toThrow(/two distinct replacements/i);
+    expect(() =>
+      completeChampionRetirement(
+        pending,
+        initial.round.leftCandidate,
+        replacement,
+      ),
+    ).toThrow(/two distinct replacements/i);
   });
 
   it("refuses a second selection while generation is already in progress", () => {
