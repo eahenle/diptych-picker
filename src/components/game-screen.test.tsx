@@ -2,6 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -686,12 +687,36 @@ describe("GameScreen challenger reconciliation", () => {
     );
   });
 
-  it("opens Preferences during a selection wait and defers Save", async () => {
+  it("animates and completes a queued preference save after the challenger arrives", async () => {
+    installSuccessfulImagePreload();
+    const adaptiveCompletion = completedGame();
+    adaptiveCompletion.preferenceSeed = initializedGame.preferenceSeed;
+    adaptiveCompletion.preferenceProfile = {
+      themes: initializedGame.preferenceSeed,
+      inspiration: "",
+      mediaTypes: "",
+      visualStyle: "",
+      colorPalette: "",
+      contentLevel: "family-friendly",
+      avoid: "",
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["generated-left"],
+    };
+    let getCount = 0;
+    let resolvePatch!: (response: Response) => void;
+    const patchResponse = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
     const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, init?: RequestInit) =>
-        init?.method === "POST"
-          ? json(bufferedGeneratingGame(), 202)
-          : json({ status: "ready", game: initializedGame }),
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") return json(bufferedGeneratingGame(), 202);
+        if (init?.method === "PATCH") return patchResponse;
+        getCount += 1;
+        return json({
+          status: "ready",
+          game: getCount === 1 ? initializedGame : adaptiveCompletion,
+        });
+      },
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -704,10 +729,49 @@ describe("GameScreen challenger reconciliation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
 
     expect(screen.getByRole("dialog")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
     expect(
-      screen.getByText("Changes can be saved after this challenger arrives."),
+      screen.getByText(
+        "Save now to apply these changes when the challenger arrives.",
+      ),
     ).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Inspiration"), {
+      target: { value: "queued diagonal lighting" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("Profile queued")).toBeVisible();
+    expect(
+      screen.getByText("Waiting for the challenger to arrive…"),
+    ).toBeVisible();
+    expect(screen.getByTestId("preference-save-spinner")).toBeVisible();
+    expect(screen.getByLabelText("Inspiration")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
+
+    expect(await screen.findByText("Saving profile")).toBeVisible();
+    expect(screen.getByText("Applying your preferences…")).toBeVisible();
+    const patchCall = fetchMock.mock.calls.find(
+      ([, init]) => init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
+      preferenceProfile: { inspiration: "queued diagonal lighting" },
+      expectedPreferenceProfile: {
+        adaptationMode: "adaptive",
+        adaptationSourceWinnerIds: ["generated-left"],
+      },
+    });
+
+    await act(async () => {
+      resolvePatch(json(adaptiveCompletion));
+      await patchResponse;
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps the original profile version when an open editor outlives an adaptive update", async () => {
@@ -757,6 +821,9 @@ describe("GameScreen challenger reconciliation", () => {
       expect(
         screen.getByRole("button", { name: "Save profile" }),
       ).toBeEnabled(),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Game status")).toHaveTextContent("Round 2"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
 
