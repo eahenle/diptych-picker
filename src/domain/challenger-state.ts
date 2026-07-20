@@ -2,6 +2,7 @@ import type {
   BufferHealth,
   Candidate,
   DisplayedEloRatings,
+  GameState,
   PreferenceProfile,
   SelectionHistory,
   Side,
@@ -203,6 +204,87 @@ export function summarizeDisplayedEloRatings(
     left: Math.round(ratings.get(leftCandidateId) ?? initialRating),
     right: Math.round(ratings.get(rightCandidateId) ?? initialRating),
   };
+}
+
+export function summarizeDisplayedScores(
+  state: ChallengerState | null,
+  game: GameState,
+  initialRating = 1000,
+  kFactor = 32,
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): DisplayedEloRatings {
+  const ratings = summarizeDisplayedEloRatings(
+    state,
+    game.round.leftCandidate.id,
+    game.round.rightCandidate.id,
+    initialRating,
+  );
+  if (!state) return ratings;
+
+  const appearedIds = new Set(
+    game.history.flatMap((decision) =>
+      decision.outcome === "tie" || decision.outcome === "both-lose"
+        ? [decision.leftId, decision.rightId]
+        : [decision.winnerId, decision.loserId],
+    ),
+  );
+  const scoreFor = (
+    candidateId: string,
+    opponentId: string,
+    rating: number | "new" | "pool-exit",
+  ) => {
+    if (!appearedIds.has(candidateId)) return "new" as const;
+    return wouldLeavePoolAfterLoss(
+      state,
+      candidateId,
+      opponentId,
+      kFactor,
+      poolMaximum,
+    )
+      ? ("pool-exit" as const)
+      : rating;
+  };
+
+  return {
+    left: scoreFor(
+      game.round.leftCandidate.id,
+      game.round.rightCandidate.id,
+      ratings.left,
+    ),
+    right: scoreFor(
+      game.round.rightCandidate.id,
+      game.round.leftCandidate.id,
+      ratings.right,
+    ),
+  };
+}
+
+function wouldLeavePoolAfterLoss(
+  state: ChallengerState,
+  loserId: string,
+  winnerId: string,
+  kFactor: number,
+  poolMaximum: number,
+): boolean {
+  const loser = state.ratings.find(({ candidate }) => candidate.id === loserId);
+  const winner = state.ratings.find(
+    ({ candidate }) => candidate.id === winnerId,
+  );
+  if (!loser?.poolMember || !winner) return false;
+
+  const nextRatings = updateElo(winner.rating, loser.rating, kFactor);
+  const rated = {
+    ...state,
+    ratings: state.ratings.map((item) => {
+      if (item === winner) return { ...item, rating: nextRatings.winner };
+      if (item === loser) return { ...item, rating: nextRatings.loser };
+      return item;
+    }),
+  };
+  const withLoser = admitGeneratedCandidate(rated, loserId, poolMaximum);
+  const completed = admitGeneratedCandidate(withLoser, winnerId, poolMaximum);
+  return !completed.ratings.find(({ candidate }) => candidate.id === loserId)
+    ?.poolMember;
 }
 
 export function summarizePoolLeaderboard(

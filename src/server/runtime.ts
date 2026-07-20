@@ -10,7 +10,7 @@ import type {
 import {
   summarizeBufferHealth,
   summarizeComparisonHistory,
-  summarizeDisplayedEloRatings,
+  summarizeDisplayedScores,
   summarizePoolLeaderboard,
 } from "@/domain/challenger-state";
 import { FileGenerationMailbox } from "./agent-mailbox";
@@ -255,11 +255,12 @@ export async function setCandidateFavorite(
 }
 
 export async function getDisplayedEloRatings(game: GameState) {
-  return summarizeDisplayedEloRatings(
+  return summarizeDisplayedScores(
     await challengerRepository.load(),
-    game.round.leftCandidate.id,
-    game.round.rightCandidate.id,
+    game,
     challengerConfig.initialRating,
+    challengerConfig.eloKFactor,
+    challengerConfig.poolMaximum,
   );
 }
 

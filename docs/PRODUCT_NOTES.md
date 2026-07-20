@@ -14,6 +14,10 @@ The comparison screen exposes **Declare tie**, mapped to `C` and `3`. A tie clea
 
 The comparison screen exposes **Both lose**, mapped to `D` and `4`. This is a true dual rejection: each active candidate receives one loss, neither Elo score changes because no relative winner was chosen, and both candidates are removed from the reusable pool. Generated candidates become negative adaptive-preference evidence. Both cards remain visible while a complete fresh pair is prepared, and depleted queues use the same paced, distinct pool fallback as ties.
 
+### Score-state cues
+
+The lower-left score overlay shows rounded Elo for established candidates, `✦` for a first appearance, and `⊖` when simulating a loss with the current opponent would remove that candidate from the reusable pool. First appearance takes precedence. Each symbol has a plain-language tooltip and is included in the card's accessible name.
+
 ### Comparison history
 
 The Round metric opens a newest-first timeline of prior decisions. Each row resolves display-safe winner and rejected-candidate thumbnails, concepts, and concise style tags from the durable rating catalog without exposing prompts. The first iteration shows up to fifty decisions and retains a total count.
@@ -99,10 +103,6 @@ Exploration only; these are not yet roadmap commitments.
 Let a player optionally explain a choice with quick tags such as subject, composition, palette, medium, mood, or character. Keep the A/B decision instant, then use any extra signal to distinguish what the winner got right.
 
 Add **Skip / neither** outcomes so the learning model does not have to treat every forced choice as a strong preference.
-
-### Image inspection and score-state cues
-
-Replace the visible Elo number with a distinct symbol when a candidate is appearing for the first time, and with another symbol when losing the current round would remove that candidate from the reusable pool.
 
 ### Preference presets and weighting
 

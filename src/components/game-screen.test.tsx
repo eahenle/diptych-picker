@@ -550,6 +550,42 @@ describe("GameScreen challenger reconciliation", () => {
     ).toBeVisible();
   });
 
+  it("replaces Elo with accessible first-appearance and pool-exit cues", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json({
+          status: "ready",
+          game: initializedGame,
+          eloRatings: { left: "new", right: "pool-exit" },
+        }),
+      ),
+    );
+
+    render(<GameScreen />);
+
+    expect(await screen.findByTitle("First appearance")).toHaveTextContent("✦");
+    expect(
+      screen.getByTitle("Leaves the reusable pool if it loses"),
+    ).toHaveTextContent("⊖");
+    expect(
+      screen.getByRole("button", {
+        name: "Choose image A: left concept. First appearance",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Choose image B: right concept. Leaves the reusable pool if it loses",
+      }),
+    ).toBeVisible();
+    expect(screen.getByTestId("candidate-card-left")).not.toHaveTextContent(
+      "Elo",
+    );
+    expect(screen.getByTestId("candidate-card-right")).not.toHaveTextContent(
+      "Elo",
+    );
+  });
+
   it("opens the reusable-pool leaderboard from the Pool metric", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
       String(input).endsWith("/api/game/leaderboard")

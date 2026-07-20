@@ -112,9 +112,11 @@ export interface BufferHealth {
   poolMaximum: number;
 }
 
+export type DisplayedScore = number | "new" | "pool-exit";
+
 export interface DisplayedEloRatings {
-  left: number;
-  right: number;
+  left: DisplayedScore;
+  right: DisplayedScore;
 }
 
 export interface GenerationNotice {
