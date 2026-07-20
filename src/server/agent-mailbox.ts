@@ -95,17 +95,32 @@ const candidateSchema = z
   })
   .strict();
 
-const selectionHistorySchema = z
-  .object({
-    winnerId: nonBlankStringSchema,
-    loserId: nonBlankStringSchema,
-    winnerPrompt: nonBlankStringSchema,
-    loserPrompt: nonBlankStringSchema,
-    winnerConcept: nonBlankStringSchema,
-    loserConcept: nonBlankStringSchema,
-    selectedAt: timestampSchema,
-  })
-  .strict();
+const selectionHistorySchema = z.union([
+  z
+    .object({
+      outcome: z.literal("selection").optional(),
+      winnerId: nonBlankStringSchema,
+      loserId: nonBlankStringSchema,
+      winnerPrompt: nonBlankStringSchema,
+      loserPrompt: nonBlankStringSchema,
+      winnerConcept: nonBlankStringSchema,
+      loserConcept: nonBlankStringSchema,
+      selectedAt: timestampSchema,
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("tie"),
+      leftId: nonBlankStringSchema,
+      rightId: nonBlankStringSchema,
+      leftPrompt: nonBlankStringSchema,
+      rightPrompt: nonBlankStringSchema,
+      leftConcept: nonBlankStringSchema,
+      rightConcept: nonBlankStringSchema,
+      selectedAt: timestampSchema,
+    })
+    .strict(),
+]);
 
 const generationJobFields = {
   id: jobIdSchema,
@@ -142,6 +157,7 @@ const refillGenerationJobSchema = z
     kind: z.literal("refill"),
     sessionId: jobIdSchema,
     pinnedWinnerId: nonBlankStringSchema,
+    comparisonOutcome: z.literal("tie").optional(),
   })
   .strict()
   .refine((job) => job.pinnedWinnerId === job.retainedWinner.id, {

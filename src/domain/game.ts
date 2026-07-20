@@ -45,7 +45,8 @@ export interface Round {
   winStreak: number;
 }
 
-export interface SelectionHistory {
+export interface WinningSelectionHistory {
+  outcome?: "selection";
   winnerId: string;
   loserId: string;
   winnerPrompt: string;
@@ -55,6 +56,19 @@ export interface SelectionHistory {
   selectedAt: string;
 }
 
+export interface TieSelectionHistory {
+  outcome: "tie";
+  leftId: string;
+  rightId: string;
+  leftPrompt: string;
+  rightPrompt: string;
+  leftConcept: string;
+  rightConcept: string;
+  selectedAt: string;
+}
+
+export type SelectionHistory = WinningSelectionHistory | TieSelectionHistory;
+
 export type PendingSelection =
   | {
       kind: "generation";
@@ -63,7 +77,8 @@ export type PendingSelection =
       generationJobId: string;
     }
   | { kind: "buffer"; winnerSide: Side; selectedAt: string }
-  | { kind: "retirement"; winnerSide: Side; selectedAt: string };
+  | { kind: "retirement"; winnerSide: Side; selectedAt: string }
+  | { kind: "tie"; referenceSide: Side; selectedAt: string };
 
 export interface GameState {
   round: Round;
@@ -283,12 +298,35 @@ export function beginChampionRetirement(
   };
 }
 
+export function beginTie(
+  state: GameState,
+  referenceSide: Side,
+  selectedAt: string,
+): GameState | null {
+  if (state.round.status === "generating") return null;
+
+  return {
+    ...state,
+    round: {
+      ...state.round,
+      status: "generating",
+      replacingSide: null,
+    },
+    pendingSelection: { kind: "tie", referenceSide, selectedAt },
+    errorMessage: undefined,
+  };
+}
+
 export function completeSelection(
   state: GameState,
   challenger: Candidate,
 ): GameState {
   const pending = state.pendingSelection;
-  if (state.round.status !== "generating" || !pending) {
+  if (
+    state.round.status !== "generating" ||
+    !pending ||
+    pending.kind === "tie"
+  ) {
     throw new Error("No selection is awaiting a challenger");
   }
 
@@ -376,6 +414,59 @@ export function completeChampionRetirement(
   };
 }
 
+export function completeTie(
+  state: GameState,
+  leftCandidate: Candidate,
+  rightCandidate: Candidate,
+): GameState {
+  const pending = state.pendingSelection;
+  if (state.round.status !== "generating" || pending?.kind !== "tie") {
+    throw new Error("No tie is awaiting replacements");
+  }
+
+  const currentIds = new Set([
+    state.round.leftCandidate.id,
+    state.round.rightCandidate.id,
+  ]);
+  if (
+    leftCandidate.id === rightCandidate.id ||
+    currentIds.has(leftCandidate.id) ||
+    currentIds.has(rightCandidate.id)
+  ) {
+    throw new Error("A tie requires two distinct replacements");
+  }
+
+  const tiedLeft = state.round.leftCandidate;
+  const tiedRight = state.round.rightCandidate;
+  return {
+    ...state,
+    round: {
+      leftCandidate,
+      rightCandidate,
+      status: "idle",
+      replacingSide: null,
+      roundNumber: state.round.roundNumber + 1,
+      retainedCandidateId: null,
+      winStreak: 0,
+    },
+    history: [
+      ...state.history,
+      {
+        outcome: "tie",
+        leftId: tiedLeft.id,
+        rightId: tiedRight.id,
+        leftPrompt: tiedLeft.prompt,
+        rightPrompt: tiedRight.prompt,
+        leftConcept: tiedLeft.concept,
+        rightConcept: tiedRight.concept,
+        selectedAt: pending.selectedAt,
+      },
+    ],
+    pendingSelection: undefined,
+    errorMessage: undefined,
+  };
+}
+
 export function failSelection(state: GameState, message: string): GameState {
   if (!state.pendingSelection) {
     throw new Error("No selection is available to retry");
@@ -404,7 +495,11 @@ export function recentConcepts(state: GameState, limit = 8): string[] {
 
   for (let index = state.history.length - 1; index >= 0; index -= 1) {
     const item = state.history[index];
-    for (const concept of [item.loserConcept, item.winnerConcept]) {
+    const itemConcepts =
+      item.outcome === "tie"
+        ? [item.rightConcept, item.leftConcept]
+        : [item.loserConcept, item.winnerConcept];
+    for (const concept of itemConcepts) {
       if (!seen.has(concept)) {
         seen.add(concept);
         concepts.push(concept);

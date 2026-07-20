@@ -8,10 +8,16 @@ import { gameService, getDisplayedEloRatings } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
-const SelectionSchema = z.object({
-  winnerSide: z.enum(["left", "right"]),
-  roundNumber: z.number().int().positive(),
-});
+const SelectionSchema = z.union([
+  z.object({
+    winnerSide: z.enum(["left", "right"]),
+    roundNumber: z.number().int().positive(),
+  }),
+  z.object({
+    outcome: z.literal("tie"),
+    roundNumber: z.number().int().positive(),
+  }),
+]);
 
 export async function POST(request: Request) {
   const parsed = SelectionSchema.safeParse(await request.json());
@@ -19,10 +25,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid selection." }, { status: 400 });
 
   try {
-    const game = await gameService.select(
-      parsed.data.winnerSide,
-      parsed.data.roundNumber,
-    );
+    const game =
+      "outcome" in parsed.data
+        ? await gameService.tie(parsed.data.roundNumber)
+        : await gameService.select(
+            parsed.data.winnerSide,
+            parsed.data.roundNumber,
+          );
     return NextResponse.json(
       { ...game, eloRatings: await getDisplayedEloRatings(game) },
       {

@@ -157,6 +157,40 @@ const pendingSelectionSchema = z.discriminatedUnion("kind", [
       selectedAt: z.string().trim().min(1),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("tie"),
+      referenceSide: z.enum(["left", "right"]),
+      selectedAt: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
+const selectionHistorySchema = z.union([
+  z
+    .object({
+      outcome: z.literal("selection").optional(),
+      winnerId: z.string().trim().min(1),
+      loserId: z.string().trim().min(1),
+      winnerPrompt: z.string().trim().min(1),
+      loserPrompt: z.string().trim().min(1),
+      winnerConcept: z.string().trim().min(1),
+      loserConcept: z.string().trim().min(1),
+      selectedAt: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("tie"),
+      leftId: z.string().trim().min(1),
+      rightId: z.string().trim().min(1),
+      leftPrompt: z.string().trim().min(1),
+      rightPrompt: z.string().trim().min(1),
+      leftConcept: z.string().trim().min(1),
+      rightConcept: z.string().trim().min(1),
+      selectedAt: z.string().trim().min(1),
+    })
+    .strict(),
 ]);
 
 const gameStateSchema: z.ZodType<GameState> = z
@@ -172,19 +206,7 @@ const gameStateSchema: z.ZodType<GameState> = z
         winStreak: z.number().int().nonnegative(),
       })
       .strict(),
-    history: z.array(
-      z
-        .object({
-          winnerId: z.string().trim().min(1),
-          loserId: z.string().trim().min(1),
-          winnerPrompt: z.string().trim().min(1),
-          loserPrompt: z.string().trim().min(1),
-          winnerConcept: z.string().trim().min(1),
-          loserConcept: z.string().trim().min(1),
-          selectedAt: z.string().trim().min(1),
-        })
-        .strict(),
-    ),
+    history: z.array(selectionHistorySchema),
     preferenceSeed: z.string().trim().min(1),
     preferenceProfile: preferenceProfileSchema.optional(),
     pendingSelection: pendingSelectionSchema.optional(),

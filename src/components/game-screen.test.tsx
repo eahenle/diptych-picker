@@ -103,6 +103,54 @@ function retirementGeneratingGame(
   return game;
 }
 
+function tieGeneratingGame(): GameState {
+  const game = cloneGame();
+  game.round.status = "generating";
+  game.round.replacingSide = null;
+  game.pendingSelection = {
+    kind: "tie",
+    referenceSide: "left",
+    selectedAt: "2026-07-16T12:00:01.000Z",
+  };
+  return game;
+}
+
+function completedTieGame(): GameState {
+  const game = cloneGame();
+  const tiedLeft = game.round.leftCandidate;
+  const tiedRight = game.round.rightCandidate;
+  game.round = {
+    leftCandidate: {
+      ...tiedLeft,
+      id: "tie-left",
+      imageUrl: "/api/assets/tie-left.png",
+      concept: "tie replacement left",
+    },
+    rightCandidate: {
+      ...tiedRight,
+      id: "tie-right",
+      imageUrl: "/api/assets/tie-right.png",
+      concept: "tie replacement right",
+    },
+    status: "idle",
+    replacingSide: null,
+    roundNumber: 2,
+    retainedCandidateId: null,
+    winStreak: 0,
+  };
+  game.history.push({
+    outcome: "tie",
+    leftId: tiedLeft.id,
+    rightId: tiedRight.id,
+    leftPrompt: tiedLeft.prompt,
+    rightPrompt: tiedRight.prompt,
+    leftConcept: tiedLeft.concept,
+    rightConcept: tiedRight.concept,
+    selectedAt: "2026-07-16T12:00:01.000Z",
+  });
+  return game;
+}
+
 function bufferedErrorGame(): GameState {
   const game = cloneGame();
   game.round.status = "error";
@@ -685,6 +733,67 @@ describe("GameScreen challenger reconciliation", () => {
     expect(screen.getByLabelText("Game status")).toHaveTextContent(
       "Win streak 0",
     );
+  });
+
+  it("declares a tie from the visible button and replaces both cards", async () => {
+    const preloadedUrls: string[] = [];
+    installRecordedImagePreload(preloadedUrls);
+    const completed = completedTieGame();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json({ ...completed, eloRatings: { left: 1000, right: 1000 } })
+          : json({
+              status: "ready",
+              game: initializedGame,
+              eloRatings: { left: 1000, right: 1000 },
+            }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    const originalImages = await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: /declare tie/i }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Game status")).toHaveTextContent("Round 2"),
+    );
+    const replacements = screen.getAllByTestId("candidate-image");
+    expect(replacements[0]).not.toBe(originalImages[0]);
+    expect(replacements[1]).not.toBe(originalImages[1]);
+    expect(preloadedUrls).toEqual([
+      "/api/assets/tie-left.png",
+      "/api/assets/tie-right.png",
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      outcome: "tie",
+      roundNumber: 1,
+    });
+  });
+
+  it.each(["c", "3"])("maps %s to the tie action", async (key) => {
+    installSuccessfulImagePreload();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json(tieGeneratingGame(), 202)
+          : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.keyDown(document.body, { key });
+
+    expect(await screen.findByTestId("loading-left")).toBeVisible();
+    expect(screen.getByTestId("loading-right")).toBeVisible();
+    expect(
+      screen.getByText("Tie recorded — preparing a fresh matchup…"),
+    ).toBeVisible();
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      outcome: "tie",
+      roundNumber: 1,
+    });
   });
 
   it("animates and completes a queued preference save after the challenger arrives", async () => {

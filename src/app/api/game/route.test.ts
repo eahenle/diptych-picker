@@ -9,6 +9,7 @@ const exportGameSnapshot = vi.fn();
 const importGameSnapshot = vi.fn();
 const publishGameExport = vi.fn();
 const select = vi.fn();
+const tie = vi.fn();
 const updatePreferenceSeed = vi.fn();
 const dismissGenerationNotice = vi.fn();
 
@@ -22,7 +23,7 @@ vi.mock("@/server/runtime", () => ({
   exportGameSnapshot,
   importGameSnapshot,
   publishGameExport,
-  gameService: { select },
+  gameService: { select, tie },
   updatePreferenceSeed,
   dismissGenerationNotice,
 }));
@@ -315,6 +316,7 @@ describe("DELETE /api/game/notice", () => {
 describe("POST /api/game/select", () => {
   beforeEach(() => {
     select.mockReset();
+    tie.mockReset();
   });
 
   it("returns 200 when a buffered challenger completes the round", async () => {
@@ -351,5 +353,22 @@ describe("POST /api/game/select", () => {
     expect(await response.json()).toMatchObject({
       eloRatings: { left: 1016, right: 984 },
     });
+  });
+
+  it("declares a tie without inventing a winner side", async () => {
+    tie.mockResolvedValue({ round: { status: "idle" } });
+    const { POST } = await import("./select/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/game/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome: "tie", roundNumber: 5 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(tie).toHaveBeenCalledWith(5);
+    expect(select).not.toHaveBeenCalled();
   });
 });

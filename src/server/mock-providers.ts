@@ -79,7 +79,11 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
     input: ChallengerPromptInput,
   ): ProposedChallenger {
     if (input.preferenceProfile.adaptationMode !== "adaptive") return proposal;
-    const priorWinner = input.selectionHistory.at(-1)?.winnerConcept;
+    const latestDecision = input.selectionHistory.at(-1);
+    const priorWinner =
+      latestDecision?.outcome === "tie"
+        ? undefined
+        : latestDecision?.winnerConcept;
     const fields = {
       themes: input.preferenceProfile.themes,
       inspiration: input.preferenceProfile.inspiration,

@@ -88,6 +88,8 @@ The preference seed is the authoritative creative brief for every worker. Explic
 
 New jobs include the structured `preferenceProfile`; legacy jobs may omit it and are treated as Static. In Static mode, omit `preferenceRevision` and preserve every preference field exactly. In Adaptive mode, the worker must add a complete `preferenceRevision` conditioned on the retained winner and selection history, treating winners as positive evidence and generated losers as negative evidence. The profile carries separate bounded source-ID lists for both outcomes. The app adopts a model-authored revision only if its generated candidate later wins, while every generated loser is recorded immediately as negative provenance for future jobs.
 
+Tie-triggered refill jobs include `"comparisonOutcome": "tie"`. Their compatibility fields use the lower-rated tied candidate as `retainedWinner` (or the left candidate when ratings are equal) and the other tied candidate as `rejectedCandidate`, but both are neutral preference context. The latest history item is an explicit tie with left/right candidate metadata; it must not be interpreted as positive or negative adaptive evidence.
+
 Refill jobs carry the same preference context plus durable session and pinned-winner ownership:
 
 ```json
@@ -95,11 +97,12 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
   "id": "refill-job-1",
   "kind": "refill",
   "sessionId": "session-1",
-  "pinnedWinnerId": "candidate-id"
+  "pinnedWinnerId": "candidate-id",
+  "comparisonOutcome": "tie"
 }
 ```
 
-`pinnedWinnerId` must equal `retainedWinner.id`. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
+`pinnedWinnerId` must equal `retainedWinner.id`. `comparisonOutcome` is optional and currently appears only as `tie`; ordinary refill jobs omit it. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
 
 At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 

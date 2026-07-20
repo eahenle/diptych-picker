@@ -151,6 +151,46 @@ test("starts with five durable challengers and adapts two independent images to 
   ).toBeLessThanOrEqual(390);
 });
 
+test("declares an equal-Elo tie and replaces both active candidates", async ({
+  page,
+  request,
+}) => {
+  const originalIds = await Promise.all([
+    page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
+    page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
+  ]);
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/select") &&
+      response.request().method() === "POST",
+  );
+
+  await page.getByRole("button", { name: /declare tie/i }).click();
+  const response = await responsePromise;
+  expect(response.status()).toBe(200);
+  expect(response.request().postDataJSON()).toEqual({
+    outcome: "tie",
+    roundNumber: 1,
+  });
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("candidate-card-left")).not.toHaveAttribute(
+    "data-candidate-id",
+    originalIds[0]!,
+  );
+  await expect(page.getByTestId("candidate-card-right")).not.toHaveAttribute(
+    "data-candidate-id",
+    originalIds[1]!,
+  );
+
+  const historyResponse = await request.get("/api/game/history");
+  expect(historyResponse.status()).toBe(200);
+  expect((await historyResponse.json()).entries[0]).toMatchObject({
+    outcome: "tie",
+    left: { id: originalIds[0] },
+    right: { id: originalIds[1] },
+  });
+});
+
 test("opens a display-safe reusable-pool leaderboard", async ({
   page,
   request,
