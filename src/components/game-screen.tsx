@@ -239,6 +239,8 @@ export function GameScreen() {
   >([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [favoriteSaving, setFavoriteSaving] = useState<string | null>(null);
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const [gameTransferAction, setGameTransferAction] =
     useState<GameTransferAction | null>(null);
   const [gameTransferError, setGameTransferError] = useState<string | null>(
@@ -820,6 +822,7 @@ export function GameScreen() {
     setHistoryOpen(true);
     setHistoryLoading(true);
     setHistoryError(null);
+    setFavoriteError(null);
     try {
       const response = await fetch("/api/game/history", {
         cache: "no-store",
@@ -843,6 +846,7 @@ export function GameScreen() {
     setLeaderboardOpen(true);
     setLeaderboardLoading(true);
     setLeaderboardError(null);
+    setFavoriteError(null);
     try {
       const response = await fetch("/api/game/leaderboard", {
         cache: "no-store",
@@ -858,6 +862,44 @@ export function GameScreen() {
       );
     } finally {
       setLeaderboardLoading(false);
+    }
+  };
+
+  const updateFavorite = async (candidateId: string, favorite: boolean) => {
+    setFavoriteSaving(candidateId);
+    setFavoriteError(null);
+    try {
+      await readJson<{ candidateId: string; favorite: boolean }>(
+        await fetch("/api/game/favorites", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateId, favorite }),
+        }),
+      );
+      setHistoryEntries((entries) =>
+        entries.map((entry) => ({
+          ...entry,
+          winner:
+            entry.winner.id === candidateId
+              ? { ...entry.winner, favorite }
+              : entry.winner,
+          loser:
+            entry.loser.id === candidateId
+              ? { ...entry.loser, favorite }
+              : entry.loser,
+        })),
+      );
+      setLeaderboardEntries((entries) =>
+        entries.map((entry) =>
+          entry.candidate.id === candidateId ? { ...entry, favorite } : entry,
+        ),
+      );
+    } catch (error) {
+      setFavoriteError(
+        error instanceof Error ? error.message : "Could not update favorite",
+      );
+    } finally {
+      setFavoriteSaving(null);
     }
   };
 
@@ -1290,6 +1332,11 @@ export function GameScreen() {
               Newest choices first. Each row shows the selected winner and the
               rejected candidate without exposing their generation prompts.
             </p>
+            {favoriteError ? (
+              <p className={styles.transferError} role="alert">
+                {favoriteError}
+              </p>
+            ) : null}
             {historyLoading ? (
               <p className={styles.leaderboardState} role="status">
                 Rebuilding the timeline…
@@ -1334,7 +1381,31 @@ export function GameScreen() {
                           <small>
                             {entry.winner.style.slice(0, 2).join(" · ")}
                           </small>
-                          <em>Winner</em>
+                          <span className={styles.candidateFooter}>
+                            <em>Winner</em>
+                            {entry.winner.favorite !== null ? (
+                              <button
+                                type="button"
+                                className={styles.favoriteButton}
+                                aria-label={`${entry.winner.favorite ? "Remove" : "Add"} ${entry.winner.concept} ${entry.winner.favorite ? "from" : "to"} favorites`}
+                                title={
+                                  entry.winner.favorite
+                                    ? "Remove from favorites"
+                                    : "Add to favorites"
+                                }
+                                aria-pressed={entry.winner.favorite}
+                                disabled={favoriteSaving === entry.winner.id}
+                                onClick={() =>
+                                  void updateFavorite(
+                                    entry.winner.id,
+                                    !entry.winner.favorite,
+                                  )
+                                }
+                              >
+                                {entry.winner.favorite ? "★" : "☆"}
+                              </button>
+                            ) : null}
+                          </span>
                         </span>
                       </span>
                       <span className={styles.historyVersus} aria-hidden="true">
@@ -1361,7 +1432,31 @@ export function GameScreen() {
                           <small>
                             {entry.loser.style.slice(0, 2).join(" · ")}
                           </small>
-                          <em>Rejected</em>
+                          <span className={styles.candidateFooter}>
+                            <em>Rejected</em>
+                            {entry.loser.favorite !== null ? (
+                              <button
+                                type="button"
+                                className={styles.favoriteButton}
+                                aria-label={`${entry.loser.favorite ? "Remove" : "Add"} ${entry.loser.concept} ${entry.loser.favorite ? "from" : "to"} favorites`}
+                                title={
+                                  entry.loser.favorite
+                                    ? "Remove from favorites"
+                                    : "Add to favorites"
+                                }
+                                aria-pressed={entry.loser.favorite}
+                                disabled={favoriteSaving === entry.loser.id}
+                                onClick={() =>
+                                  void updateFavorite(
+                                    entry.loser.id,
+                                    !entry.loser.favorite,
+                                  )
+                                }
+                              >
+                                {entry.loser.favorite ? "★" : "☆"}
+                              </button>
+                            ) : null}
+                          </span>
                         </span>
                       </span>
                       <time dateTime={entry.selectedAt}>
@@ -1414,6 +1509,11 @@ export function GameScreen() {
               enter the pool; the strongest entries remain available for paced
               fallback comparisons.
             </p>
+            {favoriteError ? (
+              <p className={styles.transferError} role="alert">
+                {favoriteError}
+              </p>
+            ) : null}
             {leaderboardLoading ? (
               <p className={styles.leaderboardState} role="status">
                 Ranking the pool…
@@ -1453,6 +1553,23 @@ export function GameScreen() {
                         {entry.wins}W–{entry.losses}L
                       </small>
                     </span>
+                    <button
+                      type="button"
+                      className={styles.favoriteButton}
+                      aria-label={`${entry.favorite ? "Remove" : "Add"} ${entry.candidate.concept} ${entry.favorite ? "from" : "to"} favorites`}
+                      title={
+                        entry.favorite
+                          ? "Remove from favorites"
+                          : "Add to favorites"
+                      }
+                      aria-pressed={entry.favorite}
+                      disabled={favoriteSaving === entry.candidate.id}
+                      onClick={() =>
+                        void updateFavorite(entry.candidate.id, !entry.favorite)
+                      }
+                    >
+                      {entry.favorite ? "★" : "☆"}
+                    </button>
                   </li>
                 ))}
               </ol>

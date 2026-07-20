@@ -446,7 +446,7 @@
 }
 .leaderboardList li {
   display: grid;
-  grid-template-columns: 36px 72px minmax(0, 1fr) auto;
+  grid-template-columns: 36px 72px minmax(0, 1fr) auto 34px;
   align-items: center;
   gap: 14px;
   padding: 10px 14px 10px 8px;
@@ -583,6 +583,39 @@
   font-weight: 750;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+.candidateFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.favoriteButton {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: #9d7868;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.favoriteButton[aria-pressed="true"] {
+  color: var(--copper-bright);
+}
+.favoriteButton:hover,
+.favoriteButton:focus-visible {
+  color: var(--text);
+  border-color: rgba(180, 104, 73, 0.55);
+  background: rgba(180, 104, 73, 0.08);
+  outline: none;
+}
+.favoriteButton:disabled {
+  cursor: wait;
+  opacity: 0.5;
 }
 .historyVersus {
   color: #6f6965;
@@ -845,7 +878,7 @@
     grid-column: 1;
   }
   .leaderboardList li {
-    grid-template-columns: 28px 56px minmax(0, 1fr) auto;
+    grid-template-columns: 28px 56px minmax(0, 1fr) auto 30px;
     gap: 10px;
     padding-inline: 6px 10px;
   }

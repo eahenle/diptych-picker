@@ -192,6 +192,84 @@ test("opens a display-safe newest-first comparison history", async ({
   expect(JSON.stringify(body)).not.toContain('"prompt"');
 });
 
+test("favorites a candidate across history, pool, refresh, and export", async ({
+  page,
+  request,
+}) => {
+  await select(page, "left", 2);
+  await page
+    .getByRole("button", { name: "View comparison history; 1 decisions" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Comparison history" });
+  const historyResponse = await request.get("/api/game/history");
+  const history = await historyResponse.json();
+  const winner = history.entries[0].winner as {
+    id: string;
+    concept: string;
+  };
+
+  const favoriteResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/favorites") &&
+      response.request().method() === "PUT",
+  );
+  await dialog
+    .getByRole("button", {
+      name: `Add ${winner.concept} to favorites`,
+    })
+    .click();
+  expect((await favoriteResponse).status()).toBe(200);
+  await expect(
+    dialog.getByRole("button", {
+      name: `Remove ${winner.concept} from favorites`,
+    }),
+  ).toBeVisible();
+
+  const persistedHistory = await (
+    await request.get("/api/game/history")
+  ).json();
+  expect(persistedHistory.entries[0].winner).toMatchObject({
+    id: winner.id,
+    favorite: true,
+  });
+  const snapshot = await (await request.get("/api/game/snapshot")).json();
+  expect(
+    snapshot.challengers.ratings.find(
+      (rating: { candidate: { id: string } }) =>
+        rating.candidate.id === winner.id,
+    ),
+  ).toMatchObject({ favorite: true });
+
+  await page.reload();
+  await page
+    .getByRole("button", { name: "View comparison history; 1 decisions" })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: `Remove ${winner.concept} from favorites`,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close history" }).click();
+  await page
+    .getByRole("button", {
+      name: "View pool leaderboard; 7 of 50 reusable images",
+    })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: `Remove ${winner.concept} from favorites`,
+    }),
+  ).toBeVisible();
+
+  expect(
+    (
+      await request.put("/api/game/favorites", {
+        data: { candidateId: "missing", favorite: true },
+      })
+    ).status(),
+  ).toBe(404);
+});
+
 test("exports the last stable comparison while a challenger is loading", async ({
   page,
   request,

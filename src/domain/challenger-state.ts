@@ -20,6 +20,7 @@ export interface CandidateRating {
   source: "curated" | "generated";
   poolMember: boolean;
   lastServedAt: string | null;
+  favorite?: boolean;
 }
 
 export interface BufferedCandidate {
@@ -97,6 +98,7 @@ export interface PoolLeaderboardEntry {
   wins: number;
   losses: number;
   source: CandidateRating["source"];
+  favorite: boolean;
 }
 
 export interface ComparisonHistoryCandidate {
@@ -104,6 +106,7 @@ export interface ComparisonHistoryCandidate {
   imageUrl: string | null;
   concept: string;
   style: string[];
+  favorite: boolean | null;
 }
 
 export interface ComparisonHistoryEntry {
@@ -163,7 +166,7 @@ export function summarizePoolLeaderboard(
         left.losses - right.losses ||
         left.candidate.id.localeCompare(right.candidate.id),
     )
-    .map(({ candidate, rating, wins, losses, source }, index) => ({
+    .map(({ candidate, rating, wins, losses, source, favorite }, index) => ({
       rank: index + 1,
       candidate: {
         id: candidate.id,
@@ -175,6 +178,7 @@ export function summarizePoolLeaderboard(
       wins,
       losses,
       source,
+      favorite: Boolean(favorite),
     }));
 }
 
@@ -184,18 +188,20 @@ export function summarizeComparisonHistory(
   limit = 50,
 ): ComparisonHistoryEntry[] {
   const ratings = new Map(
-    (state?.ratings ?? []).map(({ candidate }) => [candidate.id, candidate]),
+    (state?.ratings ?? []).map((rating) => [rating.candidate.id, rating]),
   );
   const displayCandidate = (
     id: string,
     fallbackConcept: string,
   ): ComparisonHistoryCandidate => {
-    const candidate = ratings.get(id);
+    const rating = ratings.get(id);
+    const candidate = rating?.candidate;
     return {
       id,
       imageUrl: candidate?.imageUrl ?? null,
       concept: candidate?.concept ?? fallbackConcept,
       style: candidate?.style ?? [],
+      favorite: rating ? Boolean(rating.favorite) : null,
     };
   };
 

@@ -78,6 +78,7 @@ function challengerState(): ChallengerState {
       source: "generated" as const,
       poolMember: true,
       lastServedAt: null,
+      favorite: index === 0,
     })),
     generationTurnaroundEmaMs: 120_000,
     consecutiveFallbackDraws: 4,

@@ -503,6 +503,7 @@ describe("challenger state", () => {
             wins: 6,
             losses: 1,
             source: "curated",
+            favorite: true,
           }),
           rating("excluded", 1200, { poolMember: false }),
         ],
@@ -522,6 +523,7 @@ describe("challenger state", () => {
         wins: 6,
         losses: 1,
         source: "curated",
+        favorite: true,
       },
       expect.objectContaining({
         rank: 2,
@@ -559,7 +561,7 @@ describe("challenger state", () => {
         ratings: [
           rating("first-winner", 1016),
           rating("first-loser", 984),
-          rating("latest-winner", 1030),
+          rating("latest-winner", 1030, { favorite: true }),
         ],
       }),
     );
@@ -573,12 +575,14 @@ describe("challenger state", () => {
           imageUrl: "/api/assets/latest-winner.png",
           concept: "latest-winner concept",
           style: ["latest-winner"],
+          favorite: true,
         },
         loser: {
           id: "missing-loser",
           imageUrl: null,
           concept: "archived loser concept",
           style: [],
+          favorite: null,
         },
       },
       expect.objectContaining({

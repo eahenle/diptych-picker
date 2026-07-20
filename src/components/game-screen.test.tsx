@@ -512,12 +512,14 @@ describe("GameScreen challenger reconciliation", () => {
                   imageUrl: "/api/assets/latest-winner.png",
                   concept: "Latest winner",
                   style: ["editorial"],
+                  favorite: false,
                 },
                 loser: {
                   id: "latest-loser",
                   imageUrl: "/api/assets/latest-loser.png",
                   concept: "Latest rejected",
                   style: ["linocut"],
+                  favorite: false,
                 },
               },
               {
@@ -528,17 +530,21 @@ describe("GameScreen challenger reconciliation", () => {
                   imageUrl: "/api/assets/older-winner.png",
                   concept: "Older winner",
                   style: [],
+                  favorite: false,
                 },
                 loser: {
                   id: "older-loser",
                   imageUrl: null,
                   concept: "Older rejected",
                   style: [],
+                  favorite: null,
                 },
               },
             ],
           })
-        : json({ status: "ready", game }),
+        : String(input).endsWith("/api/game/favorites")
+          ? json({ candidateId: "latest-winner", favorite: true })
+          : json({ status: "ready", game }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -559,6 +565,26 @@ describe("GameScreen challenger reconciliation", () => {
     expect(dialog.getElementsByTagName("li")).toHaveLength(2);
     expect(fetchMock).toHaveBeenCalledWith("/api/game/history", {
       cache: "no-store",
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Add Latest winner to favorites",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: "Remove Latest winner from favorites",
+        }),
+      ).toBeVisible(),
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/favorites", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidateId: "latest-winner",
+        favorite: true,
+      }),
     });
     fireEvent.click(screen.getByRole("button", { name: "Close history" }));
     expect(dialog).not.toBeInTheDocument();
