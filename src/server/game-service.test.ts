@@ -768,6 +768,10 @@ describe("GameService challenger buffer", () => {
     await expect(context.challengerRepository.load()).resolves.toMatchObject({
       consecutiveFallbackDraws: 0,
       nextFallbackAt: "2026-07-16T01:00:03.000Z",
+      pendingSelectionBaseline: {
+        consecutiveFallbackDraws: 0,
+        nextFallbackAt: null,
+      },
     });
 
     currentNow = "2026-07-16T01:00:02.999Z";
@@ -782,6 +786,7 @@ describe("GameService challenger buffer", () => {
     await expect(context.challengerRepository.load()).resolves.toMatchObject({
       consecutiveFallbackDraws: 1,
       nextFallbackAt: null,
+      pendingSelectionBaseline: null,
     });
   });
 

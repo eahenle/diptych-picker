@@ -10,6 +10,7 @@ import type {
 import {
   summarizeBufferHealth,
   summarizeDisplayedEloRatings,
+  summarizePoolLeaderboard,
 } from "@/domain/challenger-state";
 import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
@@ -201,6 +202,14 @@ export async function getBufferHealth(): Promise<BufferHealth> {
 export async function refreshBufferHealth(): Promise<BufferHealth> {
   await gameService.reconcile();
   return getBufferHealth();
+}
+
+export async function getPoolLeaderboard() {
+  await gameService.reconcile();
+  return {
+    entries: summarizePoolLeaderboard(await challengerRepository.load()),
+    poolMaximum: challengerConfig.poolMaximum,
+  };
 }
 
 export async function getDisplayedEloRatings(game: GameState) {

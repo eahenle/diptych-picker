@@ -9,6 +9,7 @@ import {
   refillDeficit,
   summarizeBufferHealth,
   summarizeDisplayedEloRatings,
+  summarizePoolLeaderboard,
   updateElo,
   type BufferedCandidate,
   type CandidateRating,
@@ -490,5 +491,44 @@ describe("challenger state", () => {
     expect(
       refillDeficit({ ...initial, ready: Array(5).fill(buffered("x")) }),
     ).toBe(0);
+  });
+
+  it("ranks only reusable pool members without exposing prompts", () => {
+    const entries = summarizePoolLeaderboard(
+      state({
+        ratings: [
+          rating("runner-up", 1012.4, { wins: 4, losses: 2 }),
+          rating("leader", 1044.6, {
+            wins: 6,
+            losses: 1,
+            source: "curated",
+          }),
+          rating("excluded", 1200, { poolMember: false }),
+        ],
+      }),
+    );
+
+    expect(entries).toEqual([
+      {
+        rank: 1,
+        candidate: {
+          id: "leader",
+          imageUrl: "/api/assets/leader.png",
+          concept: "leader concept",
+          style: ["leader"],
+        },
+        rating: 1045,
+        wins: 6,
+        losses: 1,
+        source: "curated",
+      },
+      expect.objectContaining({
+        rank: 2,
+        candidate: expect.objectContaining({ id: "runner-up" }),
+        rating: 1012,
+      }),
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("prompt");
+    expect(JSON.stringify(entries)).not.toContain("excluded");
   });
 });

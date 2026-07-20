@@ -59,12 +59,21 @@ export interface PendingComparisonReceipt {
   loserId: string;
 }
 
+export interface PendingSelectionBaseline {
+  ready: BufferedCandidate[];
+  ratings: CandidateRating[];
+  generationTurnaroundEmaMs: number;
+  consecutiveFallbackDraws: number;
+  nextFallbackAt: string | null;
+}
+
 export interface ChallengerState {
   version: 1;
   sessionId: string;
   ready: BufferedCandidate[];
   refillJobs: RefillJobRecord[];
   pendingComparison: PendingComparisonReceipt | null;
+  pendingSelectionBaseline?: PendingSelectionBaseline | null;
   ratings: CandidateRating[];
   generationTurnaroundEmaMs: number;
   consecutiveFallbackDraws: number;
@@ -79,6 +88,15 @@ export interface EloUpdate {
 export interface CandidateDraw {
   candidate: Candidate | null;
   state: ChallengerState;
+}
+
+export interface PoolLeaderboardEntry {
+  rank: number;
+  candidate: Pick<Candidate, "id" | "imageUrl" | "concept" | "style">;
+  rating: number;
+  wins: number;
+  losses: number;
+  source: CandidateRating["source"];
 }
 
 export interface FallbackDrawOptions {
@@ -117,6 +135,33 @@ export function summarizeDisplayedEloRatings(
     left: Math.round(ratings.get(leftCandidateId) ?? initialRating),
     right: Math.round(ratings.get(rightCandidateId) ?? initialRating),
   };
+}
+
+export function summarizePoolLeaderboard(
+  state: ChallengerState | null,
+): PoolLeaderboardEntry[] {
+  return (state?.ratings ?? [])
+    .filter(({ poolMember }) => poolMember)
+    .toSorted(
+      (left, right) =>
+        right.rating - left.rating ||
+        right.wins - left.wins ||
+        left.losses - right.losses ||
+        left.candidate.id.localeCompare(right.candidate.id),
+    )
+    .map(({ candidate, rating, wins, losses, source }, index) => ({
+      rank: index + 1,
+      candidate: {
+        id: candidate.id,
+        imageUrl: candidate.imageUrl,
+        concept: candidate.concept,
+        style: candidate.style,
+      },
+      rating: Math.round(rating),
+      wins,
+      losses,
+      source,
+    }));
 }
 
 function roundRating(rating: number): number {

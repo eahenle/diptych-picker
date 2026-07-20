@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- Leaderboard thumbnails use immutable local candidate URLs. */
+
 import {
   useCallback,
   useEffect,
@@ -19,6 +21,7 @@ import {
   type PreferenceProfile,
   type Side,
 } from "@/domain/game";
+import type { PoolLeaderboardEntry } from "@/domain/challenger-state";
 import { CandidateCard } from "./candidate-card";
 import styles from "./game-screen.module.css";
 
@@ -203,6 +206,12 @@ export function GameScreen() {
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [newGameOpen, setNewGameOpen] = useState(false);
   const [loadGameOpen, setLoadGameOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [leaderboardEntries, setLeaderboardEntries] = useState<
+    PoolLeaderboardEntry[]
+  >([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [gameTransferAction, setGameTransferAction] =
     useState<GameTransferAction | null>(null);
   const [gameTransferError, setGameTransferError] = useState<string | null>(
@@ -716,6 +725,9 @@ export function GameScreen() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (preferencesOpen || newGameOpen || loadGameOpen || leaderboardOpen) {
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat)
         return;
       const target = event.target as HTMLElement | null;
@@ -726,7 +738,29 @@ export function GameScreen() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [select]);
+  }, [leaderboardOpen, loadGameOpen, newGameOpen, preferencesOpen, select]);
+
+  const openPoolLeaderboard = async () => {
+    setLeaderboardOpen(true);
+    setLeaderboardLoading(true);
+    setLeaderboardError(null);
+    try {
+      const response = await fetch("/api/game/leaderboard", {
+        cache: "no-store",
+      });
+      const data = await readJson<{
+        entries: PoolLeaderboardEntry[];
+        poolMaximum: number;
+      }>(response);
+      setLeaderboardEntries(data.entries);
+    } catch (error) {
+      setLeaderboardError(
+        error instanceof Error ? error.message : "Could not load the pool",
+      );
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  };
 
   const openNewGame = () => {
     setGameTransferError(null);
@@ -932,7 +966,6 @@ export function GameScreen() {
             title="Export current game"
             disabled={
               !game ||
-              status === "generating" ||
               reconcilingRetry ||
               initializing ||
               gameTransferAction !== null
@@ -1040,15 +1073,18 @@ export function GameScreen() {
                   ) : null}
                 </span>
                 <i aria-hidden="true" />
-                <span
-                  className={styles.supplyMetric}
-                  aria-label={`Reusable image pool ${bufferHealth.pool} of ${bufferHealth.poolMaximum}`}
+                <button
+                  type="button"
+                  className={`${styles.supplyMetric} ${styles.poolMetric}`}
+                  aria-label={`View pool leaderboard; ${bufferHealth.pool} of ${bufferHealth.poolMaximum} reusable images`}
+                  title="View pool leaderboard"
+                  onClick={() => void openPoolLeaderboard()}
                 >
                   Pool
                   <strong>
                     {bufferHealth.pool}/{bufferHealth.poolMaximum}
                   </strong>
-                </span>
+                </button>
               </>
             ) : null}
           </section>
@@ -1109,6 +1145,91 @@ export function GameScreen() {
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {leaderboardOpen && game ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onMouseDown={() => setLeaderboardOpen(false)}
+        >
+          <section
+            className={`${styles.preferencesModal} ${styles.leaderboardModal}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pool-leaderboard-title"
+            aria-describedby="pool-leaderboard-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className={styles.leaderboardClose}
+              aria-label="Close leaderboard"
+              onClick={() => setLeaderboardOpen(false)}
+            >
+              ×
+            </button>
+            <h2 id="pool-leaderboard-title">Pool leaderboard</h2>
+            <p id="pool-leaderboard-description">
+              Reusable images ranked by Elo. Compared generated challengers can
+              enter the pool; the strongest entries remain available for paced
+              fallback comparisons.
+            </p>
+            {leaderboardLoading ? (
+              <p className={styles.leaderboardState} role="status">
+                Ranking the pool…
+              </p>
+            ) : leaderboardError ? (
+              <p className={styles.transferError} role="alert">
+                {leaderboardError}
+              </p>
+            ) : leaderboardEntries.length === 0 ? (
+              <p className={styles.leaderboardState}>The pool is empty.</p>
+            ) : (
+              <ol className={styles.leaderboardList}>
+                {leaderboardEntries.map((entry) => (
+                  <li key={entry.candidate.id}>
+                    <span className={styles.leaderboardRank}>{entry.rank}</span>
+                    <img
+                      src={entry.candidate.imageUrl}
+                      alt=""
+                      width={72}
+                      height={72}
+                    />
+                    <span className={styles.leaderboardIdentity}>
+                      <strong>{entry.candidate.concept}</strong>
+                      <small>
+                        {entry.candidate.style.slice(0, 3).join(" · ")}
+                      </small>
+                      <em>
+                        {entry.source === "curated" ? "Curated" : "Generated"}
+                      </em>
+                    </span>
+                    <span
+                      className={styles.leaderboardScore}
+                      aria-label={`Elo ${entry.rating}; ${entry.wins} wins and ${entry.losses} losses`}
+                    >
+                      <strong>{entry.rating}</strong>
+                      <small>
+                        {entry.wins}W–{entry.losses}L
+                      </small>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.utilityButton}
+                onClick={() => setLeaderboardOpen(false)}
+                autoFocus
+              >
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {loadGameOpen && game ? (

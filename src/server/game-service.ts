@@ -10,6 +10,7 @@ import {
   type CandidateRating,
   type ChallengerState,
   type PendingComparisonReceipt,
+  type PendingSelectionBaseline,
   type RefillJobRecord,
 } from "@/domain/challenger-state";
 import {
@@ -170,7 +171,11 @@ export class GameService {
         oppositeSide(winnerSide),
       );
       let nextChallengers = this.recordComparison(
-        challengerState,
+        {
+          ...challengerState,
+          pendingSelectionBaseline:
+            this.pendingSelectionBaseline(challengerState),
+        },
         retainedWinner,
         rejectedCandidate,
         this.comparisonReceipt(current, winnerSide, selectedAt),
@@ -211,6 +216,7 @@ export class GameService {
         await this.challengerRepository.save({
           ...capacity.state,
           pendingComparison: null,
+          pendingSelectionBaseline: null,
         });
       }
       await this.ensureJobsEnqueued(capacity.jobs);
@@ -327,7 +333,11 @@ export class GameService {
       if (draw.candidate) {
         game = completeSelection(game, draw.candidate);
         await this.gameRepository.save(game);
-        challengers = { ...challengers, pendingComparison: null };
+        challengers = {
+          ...challengers,
+          pendingComparison: null,
+          pendingSelectionBaseline: null,
+        };
         await this.challengerRepository.save(challengers);
       }
     }
@@ -652,8 +662,17 @@ export class GameService {
       game.round.status !== "generating" ||
       game.pendingSelection?.kind !== "buffer"
     ) {
-      if (challengers.pendingComparison === null) return challengers;
-      const cleaned = { ...challengers, pendingComparison: null };
+      if (
+        challengers.pendingComparison === null &&
+        !challengers.pendingSelectionBaseline
+      ) {
+        return challengers;
+      }
+      const cleaned = {
+        ...challengers,
+        pendingComparison: null,
+        pendingSelectionBaseline: null,
+      };
       await this.challengerRepository.save(cleaned);
       return cleaned;
     }
@@ -673,7 +692,13 @@ export class GameService {
     }
 
     const compared = this.recordComparison(
-      challengers,
+      challengers.pendingSelectionBaseline
+        ? challengers
+        : {
+            ...challengers,
+            pendingSelectionBaseline:
+              this.pendingSelectionBaseline(challengers),
+          },
       candidateAt(game.round, game.pendingSelection.winnerSide),
       candidateAt(game.round, oppositeSide(game.pendingSelection.winnerSide)),
       receipt,
@@ -751,7 +776,11 @@ export class GameService {
 
     const completed = completeSelection(game, draw.candidate);
     await this.gameRepository.save(completed);
-    const finalized = { ...draw.state, pendingComparison: null };
+    const finalized = {
+      ...draw.state,
+      pendingComparison: null,
+      pendingSelectionBaseline: null,
+    };
     if (draw.state !== challengers || challengers.pendingComparison !== null) {
       await this.challengerRepository.save(finalized);
     }
@@ -794,6 +823,18 @@ export class GameService {
       delayMs: this.config.fallbackDelayMs,
       maximumConsecutiveDraws: this.config.fallbackMaximumConsecutive,
     });
+  }
+
+  private pendingSelectionBaseline(
+    state: ChallengerState,
+  ): PendingSelectionBaseline {
+    return {
+      ready: state.ready,
+      ratings: state.ratings,
+      generationTurnaroundEmaMs: state.generationTurnaroundEmaMs,
+      consecutiveFallbackDraws: state.consecutiveFallbackDraws,
+      nextFallbackAt: state.nextFallbackAt,
+    };
   }
 
   private candidateFromResult(

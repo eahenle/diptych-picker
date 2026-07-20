@@ -44,6 +44,27 @@ const candidateSchema = z
   })
   .strict();
 
+const bufferedCandidateSchema = z
+  .object({
+    candidate: candidateSchema,
+    source: z.enum(["seed", "generated"]),
+    pinnedWinnerId: z.string().min(1).nullable(),
+    enqueuedAt: z.string().min(1),
+  })
+  .strict();
+
+const candidateRatingSchema = z
+  .object({
+    candidate: candidateSchema,
+    rating: z.number().finite(),
+    wins: z.number().int().nonnegative(),
+    losses: z.number().int().nonnegative(),
+    source: z.enum(["curated", "generated"]),
+    poolMember: z.boolean(),
+    lastServedAt: z.string().min(1).nullable(),
+  })
+  .strict();
+
 const selectionHistorySchema = z
   .object({
     winnerId: z.string().min(1),
@@ -81,16 +102,7 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
   .object({
     version: z.literal(1),
     sessionId: z.string().min(1),
-    ready: z.array(
-      z
-        .object({
-          candidate: candidateSchema,
-          source: z.enum(["seed", "generated"]),
-          pinnedWinnerId: z.string().min(1).nullable(),
-          enqueuedAt: z.string().min(1),
-        })
-        .strict(),
-    ),
+    ready: z.array(bufferedCandidateSchema),
     refillJobs: z.array(
       z
         .object({
@@ -135,19 +147,18 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
       .strict()
       .nullable()
       .default(null),
-    ratings: z.array(
-      z
-        .object({
-          candidate: candidateSchema,
-          rating: z.number().finite(),
-          wins: z.number().int().nonnegative(),
-          losses: z.number().int().nonnegative(),
-          source: z.enum(["curated", "generated"]),
-          poolMember: z.boolean(),
-          lastServedAt: z.string().min(1).nullable(),
-        })
-        .strict(),
-    ),
+    pendingSelectionBaseline: z
+      .object({
+        ready: z.array(bufferedCandidateSchema),
+        ratings: z.array(candidateRatingSchema),
+        generationTurnaroundEmaMs: z.number().finite().nonnegative(),
+        consecutiveFallbackDraws: z.number().int().nonnegative(),
+        nextFallbackAt: z.string().min(1).nullable(),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+    ratings: z.array(candidateRatingSchema),
     generationTurnaroundEmaMs: z.number().finite().nonnegative(),
     consecutiveFallbackDraws: z.number().int().nonnegative(),
     nextFallbackAt: z.string().min(1).nullable(),
@@ -189,6 +200,7 @@ function resetSession(
     ready: [],
     refillJobs: [],
     pendingComparison: null,
+    pendingSelectionBaseline: null,
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,
   });

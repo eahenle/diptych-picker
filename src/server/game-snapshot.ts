@@ -71,6 +71,7 @@ function validateRestorableState(
   if (
     challengers.refillJobs.length > 0 ||
     challengers.pendingComparison !== null ||
+    challengers.pendingSelectionBaseline ||
     challengers.nextFallbackAt !== null
   ) {
     invalid("Saved games cannot contain in-flight generation work");
@@ -177,21 +178,48 @@ export class GameSnapshotService {
             "Start a game before exporting it",
           );
         }
+        let stableGame = game;
+        let stableChallengers = challengers;
         if (game.round.status !== "idle") {
-          throw new GameSnapshotUnavailableError(
-            "Wait for the current comparison to finish before exporting",
-          );
+          const baseline = challengers.pendingSelectionBaseline;
+          if (
+            game.round.status !== "generating" ||
+            game.pendingSelection?.kind !== "buffer" ||
+            !baseline
+          ) {
+            throw new GameSnapshotUnavailableError(
+              "The last stable comparison is not available for export",
+            );
+          }
+          stableGame = {
+            ...game,
+            round: {
+              ...game.round,
+              status: "idle",
+              replacingSide: null,
+            },
+          };
+          delete stableGame.pendingSelection;
+          delete stableGame.errorMessage;
+          delete stableGame.mailboxCleanupJobId;
+          stableChallengers = {
+            ...challengers,
+            ...baseline,
+            pendingComparison: null,
+            pendingSelectionBaseline: null,
+          };
         }
 
         return parseGameSnapshot({
           format: GAME_SNAPSHOT_FORMAT,
           version: GAME_SNAPSHOT_VERSION,
           exportedAt: this.now(),
-          game,
+          game: stableGame,
           challengers: {
-            ...challengers,
+            ...stableChallengers,
             refillJobs: [],
             pendingComparison: null,
+            pendingSelectionBaseline: null,
             nextFallbackAt: null,
           },
         });
@@ -239,6 +267,7 @@ export class GameSnapshotService {
           sessionId: this.createId(),
           refillJobs: [],
           pendingComparison: null,
+          pendingSelectionBaseline: null,
           nextFallbackAt: null,
         });
         await this.options.challengerRepository.save(restoredChallengers);

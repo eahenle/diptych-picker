@@ -4,8 +4,12 @@
 
 ### Comparison-loop follow-ups
 
-- Export must remain responsive while a challenger is loading. Exporting the last stable game state must not wait on or become disabled by generation work.
+- Export remains responsive while a challenger is loading by saving the last stable comparison and its matching pre-selection ratings, queue, pool membership, and pacing state without mutating live generation.
 - A champion reaching a ten-win streak should retire from the active comparison and be replaced. This is distinct from the depleted-buffer allowance of ten pool draws.
+
+### Pool leaderboard
+
+The Pool metric opens a display-safe leaderboard of current reusable candidates ranked by Elo. Each row includes its thumbnail, concept, concise style tags, win–loss record, and curated/generated provenance without exposing prompts or mailbox state.
 
 ### Deck-driven generation and agent transport
 

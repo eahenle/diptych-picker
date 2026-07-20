@@ -332,7 +332,7 @@ describe("GameScreen challenger reconciliation", () => {
       await screen.findByLabelText("Ready queue 3 of 5; 2 generating"),
     ).toHaveTextContent("Queue3/5+2");
     expect(
-      screen.getByLabelText("Reusable image pool 30 of 50"),
+      screen.getByLabelText("View pool leaderboard; 30 of 50 reusable images"),
     ).toHaveTextContent("Pool30/50");
     expect(screen.getByTestId("candidate-card-left")).toHaveTextContent(
       /Elo\s*1017/,
@@ -345,6 +345,73 @@ describe("GameScreen challenger reconciliation", () => {
         name: "Choose image A: left concept. Elo rating 1017",
       }),
     ).toBeVisible();
+  });
+
+  it("opens the reusable-pool leaderboard from the Pool metric", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/api/game/leaderboard")
+        ? json({
+            entries: [
+              {
+                rank: 1,
+                candidate: {
+                  id: "pool-leader",
+                  imageUrl: "/api/assets/pool-leader.png",
+                  concept: "Copper portrait",
+                  style: ["photography", "violet", "alt"],
+                },
+                rating: 1088,
+                wins: 8,
+                losses: 2,
+                source: "generated",
+              },
+              {
+                rank: 2,
+                candidate: {
+                  id: "pool-runner-up",
+                  imageUrl: "/seed-assets/pool-runner-up.png",
+                  concept: "Violet portrait",
+                  style: ["editorial"],
+                },
+                rating: 1040,
+                wins: 5,
+                losses: 3,
+                source: "curated",
+              },
+            ],
+            poolMaximum: 50,
+          })
+        : json({
+            status: "ready",
+            game: initializedGame,
+            bufferHealth: {
+              ready: 5,
+              inFlight: 0,
+              target: 5,
+              pool: 2,
+              poolMaximum: 50,
+            },
+          }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "View pool leaderboard; 2 of 50 reusable images",
+      }),
+    );
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Pool leaderboard",
+    });
+    expect(dialog).toHaveTextContent(/1Copper portrait.*1088.*8W–2L/);
+    expect(dialog).toHaveTextContent(/2Violet portrait.*1040.*5W–3L/);
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/leaderboard", {
+      cache: "no-store",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(dialog).not.toBeInTheDocument();
   });
 
   it("commits an instant buffered round after preloading only the losing asset", async () => {
@@ -826,6 +893,46 @@ describe("GameScreen game state transfer", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/game/snapshot", {
       cache: "no-store",
     });
+  });
+
+  it("exports the last stable game while a buffered challenger is loading", async () => {
+    const snapshot = JSON.stringify({
+      format: "diptych-picker-game",
+      version: 1,
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/api/game/snapshot")
+        ? new Response(snapshot, {
+            headers: {
+              "Content-Type": "application/json",
+              "Content-Disposition":
+                'attachment; filename="diptych-picker-round-1.json"',
+            },
+          })
+        : json({ status: "ready", game: bufferedGeneratingGame() }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const NativeURL = URL;
+    class DownloadURL extends NativeURL {
+      static createObjectURL = vi.fn(() => "blob:stable-game");
+      static revokeObjectURL = vi.fn();
+    }
+    vi.stubGlobal("URL", DownloadURL);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    const exportButton = screen.getByRole("button", { name: "Export" });
+    expect(exportButton).toBeEnabled();
+    fireEvent.click(exportButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/game/snapshot", {
+        cache: "no-store",
+      }),
+    );
   });
 
   it("starts fresh only after the explicit dialog action", async () => {
