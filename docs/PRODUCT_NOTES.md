@@ -12,6 +12,12 @@ History and pool rows let the player favorite exceptional candidates. Favorite s
 
 The Preference profile title row exposes **Static / Adaptive** for the entire profile. Static is the default and prevents model mutation of every preference field. Adaptive lets each generated proposal carry a complete trajectory-conditioned profile revision; the app adopts it only if that candidate later wins, records the influencing winner ID, invalidates earlier-profile buffer capacity, and composes future jobs from the revised fields.
 
+Extend Adaptive mode to incorporate generated candidates that the player rejects as negative preference evidence, not only winning candidates as positive evidence. Preserve which candidate and comparison outcome supplied each signal so later revisions can distinguish “more like this” from “less like this.” Generation failures, cancellations, and invalid worker output are operational outcomes rather than player rejections and must not influence taste preferences. Moderation blocks must not disappear silently: either use them as a distinct safety-constraint signal that steers future generations toward allowed content, or show a toast or modal that explains the block and asks the player to adjust the relevant profile fields.
+
+### Queued preference saves
+
+**Save profile** remains actionable while the active round waits for a challenger. Clicking it captures and locks the edited profile, displays animated queued/saving feedback inside the modal, and applies the profile automatically after the round settles. The queued edit deliberately supersedes an adaptive revision from that in-flight round while exact-profile conflict protection still rejects unrelated concurrent edits.
+
 ## 2026-07-19
 
 ### Comparison-loop follow-ups
@@ -82,6 +88,8 @@ Add **Skip / neither** and eventually **both** outcomes so the learning model do
 
 Add a **Tie** action mapped to `C` and `3`. If the candidates have different Elo scores, update only the lower-rated candidate as though it won and leave the higher-rated candidate unchanged. If their scores are equal, neither score changes. In either case, clear both candidates from the active round.
 
+Add a distinct **Both lose** action mapped to `D` and `4`. Record that the player rejected both images and clear both candidates from the active round. Define its Elo and reusable-pool removal behavior explicitly before implementation rather than treating it as a tie or silently choosing a winner.
+
 ### Image inspection and score-state cues
 
 Add a magnifying-glass action that opens either candidate in a larger image view. Replace the visible Elo number with a distinct symbol when a candidate is appearing for the first time, and with another symbol when losing the current round would remove that candidate from the reusable pool.
@@ -93,10 +101,6 @@ Allow named profiles for different creative moods, with lightweight importance c
 ### Source-image profile ingestion
 
 Let the player ingest a source image and derive an editable Preference profile aimed at generating variations on its depicted themes and content. The populated fields should describe transferable subject matter, composition, medium, style, palette, and constraints rather than asking future generations to reproduce a specific person's identity or exact likeness.
-
-### Deferred preference-save feedback
-
-Keep **Save profile** actionable while the active round is waiting for a challenger. Clicking it should queue the edited profile and start a visible animation inside the modal; keep that animation running until the challenger arrives and the queued save finishes, then close the modal normally. The eventual save should preserve optimistic conflict protection against unrelated edits while allowing the deliberately queued profile to supersede any adaptive revision produced by the round that was already in flight.
 
 ### History, lineage, and favorites
 

@@ -583,7 +583,7 @@ test("double click consumes one challenger and advances one round", async ({
   expect((await challengerState()).ready).toHaveLength(4);
 });
 
-test("delays pool fallback, blocks an eleventh, and explains deferred Preferences save", async ({
+test("delays pool fallback, blocks an eleventh, and completes a queued Preferences save", async ({
   page,
 }) => {
   await updateChallengerState((state) => ({ ...state, ready: [] }));
@@ -604,15 +604,23 @@ test("delays pool fallback, blocks an eleventh, and explains deferred Preference
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Save profile" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByText("Changes can be saved after this challenger arrives."),
-  ).toBeVisible();
-  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Save profile" }),
   ).toBeEnabled();
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByText(
+      "Save now to apply these changes when the challenger arrives.",
+    ),
+  ).toBeVisible();
+  const preferenceResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game") &&
+      response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(page.getByText("Profile queued")).toBeVisible();
+  await expect(page.getByTestId("preference-save-spinner")).toBeVisible();
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
+  expect((await preferenceResponse).status()).toBe(200);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await updateChallengerState((state) => ({
     ...state,

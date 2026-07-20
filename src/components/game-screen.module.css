@@ -850,6 +850,59 @@
   margin: 10px 0 0;
   color: var(--copper-bright);
 }
+.preferenceSaveProgress {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  overflow: hidden;
+  margin-top: 12px;
+  padding: 11px 13px;
+  color: var(--text);
+  border: 1px solid rgba(180, 104, 73, 0.48);
+  background: rgba(180, 104, 73, 0.08);
+}
+.preferenceSaveProgress::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 25%,
+    rgba(167, 107, 239, 0.13) 48%,
+    transparent 72%
+  );
+  content: "";
+  transform: translateX(-100%);
+  animation: preferenceSaveSweep 1600ms ease-in-out infinite;
+  pointer-events: none;
+}
+.preferenceSaveProgress > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+.preferenceSaveProgress strong {
+  font-size: 12px;
+  letter-spacing: 0.025em;
+}
+.preferenceSaveProgress small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.preferenceSaveSpinner {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(241, 236, 228, 0.2);
+  border-top-color: var(--copper-bright);
+  border-radius: 50%;
+  animation: spin 850ms linear infinite;
+}
+@keyframes preferenceSaveSweep {
+  50%,
+  100% {
+    transform: translateX(100%);
+  }
+}
 .modalActions {
   margin-top: 18px;
   display: flex;
@@ -962,5 +1015,11 @@
   }
   .spinner {
     animation-duration: 1800ms;
+  }
+  .preferenceSaveSpinner {
+    animation-duration: 1800ms;
+  }
+  .preferenceSaveProgress::after {
+    animation-duration: 3200ms;
   }
 }

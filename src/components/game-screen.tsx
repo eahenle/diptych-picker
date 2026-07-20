@@ -224,6 +224,7 @@ export function GameScreen() {
   const [initializing, setInitializing] = useState(true);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferenceSaveQueued, setPreferenceSaveQueued] = useState(false);
   const [newGameOpen, setNewGameOpen] = useState(false);
   const [loadGameOpen, setLoadGameOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -271,6 +272,8 @@ export function GameScreen() {
   );
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
+  const queuedPreferenceSaveStartedRef = useRef(false);
 
   const commitGame = useCallback((next: GameState) => {
     gameRef.current = next;
@@ -1043,35 +1046,62 @@ export function GameScreen() {
     }
   };
 
-  const savePreferences = async () => {
-    setPreferencesSaving(true);
-    try {
-      const state = await readJson<GameState>(
-        await fetch("/api/game", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            preferenceProfile: preferenceDraft,
-            expectedPreferenceProfile: preferenceDraftBaseProfile,
+  const persistPreferences = useCallback(
+    async (profile: PreferenceProfile, expectedProfile: PreferenceProfile) => {
+      setPreferencesSaving(true);
+      try {
+        const state = await readJson<GameState>(
+          await fetch("/api/game", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              preferenceProfile: profile,
+              expectedPreferenceProfile: expectedProfile,
+            }),
           }),
-        }),
-      );
-      commitGame(state);
-      setPreferencesOpen(false);
+        );
+        commitGame(state);
+        setPreferencesOpen(false);
+        setLocalError(null);
+      } catch (error) {
+        setLocalError(
+          error instanceof Error ? error.message : "Could not save preferences",
+        );
+      } finally {
+        queuedPreferenceProfileRef.current = null;
+        queuedPreferenceSaveStartedRef.current = false;
+        setPreferenceSaveQueued(false);
+        setPreferencesSaving(false);
+      }
+    },
+    [commitGame],
+  );
+
+  const savePreferences = async () => {
+    if (selectionBoundWait) {
+      queuedPreferenceProfileRef.current = preferenceDraft;
+      queuedPreferenceSaveStartedRef.current = false;
+      setPreferenceSaveQueued(true);
+      setPreferencesSaving(true);
       setLocalError(null);
-    } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : "Could not save preferences",
-      );
-    } finally {
-      setPreferencesSaving(false);
+      return;
     }
+    await persistPreferences(preferenceDraft, preferenceDraftBaseProfile);
+  };
+
+  const closePreferences = () => {
+    if (preferencesSaving) return;
+    setPreferencesOpen(false);
   };
 
   const openPreferences = () => {
     if (!game) return;
     const currentProfile =
       game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed);
+    queuedPreferenceProfileRef.current = null;
+    queuedPreferenceSaveStartedRef.current = false;
+    setPreferenceSaveQueued(false);
+    setPreferencesSaving(false);
     setPreferenceDraft(currentProfile);
     setPreferenceDraftBaseProfile(currentProfile);
     setPreferencesOpen(true);
@@ -1111,6 +1141,23 @@ export function GameScreen() {
         ? "refilling"
         : "low"
     : null;
+
+  useEffect(() => {
+    if (
+      !preferenceSaveQueued ||
+      selectionBoundWait ||
+      !game ||
+      queuedPreferenceSaveStartedRef.current
+    ) {
+      return;
+    }
+    const queuedProfile = queuedPreferenceProfileRef.current;
+    if (!queuedProfile) return;
+    const currentProfile =
+      game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed);
+    queuedPreferenceSaveStartedRef.current = true;
+    void persistPreferences(queuedProfile, currentProfile);
+  }, [game, persistPreferences, preferenceSaveQueued, selectionBoundWait]);
 
   return (
     <main className={styles.shell}>
@@ -1824,12 +1871,13 @@ export function GameScreen() {
         <div
           className={styles.modalBackdrop}
           role="presentation"
-          onMouseDown={() => setPreferencesOpen(false)}
+          onMouseDown={closePreferences}
         >
           <section
             className={styles.preferencesModal}
             role="dialog"
             aria-modal="true"
+            aria-busy={preferencesSaving}
             aria-labelledby="preferences-title"
             aria-describedby={
               selectionBoundWait
@@ -1849,6 +1897,7 @@ export function GameScreen() {
                     type="radio"
                     name="adaptation-mode"
                     value="static"
+                    disabled={preferencesSaving}
                     checked={preferenceDraft.adaptationMode === "static"}
                     onChange={() => setAdaptationMode("static")}
                   />
@@ -1859,6 +1908,7 @@ export function GameScreen() {
                     type="radio"
                     name="adaptation-mode"
                     value="adaptive"
+                    disabled={preferencesSaving}
                     checked={preferenceDraft.adaptationMode === "adaptive"}
                     onChange={() => setAdaptationMode("adaptive")}
                   />
@@ -1882,6 +1932,7 @@ export function GameScreen() {
                 <textarea
                   id="preference-themes"
                   value={preferenceDraft.themes}
+                  disabled={preferencesSaving}
                   onChange={(event) =>
                     setPreferenceField("themes", event.target.value)
                   }
@@ -1901,6 +1952,7 @@ export function GameScreen() {
                 <textarea
                   id="preference-inspiration"
                   value={preferenceDraft.inspiration}
+                  disabled={preferencesSaving}
                   onChange={(event) =>
                     setPreferenceField("inspiration", event.target.value)
                   }
@@ -1917,6 +1969,7 @@ export function GameScreen() {
                 <span>Preferred media</span>
                 <input
                   value={preferenceDraft.mediaTypes}
+                  disabled={preferencesSaving}
                   maxLength={500}
                   onChange={(event) =>
                     setPreferenceField("mediaTypes", event.target.value)
@@ -1928,6 +1981,7 @@ export function GameScreen() {
                 <span>Visual style &amp; mood</span>
                 <input
                   value={preferenceDraft.visualStyle}
+                  disabled={preferencesSaving}
                   maxLength={500}
                   onChange={(event) =>
                     setPreferenceField("visualStyle", event.target.value)
@@ -1939,6 +1993,7 @@ export function GameScreen() {
                 <span>Color palette</span>
                 <input
                   value={preferenceDraft.colorPalette}
+                  disabled={preferencesSaving}
                   maxLength={500}
                   onChange={(event) =>
                     setPreferenceField("colorPalette", event.target.value)
@@ -1954,6 +2009,7 @@ export function GameScreen() {
                       type="radio"
                       name="content-range"
                       value="family-friendly"
+                      disabled={preferencesSaving}
                       checked={
                         preferenceDraft.contentLevel === "family-friendly"
                       }
@@ -1971,6 +2027,7 @@ export function GameScreen() {
                       type="radio"
                       name="content-range"
                       value="adult-allowed"
+                      disabled={preferencesSaving}
                       checked={preferenceDraft.contentLevel === "adult-allowed"}
                       onChange={() =>
                         setPreferenceField("contentLevel", "adult-allowed")
@@ -1987,6 +2044,7 @@ export function GameScreen() {
                 <span>Avoid or de-emphasize</span>
                 <textarea
                   value={preferenceDraft.avoid}
+                  disabled={preferencesSaving}
                   maxLength={800}
                   onChange={(event) =>
                     setPreferenceField("avoid", event.target.value)
@@ -1996,20 +2054,46 @@ export function GameScreen() {
                 />
               </label>
             </div>
-            {selectionBoundWait ? (
+            {preferencesSaving ? (
+              <div
+                id={selectionBoundWait ? "preferences-wait-note" : undefined}
+                className={styles.preferenceSaveProgress}
+                role="status"
+                aria-live="polite"
+              >
+                <span
+                  className={styles.preferenceSaveSpinner}
+                  data-testid="preference-save-spinner"
+                  aria-hidden="true"
+                />
+                <span>
+                  <strong>
+                    {preferenceSaveQueued && selectionBoundWait
+                      ? "Profile queued"
+                      : "Saving profile"}
+                  </strong>
+                  <small>
+                    {preferenceSaveQueued && selectionBoundWait
+                      ? "Waiting for the challenger to arrive…"
+                      : "Applying your preferences…"}
+                  </small>
+                </span>
+              </div>
+            ) : selectionBoundWait ? (
               <p
                 id="preferences-wait-note"
                 className={styles.preferenceNotice}
                 role="status"
               >
-                Changes can be saved after this challenger arrives.
+                Save now to apply these changes when the challenger arrives.
               </p>
             ) : null}
             <div className={styles.modalActions}>
               <button
                 type="button"
                 className={styles.utilityButton}
-                onClick={() => setPreferencesOpen(false)}
+                disabled={preferencesSaving}
+                onClick={closePreferences}
               >
                 Cancel
               </button>
@@ -2017,13 +2101,15 @@ export function GameScreen() {
                 type="button"
                 className={styles.newGameButton}
                 disabled={
-                  selectionBoundWait ||
-                  preferencesSaving ||
-                  preferenceDraft.themes.trim().length < 20
+                  preferencesSaving || preferenceDraft.themes.trim().length < 20
                 }
                 onClick={() => void savePreferences()}
               >
-                {preferencesSaving ? "Saving…" : "Save profile"}
+                {preferencesSaving
+                  ? preferenceSaveQueued && selectionBoundWait
+                    ? "Waiting…"
+                    : "Saving…"
+                  : "Save profile"}
               </button>
             </div>
           </section>
