@@ -445,6 +445,92 @@ describe("GameService challenger buffer", () => {
     },
   );
 
+  it("retires a ten-win champion and consumes two FIFO heads", async () => {
+    const game = gameState();
+    game.round.retainedCandidateId = game.round.leftCandidate.id;
+    game.round.winStreak = 9;
+    const challengers = challengerState(game);
+    const context = serviceFor({ game, challengers });
+
+    const selected = await context.service.select("left", 3);
+
+    expect(selected.round).toMatchObject({
+      status: "idle",
+      roundNumber: 4,
+      leftCandidate: { id: "buffer-1" },
+      rightCandidate: { id: "buffer-2" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+    expect(selected.history.at(-1)).toMatchObject({
+      winnerId: "left",
+      loserId: "right",
+      selectedAt: NOW,
+    });
+    const persisted = await context.challengerRepository.load();
+    expect(persisted?.ready.map(({ candidate: item }) => item.id)).toEqual([
+      "buffer-3",
+      "buffer-4",
+      "buffer-5",
+    ]);
+    expect(context.queue.enqueue).toHaveBeenCalledTimes(2);
+    expect(
+      persisted?.ratings.find(({ candidate: item }) => item.id === "left"),
+    ).toMatchObject({ wins: 1, rating: 1016 });
+  });
+
+  it("keeps both retired cards visible until two generated replacements are ready", async () => {
+    const game = gameState();
+    game.round.retainedCandidateId = game.round.rightCandidate.id;
+    game.round.winStreak = 9;
+    const challengers = challengerState(game, {
+      ready: [],
+      ratings: [
+        rating(game.round.leftCandidate),
+        rating(game.round.rightCandidate),
+        rating(candidate("fallback")),
+      ],
+    });
+    const context = serviceFor({
+      game,
+      challengers,
+      bufferTarget: 3,
+      createId: ids("refill-1", "refill-2", "refill-3"),
+    });
+
+    const waiting = await context.service.select("right", 3);
+
+    expect(waiting.round).toMatchObject({
+      status: "generating",
+      replacingSide: null,
+      leftCandidate: { id: "left" },
+      rightCandidate: { id: "right" },
+    });
+    expect(waiting.pendingSelection).toMatchObject({
+      kind: "retirement",
+      winnerSide: "right",
+    });
+    expect(context.queue.enqueue).toHaveBeenCalledTimes(3);
+
+    context.queue.setResult(completedResult("refill-1"));
+    const oneReady = await context.service.reconcile();
+    expect(oneReady?.round.status).toBe("generating");
+    expect(oneReady?.round.leftCandidate.id).toBe("left");
+    expect(oneReady?.round.rightCandidate.id).toBe("right");
+
+    context.queue.setResult(completedResult("refill-2"));
+    const completed = await context.service.reconcile();
+    expect(completed?.round).toMatchObject({
+      status: "idle",
+      roundNumber: 4,
+      leftCandidate: { id: "challenger-refill-1" },
+      rightCandidate: { id: "challenger-refill-2" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+    expect(completed?.history).toHaveLength(game.history.length + 1);
+  });
+
   it("keeps stale ready and in-flight work while new deficit jobs pin to the new winner", async () => {
     const game = gameState();
     const staleReady = [
@@ -649,6 +735,49 @@ describe("GameService challenger buffer", () => {
     expect(
       persisted?.ratings.find(({ candidate: item }) => item.id === "left"),
     ).toMatchObject({ wins: 1, rating: 1016 });
+  });
+
+  it("replays both prepared FIFO heads when a retirement save fails", async () => {
+    const game = gameState();
+    game.round.retainedCandidateId = game.round.leftCandidate.id;
+    game.round.winStreak = 9;
+    const backingGame = new MemoryGameRepository(game);
+    let failCompletedSave = true;
+    const gameRepository: GameRepository = {
+      load: () => backingGame.load(),
+      clear: () => backingGame.clear(),
+      withLock: (operation) => backingGame.withLock(operation),
+      save: async (state) => {
+        if (failCompletedSave && state.round.status === "idle") {
+          failCompletedSave = false;
+          throw new Error("game disk unavailable");
+        }
+        await backingGame.save(state);
+      },
+    };
+    const context = serviceFor({ game, gameRepository });
+
+    await expect(context.service.select("left", 3)).rejects.toThrow(
+      "game disk unavailable",
+    );
+    await expect(backingGame.load()).resolves.toMatchObject({
+      round: { status: "generating", roundNumber: 3 },
+      pendingSelection: { kind: "retirement", winnerSide: "left" },
+    });
+    expect(
+      (await context.challengerRepository.load())?.ready
+        .slice(0, 2)
+        .map(({ candidate: item }) => item.id),
+    ).toEqual(["buffer-1", "buffer-2"]);
+
+    const recovered = await context.service.reconcile();
+    expect(recovered?.round).toMatchObject({
+      status: "idle",
+      leftCandidate: { id: "buffer-1" },
+      rightCandidate: { id: "buffer-2" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
   });
 
   it("replays an unsaved comparison exactly once after service restart", async () => {

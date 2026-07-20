@@ -14,13 +14,16 @@ import {
   type RefillJobRecord,
 } from "@/domain/challenger-state";
 import {
+  beginChampionRetirement,
   beginBufferedSelection,
   candidateAt,
+  completeChampionRetirement,
   completeSelection,
   failSelection,
   oppositeSide,
   recentConcepts,
   preferenceProfileFromSeed,
+  willRetireChampion,
   type Candidate,
   type GameState,
   type PreferenceProfile,
@@ -158,7 +161,10 @@ export class GameService {
       }
 
       const selectedAt = this.now();
-      const inFlight = beginBufferedSelection(current, winnerSide, selectedAt);
+      const retirement = willRetireChampion(current, winnerSide);
+      const inFlight = retirement
+        ? beginChampionRetirement(current, winnerSide, selectedAt)
+        : beginBufferedSelection(current, winnerSide, selectedAt);
       if (!inFlight) {
         throw new SelectionConflictError(
           "A challenger is already being generated",
@@ -180,18 +186,32 @@ export class GameService {
         rejectedCandidate,
         this.comparisonReceipt(current, winnerSide, selectedAt),
       );
-      let preparedReadyHead: BufferedCandidate | null = null;
-      let draw = popReady(nextChallengers);
+      let preparedReadyHeads: BufferedCandidate[] = [];
       let nextGame = inFlight;
-      if (draw.candidate) {
-        preparedReadyHead = nextChallengers.ready[0];
-        nextChallengers = draw.state;
-        nextGame = completeSelection(inFlight, draw.candidate);
+      if (retirement) {
+        if (nextChallengers.ready.length >= 2) {
+          preparedReadyHeads = nextChallengers.ready.slice(0, 2);
+          const leftDraw = popReady(nextChallengers);
+          const rightDraw = popReady(leftDraw.state);
+          nextChallengers = rightDraw.state;
+          nextGame = completeChampionRetirement(
+            inFlight,
+            leftDraw.candidate!,
+            rightDraw.candidate!,
+          );
+        }
       } else {
-        draw = this.drawFallback(nextChallengers, current);
-        nextChallengers = draw.state;
-        if (draw.candidate)
+        let draw = popReady(nextChallengers);
+        if (draw.candidate) {
+          preparedReadyHeads = nextChallengers.ready.slice(0, 1);
+          nextChallengers = draw.state;
           nextGame = completeSelection(inFlight, draw.candidate);
+        } else {
+          draw = this.drawFallback(nextChallengers, current);
+          nextChallengers = draw.state;
+          if (draw.candidate)
+            nextGame = completeSelection(inFlight, draw.candidate);
+        }
       }
 
       const capacity = this.addRefillCapacity(nextChallengers, {
@@ -200,12 +220,13 @@ export class GameService {
         retainedWinner,
         rejectedCandidate,
       });
-      const durableChallengers = preparedReadyHead
-        ? {
-            ...capacity.state,
-            ready: [preparedReadyHead, ...capacity.state.ready],
-          }
-        : capacity.state;
+      const durableChallengers =
+        preparedReadyHeads.length > 0
+          ? {
+              ...capacity.state,
+              ready: [...preparedReadyHeads, ...capacity.state.ready],
+            }
+          : capacity.state;
       // Persist a replayable selection before committing either side of the
       // cross-repository transition. A prepared FIFO head remains durable
       // until the completed game round is safely stored.
@@ -658,9 +679,11 @@ export class GameService {
     game: GameState,
     challengers: ChallengerState,
   ): Promise<ChallengerState> {
+    const pending = game.pendingSelection;
     if (
       game.round.status !== "generating" ||
-      game.pendingSelection?.kind !== "buffer"
+      !pending ||
+      (pending.kind !== "buffer" && pending.kind !== "retirement")
     ) {
       if (
         challengers.pendingComparison === null &&
@@ -679,8 +702,8 @@ export class GameService {
 
     const receipt = this.comparisonReceipt(
       game,
-      game.pendingSelection.winnerSide,
-      game.pendingSelection.selectedAt,
+      pending.winnerSide,
+      pending.selectedAt,
     );
     if (isDeepStrictEqual(challengers.pendingComparison, receipt)) {
       return challengers;
@@ -699,8 +722,8 @@ export class GameService {
             pendingSelectionBaseline:
               this.pendingSelectionBaseline(challengers),
           },
-      candidateAt(game.round, game.pendingSelection.winnerSide),
-      candidateAt(game.round, oppositeSide(game.pendingSelection.winnerSide)),
+      candidateAt(game.round, pending.winnerSide),
+      candidateAt(game.round, oppositeSide(pending.winnerSide)),
       receipt,
     );
     await this.challengerRepository.save(compared);
@@ -711,7 +734,10 @@ export class GameService {
     game: GameState,
     challengers: ChallengerState,
   ): RefillContext | null {
-    if (game.pendingSelection?.kind === "buffer") {
+    if (
+      game.pendingSelection?.kind === "buffer" ||
+      game.pendingSelection?.kind === "retirement"
+    ) {
       const winnerSide = game.pendingSelection.winnerSide;
       return {
         game,
@@ -750,10 +776,30 @@ export class GameService {
     game: GameState,
     challengers: ChallengerState,
   ): Promise<{ game: GameState; challengers: ChallengerState }> {
-    if (
-      game.round.status !== "generating" ||
-      game.pendingSelection?.kind !== "buffer"
-    ) {
+    if (game.round.status !== "generating" || !game.pendingSelection) {
+      return { game, challengers };
+    }
+
+    if (game.pendingSelection.kind === "retirement") {
+      if (challengers.ready.length < 2) return { game, challengers };
+      const leftDraw = popReady(challengers);
+      const rightDraw = popReady(leftDraw.state);
+      const completed = completeChampionRetirement(
+        game,
+        leftDraw.candidate!,
+        rightDraw.candidate!,
+      );
+      await this.gameRepository.save(completed);
+      const finalized = {
+        ...rightDraw.state,
+        pendingComparison: null,
+        pendingSelectionBaseline: null,
+      };
+      await this.challengerRepository.save(finalized);
+      return { game: completed, challengers: finalized };
+    }
+
+    if (game.pendingSelection.kind !== "buffer") {
       return { game, challengers };
     }
 

@@ -172,67 +172,71 @@ describe("GameSnapshotService", () => {
     });
   });
 
-  it("exports the last stable comparison while the next challenger is loading", async () => {
-    const stableGame = gameState();
-    const game = structuredClone(stableGame);
-    game.round.status = "generating";
-    game.round.replacingSide = "right";
-    game.pendingSelection = {
-      kind: "buffer",
-      winnerSide: "left",
-      selectedAt: NOW,
-    };
-    const stableChallengers = challengerState();
-    const challengers: ChallengerState = {
-      ...stableChallengers,
-      pendingComparison: {
-        selectedAt: NOW,
-        roundNumber: stableGame.round.roundNumber,
+  it.each(["buffer", "retirement"] as const)(
+    "exports the last stable comparison while a %s selection is loading",
+    async (pendingKind) => {
+      const stableGame = gameState();
+      const game = structuredClone(stableGame);
+      game.round.status = "generating";
+      game.round.replacingSide = pendingKind === "retirement" ? null : "right";
+      game.pendingSelection = {
+        kind: pendingKind,
         winnerSide: "left",
-        winnerId: "left",
-        loserId: "right",
-      },
-      pendingSelectionBaseline: {
+        selectedAt: NOW,
+      };
+      const stableChallengers = challengerState();
+      const challengers: ChallengerState = {
+        ...stableChallengers,
+        pendingComparison: {
+          selectedAt: NOW,
+          roundNumber: stableGame.round.roundNumber,
+          winnerSide: "left",
+          winnerId: "left",
+          loserId: "right",
+        },
+        pendingSelectionBaseline: {
+          ready: stableChallengers.ready,
+          ratings: stableChallengers.ratings,
+          generationTurnaroundEmaMs:
+            stableChallengers.generationTurnaroundEmaMs,
+          consecutiveFallbackDraws: stableChallengers.consecutiveFallbackDraws,
+          nextFallbackAt: stableChallengers.nextFallbackAt,
+        },
+        ratings: stableChallengers.ratings.map((item) =>
+          item.candidate.id === "left"
+            ? { ...item, rating: item.rating + 16, wins: item.wins + 1 }
+            : item.candidate.id === "right"
+              ? { ...item, rating: item.rating - 16, losses: item.losses + 1 }
+              : item,
+        ),
+        nextFallbackAt: "2026-07-17T12:00:03.000Z",
+      };
+      const context = service({ game, challengers });
+
+      const snapshot = await context.snapshotService.export();
+
+      expect(snapshot.game).toEqual({
+        ...stableGame,
+        preferenceProfile: expect.any(Object),
+      });
+      expect(snapshot.challengers).toMatchObject({
         ready: stableChallengers.ready,
         ratings: stableChallengers.ratings,
-        generationTurnaroundEmaMs: stableChallengers.generationTurnaroundEmaMs,
-        consecutiveFallbackDraws: stableChallengers.consecutiveFallbackDraws,
-        nextFallbackAt: stableChallengers.nextFallbackAt,
-      },
-      ratings: stableChallengers.ratings.map((item) =>
-        item.candidate.id === "left"
-          ? { ...item, rating: item.rating + 16, wins: item.wins + 1 }
-          : item.candidate.id === "right"
-            ? { ...item, rating: item.rating - 16, losses: item.losses + 1 }
-            : item,
-      ),
-      nextFallbackAt: "2026-07-17T12:00:03.000Z",
-    };
-    const context = service({ game, challengers });
-
-    const snapshot = await context.snapshotService.export();
-
-    expect(snapshot.game).toEqual({
-      ...stableGame,
-      preferenceProfile: expect.any(Object),
-    });
-    expect(snapshot.challengers).toMatchObject({
-      ready: stableChallengers.ready,
-      ratings: stableChallengers.ratings,
-      pendingComparison: null,
-      pendingSelectionBaseline: null,
-      refillJobs: [],
-      nextFallbackAt: null,
-    });
-    await expect(context.gameRepository.load()).resolves.toMatchObject({
-      round: { status: "generating" },
-      pendingSelection: { kind: "buffer" },
-    });
-    await expect(context.challengerRepository.load()).resolves.toMatchObject({
-      pendingComparison: { winnerId: "left" },
-      nextFallbackAt: "2026-07-17T12:00:03.000Z",
-    });
-  });
+        pendingComparison: null,
+        pendingSelectionBaseline: null,
+        refillJobs: [],
+        nextFallbackAt: null,
+      });
+      await expect(context.gameRepository.load()).resolves.toMatchObject({
+        round: { status: "generating" },
+        pendingSelection: { kind: pendingKind },
+      });
+      await expect(context.challengerRepository.load()).resolves.toMatchObject({
+        pendingComparison: { winnerId: "left" },
+        nextFallbackAt: "2026-07-17T12:00:03.000Z",
+      });
+    },
+  );
 
   it("refuses to export legacy in-progress work without a stable baseline", async () => {
     const game = gameState();

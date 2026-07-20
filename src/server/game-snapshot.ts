@@ -184,7 +184,8 @@ export class GameSnapshotService {
           const baseline = challengers.pendingSelectionBaseline;
           if (
             game.round.status !== "generating" ||
-            game.pendingSelection?.kind !== "buffer" ||
+            (game.pendingSelection?.kind !== "buffer" &&
+              game.pendingSelection?.kind !== "retirement") ||
             !baseline
           ) {
             throw new GameSnapshotUnavailableError(
