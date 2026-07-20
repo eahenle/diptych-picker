@@ -65,6 +65,7 @@ const populatedState: ChallengerState = {
       losses: 0,
       source: "curated",
       poolMember: true,
+      favorite: true,
       lastServedAt: "2026-07-16T20:03:00.000Z",
     },
   ],

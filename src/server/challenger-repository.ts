@@ -62,6 +62,7 @@ const candidateRatingSchema = z
     source: z.enum(["curated", "generated"]),
     poolMember: z.boolean(),
     lastServedAt: z.string().min(1).nullable(),
+    favorite: z.boolean().optional(),
   })
   .strict();
 

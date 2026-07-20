@@ -225,6 +225,35 @@ export async function getComparisonHistory() {
   };
 }
 
+export class CandidateFavoriteNotFoundError extends Error {}
+
+export async function setCandidateFavorite(
+  candidateId: string,
+  favorite: boolean,
+) {
+  return challengerRepository.withLock(async () => {
+    const state = await challengerRepository.load();
+    if (!state) {
+      throw new CandidateFavoriteNotFoundError(
+        "Start a game before favoriting candidates",
+      );
+    }
+    if (!state.ratings.some(({ candidate }) => candidate.id === candidateId)) {
+      throw new CandidateFavoriteNotFoundError(
+        "That candidate is not available in this game",
+      );
+    }
+    const updated = {
+      ...state,
+      ratings: state.ratings.map((rating) =>
+        rating.candidate.id === candidateId ? { ...rating, favorite } : rating,
+      ),
+    };
+    await challengerRepository.save(updated);
+    return { candidateId, favorite };
+  });
+}
+
 export async function getDisplayedEloRatings(game: GameState) {
   return summarizeDisplayedEloRatings(
     await challengerRepository.load(),
