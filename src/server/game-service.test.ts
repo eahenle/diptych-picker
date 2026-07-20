@@ -325,7 +325,7 @@ describe("GameService challenger buffer", () => {
       challengers,
       queue,
       bufferTarget: 3,
-      createId: ids("new-refill-1", "new-refill-2", "new-refill-3"),
+      createId: ids("new-refill-1", "new-refill-2"),
     });
 
     await context.service.updatePreferenceSeed(
@@ -338,11 +338,13 @@ describe("GameService challenger buffer", () => {
       "old-refill",
       "new-refill-1",
       "new-refill-2",
-      "new-refill-3",
     ]);
-    expect(queue.enqueue).toHaveBeenCalledTimes(3);
+    expect(
+      (persisted?.ready.length ?? 0) + (persisted?.refillJobs.length ?? 0),
+    ).toBe(3);
+    expect(queue.enqueue).toHaveBeenCalledTimes(2);
     expect(queue.enqueue.mock.calls.map(([job]) => job.preferenceSeed)).toEqual(
-      Array(3).fill(
+      Array(2).fill(
         "photographic portraits of clearly adult alternative women",
       ),
     );

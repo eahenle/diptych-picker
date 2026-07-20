@@ -566,12 +566,9 @@ export class GameService {
   ): CapacityResult {
     const jobs: GenerationJob[] = [];
     const records: RefillJobRecord[] = [];
-    const currentPreferenceJobs = state.refillJobs.filter(({ expectedJob }) =>
-      this.jobMatchesGenerationPreferences(expectedJob, context.game),
-    ).length;
     const deficit = Math.max(
       0,
-      this.config.bufferTarget - state.ready.length - currentPreferenceJobs,
+      this.config.bufferTarget - state.ready.length - state.refillJobs.length,
     );
 
     for (let index = 0; index < deficit; index += 1) {

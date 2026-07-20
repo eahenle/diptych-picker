@@ -56,7 +56,7 @@ Additional useful guidance includes content to avoid, clear field examples, and 
 
 ### Live image-supply health
 
-Show a quiet, continuously refreshed Queue and Pool readout beside the round metrics. The readout reports ready challengers, in-flight refill work, and reusable-pool capacity through a narrow stats-only endpoint; it must not expose prompts, candidate metadata, or mailbox internals.
+Show a quiet, continuously refreshed Queue and Pool readout beside the round metrics. The readout reports ready challengers, in-flight refill work, and reusable-pool capacity through a narrow stats-only endpoint; it must not expose prompts, candidate metadata, or mailbox internals. Treat the configured queue target as a hard cap across ready plus in-flight work, including superseded jobs that are still draining after a preference change.
 
 ### Depleted-buffer pool cadence
 
@@ -93,6 +93,10 @@ Allow named profiles for different creative moods, with lightweight importance c
 ### Source-image profile ingestion
 
 Let the player ingest a source image and derive an editable Preference profile aimed at generating variations on its depicted themes and content. The populated fields should describe transferable subject matter, composition, medium, style, palette, and constraints rather than asking future generations to reproduce a specific person's identity or exact likeness.
+
+### Deferred preference-save feedback
+
+Keep **Save profile** actionable while the active round is waiting for a challenger. Clicking it should queue the edited profile and start a visible animation inside the modal; keep that animation running until the challenger arrives and the queued save finishes, then close the modal normally. The eventual save should preserve optimistic conflict protection against unrelated edits while allowing the deliberately queued profile to supersede any adaptive revision produced by the round that was already in flight.
 
 ### History, lineage, and favorites
 
