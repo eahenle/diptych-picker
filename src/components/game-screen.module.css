@@ -358,6 +358,51 @@
   cursor: pointer;
 }
 
+.generationNotice {
+  width: min(680px, 100%);
+  margin: 18px auto 0;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid #75543f;
+  background: rgba(84, 50, 33, 0.32);
+  color: #d8c3b4;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.generationNotice span {
+  display: grid;
+  gap: 2px;
+}
+
+.generationNotice strong {
+  color: #f0d2bd;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.generationNotice > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.generationNotice button {
+  padding: 7px 10px;
+  border: 1px solid #84624e;
+  background: transparent;
+  color: #ead7c9;
+  cursor: pointer;
+}
+
+.generationNotice button:last-child {
+  border-color: var(--accent);
+}
+
 .exportNotice {
   margin: 18px auto 0;
   color: #9fae9b;
@@ -947,6 +992,13 @@
   .shortcuts {
     font-size: 10px;
     line-height: 2;
+  }
+  .generationNotice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .generationNotice > div {
+    justify-content: flex-end;
   }
   .conceptLabel {
     font-size: 9px;

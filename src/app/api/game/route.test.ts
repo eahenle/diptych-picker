@@ -10,6 +10,7 @@ const importGameSnapshot = vi.fn();
 const publishGameExport = vi.fn();
 const select = vi.fn();
 const updatePreferenceSeed = vi.fn();
+const dismissGenerationNotice = vi.fn();
 
 vi.mock("@/server/runtime", () => ({
   generationProvider: "mock",
@@ -23,6 +24,7 @@ vi.mock("@/server/runtime", () => ({
   publishGameExport,
   gameService: { select },
   updatePreferenceSeed,
+  dismissGenerationNotice,
 }));
 
 beforeEach(() => {
@@ -291,6 +293,21 @@ describe("PATCH /api/game", () => {
 
     expect(response.status).toBe(400);
     expect(updatePreferenceSeed).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/game/notice", () => {
+  it("dismisses the current generation notice", async () => {
+    dismissGenerationNotice.mockResolvedValue({
+      round: { status: "idle" },
+    });
+    const { DELETE } = await import("./notice/route");
+
+    const response = await DELETE();
+
+    expect(response.status).toBe(200);
+    expect(dismissGenerationNotice).toHaveBeenCalledOnce();
+    expect(await response.json()).toEqual({ round: { status: "idle" } });
   });
 });
 

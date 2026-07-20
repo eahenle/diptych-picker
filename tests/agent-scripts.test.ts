@@ -968,6 +968,32 @@ describe("agent mailbox scripts", () => {
       status: "failed",
       message: "Image generation was interrupted",
       retryable: true,
+      category: "operational",
+    });
+  });
+
+  it("publishes an explicit moderation failure category", async () => {
+    const root = await createDataDirectory();
+    await putJob(root, "active", job("job-moderated"));
+    const failurePath = await messageFile(root, "job-moderated");
+
+    const result = await runScript(
+      "fail-job.mjs",
+      [
+        "--job",
+        "job-moderated",
+        "--message-file",
+        failurePath,
+        "--category",
+        "moderation",
+      ],
+      root,
+    );
+
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      jobId: "job-moderated",
+      status: "failed",
+      category: "moderation",
     });
   });
 

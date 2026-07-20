@@ -221,6 +221,9 @@ const failedGenerationResultSchema = z
     completedAt: timestampSchema,
     message: nonBlankStringSchema,
     retryable: z.boolean(),
+    category: z
+      .enum(["operational", "moderation", "invalid-output"])
+      .optional(),
   })
   .strict();
 
