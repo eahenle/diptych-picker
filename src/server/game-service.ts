@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import {
   drawFallback,
+  drawFallbackBatch,
   popReady,
   admitGeneratedCandidate,
   backfillGeneratedPool,
@@ -335,15 +336,14 @@ export class GameService {
       );
       let preparedReadyHeads: BufferedCandidate[] = [];
       let nextGame = inFlight;
-      if (nextChallengers.ready.length >= 2) {
-        preparedReadyHeads = nextChallengers.ready.slice(0, 2);
-        const leftDraw = popReady(nextChallengers);
-        const rightDraw = popReady(leftDraw.state);
-        nextChallengers = rightDraw.state;
+      const replacements = this.drawTieReplacements(nextChallengers, current);
+      nextChallengers = replacements.state;
+      if (replacements.candidates) {
+        preparedReadyHeads = replacements.readyHeads;
         nextGame = completeTie(
           inFlight,
-          leftDraw.candidate!,
-          rightDraw.candidate!,
+          replacements.candidates[0],
+          replacements.candidates[1],
         );
       }
 
@@ -1047,17 +1047,17 @@ export class GameService {
     }
 
     if (game.pendingSelection.kind === "tie") {
-      if (challengers.ready.length < 2) return { game, challengers };
-      const leftDraw = popReady(challengers);
-      const rightDraw = popReady(leftDraw.state);
-      const completed = completeTie(
-        game,
-        leftDraw.candidate!,
-        rightDraw.candidate!,
-      );
+      const replacements = this.drawTieReplacements(challengers, game);
+      if (!replacements.candidates) {
+        if (replacements.state !== challengers) {
+          await this.challengerRepository.save(replacements.state);
+        }
+        return { game, challengers: replacements.state };
+      }
+      const completed = completeTie(game, ...replacements.candidates);
       await this.gameRepository.save(completed);
       const finalized = {
-        ...rightDraw.state,
+        ...replacements.state,
         pendingComparison: null,
         pendingSelectionBaseline: null,
       };
@@ -1190,6 +1190,66 @@ export class GameService {
       delayMs: this.config.fallbackDelayMs,
       maximumConsecutiveDraws: this.config.fallbackMaximumConsecutive,
     });
+  }
+
+  private drawTieReplacements(
+    state: ChallengerState,
+    game: GameState,
+  ): {
+    candidates: [Candidate, Candidate] | null;
+    readyHeads: BufferedCandidate[];
+    state: ChallengerState;
+  } {
+    const readyHeads = state.ready.slice(0, 2);
+    const fallbackCount = 2 - readyHeads.length;
+    if (fallbackCount === 0) {
+      const leftDraw = popReady(state);
+      const rightDraw = popReady(leftDraw.state);
+      return {
+        candidates: [leftDraw.candidate!, rightDraw.candidate!],
+        readyHeads,
+        state: rightDraw.state,
+      };
+    }
+
+    const recentCandidateIds = game.history
+      .slice(-10)
+      .flatMap((decision) =>
+        decision.outcome === "tie"
+          ? [decision.leftId, decision.rightId]
+          : [decision.winnerId, decision.loserId],
+      );
+    const fallback = drawFallbackBatch(
+      state,
+      {
+        now: this.now(),
+        currentCandidateIds: [
+          game.round.leftCandidate.id,
+          game.round.rightCandidate.id,
+          ...readyHeads.map(({ candidate }) => candidate.id),
+        ],
+        recentCandidateIds,
+        random: this.random,
+        delayMs: this.config.fallbackDelayMs,
+        maximumConsecutiveDraws: this.config.fallbackMaximumConsecutive,
+      },
+      fallbackCount,
+    );
+    if (fallback.candidates.length < fallbackCount) {
+      return { candidates: null, readyHeads: [], state: fallback.state };
+    }
+
+    return {
+      candidates: [
+        ...readyHeads.map(({ candidate }) => candidate),
+        ...fallback.candidates,
+      ] as [Candidate, Candidate],
+      readyHeads,
+      state: {
+        ...fallback.state,
+        ready: fallback.state.ready.slice(readyHeads.length),
+      },
+    };
   }
 
   private pendingSelectionBaseline(

@@ -4,6 +4,7 @@ import {
   admitGeneratedCandidate,
   backfillGeneratedPool,
   drawFallback,
+  drawFallbackBatch,
   popReady,
   recordGenerationTurnaround,
   refillDeficit,
@@ -450,6 +451,56 @@ describe("challenger state", () => {
         maximumConsecutiveDraws: 1,
       }).candidate,
     ).toBeNull();
+  });
+
+  it("draws a distinct fallback pair after one shared delay", () => {
+    const initial = state({
+      ratings: [
+        rating("current", 1000),
+        rating("eligible-a", 1000),
+        rating("eligible-b", 1000),
+        rating("eligible-c", 1000),
+      ],
+    });
+    const options = {
+      now: "2026-07-16T00:00:00.000Z",
+      currentCandidateIds: ["current"],
+      recentCandidateIds: [] as string[],
+      random: () => 0,
+    };
+
+    const armed = drawFallbackBatch(initial, options, 2);
+    expect(armed.candidates).toEqual([]);
+    expect(armed.state.nextFallbackAt).toBe("2026-07-16T00:00:03.000Z");
+
+    const result = drawFallbackBatch(
+      armed.state,
+      { ...options, now: "2026-07-16T00:00:03.000Z" },
+      2,
+    );
+    expect(result.candidates.map(({ id }) => id)).toEqual([
+      "eligible-a",
+      "eligible-b",
+    ]);
+    expect(result.state.consecutiveFallbackDraws).toBe(2);
+    expect(result.state.nextFallbackAt).toBeNull();
+  });
+
+  it("does not partially draw a fallback batch", () => {
+    const initial = state({ ratings: [rating("eligible", 1000)] });
+
+    const result = drawFallbackBatch(
+      initial,
+      {
+        now: "2026-07-16T00:00:00.000Z",
+        currentCandidateIds: [],
+        recentCandidateIds: [],
+        random: () => 0,
+      },
+      2,
+    );
+
+    expect(result).toEqual({ candidates: [], state: initial });
   });
 
   it("updates generation turnaround with a 0.25 exponential moving average", () => {
