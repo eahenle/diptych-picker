@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preferenceProfileFromSeed, type GameState } from "@/domain/game";
@@ -418,6 +419,49 @@ describe("GameScreen initial generation", () => {
 });
 
 describe("GameScreen challenger reconciliation", () => {
+  it("opens either candidate in a larger view without selecting it", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(
+      screen.getByRole("button", { name: "View image A larger" }),
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Expanded image: left concept",
+    });
+    expect(dialog).toBeVisible();
+    expect(
+      within(dialog).getByRole("img", { name: "left concept" }),
+    ).toHaveAttribute("src", "/api/assets/generated-left.png");
+    expect(screen.getAllByTestId("candidate-image")).toHaveLength(2);
+    expect(
+      screen.getByRole("button", { name: "Close expanded image" }),
+    ).toHaveFocus();
+
+    fireEvent.keyDown(document.body, { key: "a" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(dialog).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View image B larger" }),
+    );
+    expect(
+      screen.getByRole("dialog", {
+        name: "Expanded image: right concept",
+      }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close expanded image" }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("shows live ready-queue and reusable-pool health", async () => {
     vi.stubGlobal(
       "fetch",

@@ -180,10 +180,24 @@
   gap: clamp(12px, 1.6vw, 24px);
 }
 
+.candidatePanel {
+  position: relative;
+  min-width: 0;
+  aspect-ratio: 1;
+}
+
+.candidatePanel.left {
+  --side-accent: var(--ultraviolet);
+}
+.candidatePanel.right {
+  --side-accent: var(--copper-bright);
+}
+
 .candidateCard {
   position: relative;
   display: block;
   width: 100%;
+  height: 100%;
   aspect-ratio: 1;
   padding: 7px;
   overflow: hidden;
@@ -198,12 +212,6 @@
     box-shadow 160ms ease;
 }
 
-.candidateCard.left {
-  --side-accent: var(--ultraviolet);
-}
-.candidateCard.right {
-  --side-accent: var(--copper-bright);
-}
 .candidateCard:hover:not(:disabled),
 .candidateCard:focus-visible {
   transform: translateY(-2px);
@@ -218,6 +226,38 @@
 }
 .candidateCard:disabled {
   cursor: default;
+}
+
+.inspectButton {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 3;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #d6cec8;
+  background: rgba(7, 8, 10, 0.82);
+  border: 1px solid color-mix(in srgb, var(--side-accent) 42%, #48413d);
+  border-radius: 50%;
+  cursor: zoom-in;
+  backdrop-filter: blur(3px);
+}
+
+.inspectButton svg {
+  width: 19px;
+  height: 19px;
+}
+
+.inspectButton:hover,
+.inspectButton:focus-visible {
+  color: #fff;
+  border-color: var(--side-accent);
+  background: rgba(7, 8, 10, 0.94);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--side-accent) 25%, transparent);
 }
 
 .candidateImage {
@@ -494,6 +534,48 @@
 }
 .historyModal {
   width: min(920px, 100%);
+}
+.imageInspector {
+  position: relative;
+  width: min(1120px, 100%);
+  max-height: calc(100vh - 48px);
+  padding: 46px 18px 18px;
+  overflow: hidden;
+  background: #080a0c;
+  border: 1px solid #383337;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.75);
+}
+.imageInspector .leaderboardClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  margin: 0;
+}
+.imageInspector figure {
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+.imageInspector img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  background: #050607;
+}
+.imageInspector figcaption {
+  max-width: 100%;
+  overflow: hidden;
+  color: #d9d2cb;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.055em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 .leaderboardClose {
   position: sticky;

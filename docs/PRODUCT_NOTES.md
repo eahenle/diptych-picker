@@ -2,6 +2,10 @@
 
 ## 2026-07-20
 
+### Large image inspection
+
+Each active candidate has a magnifying-glass control that opens its immutable image in a larger, contained modal without selecting either side or changing generation state. The view identifies the candidate, closes from its dedicated control, backdrop, or `Escape`, and suppresses gameplay shortcuts while open.
+
 ### Tie decisions
 
 The comparison screen exposes **Declare tie**, mapped to `C` and `3`. A tie clears both active candidates and records a neutral history decision. When Elo scores differ, only the lower-rated candidate gains the score it would have received for a win; the higher-rated candidate is unchanged. Equal scores do not change. Tie decisions do not alter win/loss counts or supply positive or negative adaptive-preference evidence, and tie-triggered refill work carries an explicit neutral outcome marker.
@@ -96,7 +100,7 @@ Add a distinct **Both lose** action mapped to `D` and `4`. Record that the playe
 
 ### Image inspection and score-state cues
 
-Add a magnifying-glass action that opens either candidate in a larger image view. Replace the visible Elo number with a distinct symbol when a candidate is appearing for the first time, and with another symbol when losing the current round would remove that candidate from the reusable pool.
+Replace the visible Elo number with a distinct symbol when a candidate is appearing for the first time, and with another symbol when losing the current round would remove that candidate from the reusable pool.
 
 ### Preference presets and weighting
 

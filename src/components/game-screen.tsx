@@ -18,6 +18,7 @@ import {
   preferenceProfileFromSeed,
   willRetireChampion,
   type BufferHealth,
+  type Candidate,
   type DisplayedEloRatings,
   type GameStartState,
   type GameState,
@@ -248,6 +249,8 @@ export function GameScreen() {
   const [newGameOpen, setNewGameOpen] = useState(false);
   const [loadGameOpen, setLoadGameOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [inspectedCandidate, setInspectedCandidate] =
+    useState<Candidate | null>(null);
   const [historyEntries, setHistoryEntries] = useState<
     ComparisonHistoryEntry[]
   >([]);
@@ -902,7 +905,8 @@ export function GameScreen() {
         newGameOpen ||
         loadGameOpen ||
         leaderboardOpen ||
-        historyOpen
+        historyOpen ||
+        inspectedCandidate
       ) {
         return;
       }
@@ -919,6 +923,7 @@ export function GameScreen() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     historyOpen,
+    inspectedCandidate,
     leaderboardOpen,
     loadGameOpen,
     newGameOpen,
@@ -926,6 +931,15 @@ export function GameScreen() {
     select,
     tie,
   ]);
+
+  useEffect(() => {
+    if (!inspectedCandidate) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setInspectedCandidate(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [inspectedCandidate]);
 
   const openComparisonHistory = async () => {
     setHistoryOpen(true);
@@ -1460,6 +1474,7 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
+                onInspect={setInspectedCandidate}
                 eloRating={eloRatings?.left}
               />
               <CandidateCard
@@ -1473,6 +1488,7 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
+                onInspect={setInspectedCandidate}
                 eloRating={eloRatings?.right}
               />
             </section>
@@ -1558,6 +1574,39 @@ export function GameScreen() {
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {inspectedCandidate ? (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onMouseDown={() => setInspectedCandidate(null)}
+        >
+          <section
+            className={styles.imageInspector}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Expanded image: ${inspectedCandidate.concept}`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className={styles.leaderboardClose}
+              aria-label="Close expanded image"
+              onClick={() => setInspectedCandidate(null)}
+              autoFocus
+            >
+              ×
+            </button>
+            <figure>
+              <img
+                src={inspectedCandidate.imageUrl}
+                alt={inspectedCandidate.concept}
+              />
+              <figcaption>{inspectedCandidate.concept}</figcaption>
+            </figure>
+          </section>
+        </div>
       ) : null}
 
       {historyOpen && game ? (
