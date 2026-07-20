@@ -90,7 +90,7 @@ Selection remains transactional under the game and buffer repository locks:
 6. If the ready buffer is empty, evaluate the paced local-pool fallback.
 7. If neither is available, enter the existing `generating` state with only the losing side marked for replacement.
 8. Reconcile the waiting selection when the next refill result arrives.
-9. Ensure the count of ready candidates plus active refill jobs reaches the target of five.
+9. Ensure the count of ready candidates plus active refill jobs reaches, but never exceeds, the target of five. Superseded work that is still draining continues to occupy a slot until reconciliation archives it.
 
 Every newly created refill job snapshots the latest winner, rejected candidate, selection history, recent concepts, and preference seed. If the winner later changes, ready candidates and already-running jobs remain valid stale work. New refill jobs pin to the new winner. Completed jobs append to the FIFO in completion order, so the user plays out stale candidates while winner-pinned candidates arrive in the background.
 
