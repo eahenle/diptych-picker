@@ -27,6 +27,10 @@ const preferenceProfileSchema = z
       .array(z.string().trim().min(1).max(200))
       .max(12)
       .default([]),
+    adaptationSourceRejectedIds: z
+      .array(z.string().trim().min(1).max(200))
+      .max(12)
+      .default([]),
     mediaTypes: z.string().max(500),
     visualStyle: z.string().max(500),
     colorPalette: z.string().max(500),

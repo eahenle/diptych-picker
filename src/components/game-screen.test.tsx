@@ -10,7 +10,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GameState } from "@/domain/game";
+import { preferenceProfileFromSeed, type GameState } from "@/domain/game";
 import { GameScreen } from "./game-screen";
 
 const initializedGame: GameState = {
@@ -701,6 +701,7 @@ describe("GameScreen challenger reconciliation", () => {
       avoid: "",
       adaptationMode: "adaptive",
       adaptationSourceWinnerIds: ["generated-left"],
+      adaptationSourceRejectedIds: ["generated-right"],
     };
     let getCount = 0;
     let resolvePatch!: (response: Response) => void;
@@ -762,6 +763,7 @@ describe("GameScreen challenger reconciliation", () => {
       expectedPreferenceProfile: {
         adaptationMode: "adaptive",
         adaptationSourceWinnerIds: ["generated-left"],
+        adaptationSourceRejectedIds: ["generated-right"],
       },
     });
 
@@ -788,6 +790,7 @@ describe("GameScreen challenger reconciliation", () => {
       avoid: "",
       adaptationMode: "adaptive",
       adaptationSourceWinnerIds: ["generated-left"],
+      adaptationSourceRejectedIds: ["generated-right"],
     };
     let getCount = 0;
     const fetchMock = vi.fn(
@@ -838,6 +841,7 @@ describe("GameScreen challenger reconciliation", () => {
         themes: initializedGame.preferenceSeed,
         adaptationMode: "static",
         adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
       },
     });
   });
@@ -856,6 +860,30 @@ describe("GameScreen challenger reconciliation", () => {
     expect(
       screen.queryByText("Changes can be saved after this challenger arrives."),
     ).not.toBeInTheDocument();
+  });
+
+  it("summarizes positive and negative adaptive evidence separately", async () => {
+    const evidenceGame = cloneGame();
+    evidenceGame.preferenceProfile = {
+      ...preferenceProfileFromSeed(evidenceGame.preferenceSeed),
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["winner-1", "winner-2"],
+      adaptationSourceRejectedIds: ["rejected-1"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: evidenceGame })),
+    );
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+
+    expect(
+      screen.getByText(
+        /Adaptive evidence from generated images — winners: 2; rejected: 1/,
+      ),
+    ).toBeVisible();
   });
 
   it("surfaces a moderation notice and opens Preferences to adjust it", async () => {
@@ -951,6 +979,7 @@ describe("GameScreen challenger reconciliation", () => {
         inspiration: "",
         adaptationMode: "static",
         adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
         mediaTypes: "",
         visualStyle: "",
         colorPalette: "",
@@ -962,6 +991,7 @@ describe("GameScreen challenger reconciliation", () => {
         inspiration: "high-contrast portrait lighting",
         adaptationMode: "adaptive",
         adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
         mediaTypes: "linocut and large-format photography",
         visualStyle: "tactile and cinematic",
         colorPalette: "copper and ultraviolet",

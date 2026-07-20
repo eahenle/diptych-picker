@@ -70,6 +70,10 @@ const currentPreferenceProfileSchema = z
       .array(z.string().trim().min(1).max(200))
       .max(12)
       .optional(),
+    adaptationSourceRejectedIds: z
+      .array(z.string().trim().min(1).max(200))
+      .max(12)
+      .optional(),
   })
   .strict()
   .transform((profile) => ({
@@ -77,6 +81,7 @@ const currentPreferenceProfileSchema = z
     inspiration: profile.inspiration ?? "",
     adaptationMode: profile.adaptationMode ?? ("static" as const),
     adaptationSourceWinnerIds: profile.adaptationSourceWinnerIds ?? [],
+    adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds ?? [],
   }));
 
 const transitionalPreferenceProfileSchema = z
@@ -102,6 +107,10 @@ const transitionalPreferenceProfileSchema = z
       .array(z.string().trim().min(1).max(200))
       .max(12)
       .optional(),
+    adaptationSourceRejectedIds: z
+      .array(z.string().trim().min(1).max(200))
+      .max(12)
+      .optional(),
   })
   .strict()
   .transform((profile) => ({
@@ -117,6 +126,7 @@ const transitionalPreferenceProfileSchema = z
       profile.adaptationSourceWinnerIds ??
       profile.inspirationSourceWinnerIds ??
       [],
+    adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds ?? [],
   }));
 
 const preferenceProfileSchema = z.union([

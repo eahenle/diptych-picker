@@ -12,6 +12,7 @@ import {
   mergeServerResult,
   migrateGameState,
   preferenceProfileFromSeed,
+  recordRejectedPreferenceEvidence,
   recentConcepts,
   recoverInterruptedSelection,
   willRetireChampion,
@@ -57,6 +58,7 @@ describe("round transitions", () => {
       avoid: "",
       adaptationMode: "static",
       adaptationSourceWinnerIds: [],
+      adaptationSourceRejectedIds: [],
     });
   });
 
@@ -72,6 +74,7 @@ describe("round transitions", () => {
         avoid: "cute mascots and readable text",
         adaptationMode: "static",
         adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
       }),
     ).toBe(
       [
@@ -115,7 +118,33 @@ describe("round transitions", () => {
       mediaTypes: "large-format photography",
       adaptationMode: "adaptive",
       adaptationSourceWinnerIds: ["winner"],
+      adaptationSourceRejectedIds: [],
     });
+  });
+
+  it("records bounded rejected-candidate evidence only in adaptive mode", () => {
+    const staticProfile = preferenceProfileFromSeed(
+      "prefer strange crafted landscapes",
+    );
+    expect(recordRejectedPreferenceEvidence(staticProfile, "loser")).toBe(
+      staticProfile,
+    );
+
+    const adaptiveProfile = {
+      ...staticProfile,
+      adaptationMode: "adaptive" as const,
+      adaptationSourceRejectedIds: Array.from(
+        { length: 12 },
+        (_, index) => `loser-${index + 1}`,
+      ),
+    };
+    expect(
+      recordRejectedPreferenceEvidence(adaptiveProfile, "latest-loser")
+        .adaptationSourceRejectedIds,
+    ).toEqual([
+      ...adaptiveProfile.adaptationSourceRejectedIds.slice(1),
+      "latest-loser",
+    ]);
   });
 
   it("migrates the transitional inspiration-only toggle to profile-wide adaptation", () => {
@@ -143,6 +172,7 @@ describe("round transitions", () => {
       avoid: "readable text",
       adaptationMode: "adaptive",
       adaptationSourceWinnerIds: ["winner"],
+      adaptationSourceRejectedIds: [],
     });
   });
 

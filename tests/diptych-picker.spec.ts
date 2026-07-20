@@ -367,6 +367,7 @@ test("persists a fine-grained preference profile and composes generation context
     inspiration: "  severe off-axis framing and quiet tension  ",
     adaptationMode: "static",
     adaptationSourceWinnerIds: [],
+    adaptationSourceRejectedIds: [],
     contentLevel: "adult-allowed",
     avoid: "readable text and cute mascots",
   });
@@ -410,6 +411,7 @@ test("adopts a complete model-authored profile only after an adaptive candidate 
     themes: "mythic engineering and strange nocturnal ecosystems",
     adaptationMode: "adaptive",
     adaptationSourceWinnerIds: [adaptiveCandidateId],
+    adaptationSourceRejectedIds: [],
   });
   expect(state.game.preferenceProfile.inspiration).toContain("Favor");
   expect(state.game.preferenceProfile.visualStyle).not.toBe("");
@@ -417,7 +419,9 @@ test("adopts a complete model-authored profile only after an adaptive candidate 
   await page.getByRole("button", { name: "Preferences" }).click();
   await expect(page.getByRole("radio", { name: "Adaptive" })).toBeChecked();
   await expect(
-    page.getByText(/Adaptive last revised this profile from 1 winning image/),
+    page.getByText(
+      /Adaptive evidence from generated images — winners: 1; rejected: 0/,
+    ),
   ).toBeVisible();
 });
 
