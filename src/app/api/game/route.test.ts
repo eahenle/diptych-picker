@@ -213,6 +213,9 @@ describe("PATCH /api/game", () => {
   it("composes and persists a fine-grained preference profile", async () => {
     const preferenceProfile = {
       themes: "mythic engineering and strange ecosystems",
+      inspiration: "  sharp off-axis lighting  ",
+      adaptationMode: "adaptive" as const,
+      adaptationSourceWinnerIds: [],
       mediaTypes: "large-format photography",
       visualStyle: "cinematic and tactile",
       colorPalette: "ultraviolet, copper, and oxblood",
@@ -225,7 +228,13 @@ describe("PATCH /api/game", () => {
       new Request("http://localhost/api/game", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preferenceProfile }),
+        body: JSON.stringify({
+          preferenceProfile,
+          expectedPreferenceProfile: {
+            ...preferenceProfile,
+            adaptationMode: "static",
+          },
+        }),
       }),
     );
 
@@ -233,6 +242,7 @@ describe("PATCH /api/game", () => {
     expect(updatePreferenceSeed).toHaveBeenCalledWith(
       [
         "Themes and subjects: mythic engineering and strange ecosystems",
+        "Inspiration: sharp off-axis lighting",
         "Preferred media: large-format photography",
         "Visual style and mood: cinematic and tactile",
         "Color palette: ultraviolet, copper, and oxblood",
@@ -240,6 +250,7 @@ describe("PATCH /api/game", () => {
         "Avoid or de-emphasize: readable text",
       ].join("\n"),
       preferenceProfile,
+      { ...preferenceProfile, adaptationMode: "static" },
     );
   });
 

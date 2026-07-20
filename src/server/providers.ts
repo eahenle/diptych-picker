@@ -1,4 +1,9 @@
-import type { Candidate, SelectionHistory } from "@/domain/game";
+import type {
+  Candidate,
+  PreferenceProfile,
+  PreferenceRevision,
+  SelectionHistory,
+} from "@/domain/game";
 
 export interface ChallengerPromptInput {
   retainedWinner: Candidate;
@@ -6,6 +11,7 @@ export interface ChallengerPromptInput {
   selectionHistory: SelectionHistory[];
   recentConcepts: string[];
   preferenceSeed: string;
+  preferenceProfile: PreferenceProfile;
 }
 
 export interface ProposedChallenger {
@@ -13,6 +19,7 @@ export interface ProposedChallenger {
   visualPrompt: string;
   styleTags: string[];
   reasoningSummary: string;
+  preferenceRevision?: PreferenceRevision;
 }
 
 export interface ChallengerPromptProvider {

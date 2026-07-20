@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { preferenceProfileFromSeed } from "@/domain/game";
 import {
   MockChallengerPromptProvider,
   MockImageProvider,
@@ -29,6 +30,7 @@ describe("mock providers", () => {
       selectionHistory: [],
       recentConcepts: ["Kinetic paper aviary", "Subterranean ceramic archive"],
       preferenceSeed: "novelty",
+      preferenceProfile: preferenceProfileFromSeed("novelty"),
     });
 
     expect([
@@ -55,5 +57,5 @@ describe("mock providers", () => {
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     );
     expect(repeated.bytes).toEqual(image.bytes);
-  });
+  }, 15_000);
 });

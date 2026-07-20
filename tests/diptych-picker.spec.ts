@@ -11,7 +11,9 @@ const dataDirectory = join(process.cwd(), ".local-data", "test");
 const challengerStatePath = join(dataDirectory, "challenger-state.json");
 
 interface StoredChallengerState {
-  ready: Array<{ candidate: { id: string } }>;
+  ready: Array<{
+    candidate: { id: string; preferenceRevision?: Record<string, unknown> };
+  }>;
   refillJobs: Array<{ jobId: string }>;
   consecutiveFallbackDraws: number;
   nextFallbackAt: string | null;
@@ -38,7 +40,7 @@ async function select(
   page: Page,
   side: "left" | "right",
   expectedRound: number,
-  expectedStatus = 200,
+  expectedStatus: number | readonly number[] = 200,
 ) {
   const responsePromise = page.waitForResponse(
     (response) =>
@@ -47,7 +49,9 @@ async function select(
   );
   await page.getByTestId(`candidate-card-${side}`).click();
   const response = await responsePromise;
-  expect(response.status()).toBe(expectedStatus);
+  expect(
+    Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus],
+  ).toContain(response.status());
   await expect(
     page.getByText(`Round ${expectedRound}`, { exact: true }),
   ).toBeVisible();
@@ -313,9 +317,14 @@ test("persists a fine-grained preference profile and composes generation context
   request,
 }) => {
   await page.getByRole("button", { name: "Preferences" }).click();
+  await expect(page.getByRole("radio", { name: "Static" })).toBeChecked();
+  await expect(page.getByText(/Static preserves every field/)).toBeVisible();
   await page
     .getByLabel("Themes & subjects")
     .fill("mythic engineering and strange nocturnal ecosystems");
+  await page
+    .getByLabel("Inspiration")
+    .fill("  severe off-axis framing and quiet tension  ");
   await page
     .getByLabel("Preferred media")
     .fill("large-format photography, linocut");
@@ -344,6 +353,10 @@ test("persists a fine-grained preference profile and composes generation context
   await expect(page.getByLabel("Preferred media")).toHaveValue(
     "large-format photography, linocut",
   );
+  await expect(page.getByLabel("Inspiration")).toHaveValue(
+    "  severe off-axis framing and quiet tension  ",
+  );
+  await expect(page.getByRole("radio", { name: "Static" })).toBeChecked();
   await expect(
     page.getByRole("radio", { name: /adult themes/i }),
   ).toBeChecked();
@@ -351,6 +364,9 @@ test("persists a fine-grained preference profile and composes generation context
   const state = await (await request.get("/api/game")).json();
   expect(state.game.preferenceProfile).toMatchObject({
     themes: "mythic engineering and strange nocturnal ecosystems",
+    inspiration: "  severe off-axis framing and quiet tension  ",
+    adaptationMode: "static",
+    adaptationSourceWinnerIds: [],
     contentLevel: "adult-allowed",
     avoid: "readable text and cute mascots",
   });
@@ -360,6 +376,49 @@ test("persists a fine-grained preference profile and composes generation context
   expect(state.game.preferenceSeed).toContain(
     "Content range: Adult themes may be used when relevant",
   );
+});
+
+test("adopts a complete model-authored profile only after an adaptive candidate wins", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page
+    .getByLabel("Themes & subjects")
+    .fill("mythic engineering and strange nocturnal ecosystems");
+  await page.getByLabel("Inspiration").fill("start with stark lighting");
+  await page.getByRole("radio", { name: "Adaptive" }).check();
+  await expect(
+    page.getByText(/Adaptive lets the model revise this profile/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Save profile" }).click();
+
+  await select(page, "left", 2, [200, 202]);
+  await reconcileAllRefills(request);
+  expect(
+    (await challengerState()).ready[0]?.candidate.preferenceRevision,
+  ).toBeTruthy();
+  await select(page, "left", 3);
+  const adaptiveCandidateId = await page
+    .getByTestId("candidate-card-right")
+    .getAttribute("data-candidate-id");
+  expect(adaptiveCandidateId).toBeTruthy();
+  await select(page, "right", 4);
+
+  const state = await (await request.get("/api/game")).json();
+  expect(state.game.preferenceProfile).toMatchObject({
+    themes: "mythic engineering and strange nocturnal ecosystems",
+    adaptationMode: "adaptive",
+    adaptationSourceWinnerIds: [adaptiveCandidateId],
+  });
+  expect(state.game.preferenceProfile.inspiration).toContain("Favor");
+  expect(state.game.preferenceProfile.visualStyle).not.toBe("");
+
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await expect(page.getByRole("radio", { name: "Adaptive" })).toBeChecked();
+  await expect(
+    page.getByText(/Adaptive last revised this profile from 1 winning image/),
+  ).toBeVisible();
 });
 
 test("exports the current game and restores it after later play", async ({

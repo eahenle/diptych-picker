@@ -16,7 +16,9 @@ import {
 import {
   beginChampionRetirement,
   beginBufferedSelection,
+  applyWinnerPreferenceRevision,
   candidateAt,
+  composePreferenceSeed,
   completeChampionRetirement,
   completeSelection,
   failSelection,
@@ -101,6 +103,7 @@ export class GameService {
     preferenceProfile: PreferenceProfile = preferenceProfileFromSeed(
       preferenceSeed,
     ),
+    expectedPreferenceProfile?: PreferenceProfile,
   ): Promise<GameState> {
     return this.withStateLocks(async () => {
       const [current, challengers] = await Promise.all([
@@ -110,6 +113,18 @@ export class GameService {
       if (!current) {
         throw new MissingGameError("Start a game before editing preferences");
       }
+      if (
+        expectedPreferenceProfile !== undefined &&
+        !isDeepStrictEqual(
+          current.preferenceProfile ??
+            preferenceProfileFromSeed(current.preferenceSeed),
+          expectedPreferenceProfile,
+        )
+      ) {
+        throw new SelectionConflictError(
+          "Preferences changed while this editor was open. Reopen Preferences and try again.",
+        );
+      }
       if (current.round.status === "generating") {
         throw new SelectionConflictError(
           "A challenger is already being generated",
@@ -118,7 +133,11 @@ export class GameService {
 
       const updated = { ...current, preferenceSeed, preferenceProfile };
       await this.gameRepository.save(updated);
-      if (!challengers || current.preferenceSeed === preferenceSeed) {
+      const generationPreferencesChanged =
+        current.preferenceSeed !== preferenceSeed ||
+        (current.preferenceProfile?.adaptationMode ?? "static") !==
+          preferenceProfile.adaptationMode;
+      if (!challengers || !generationPreferencesChanged) {
         return updated;
       }
 
@@ -214,6 +233,9 @@ export class GameService {
         }
       }
 
+      const adapted = this.applyAdaptivePreferences(nextGame, nextChallengers);
+      nextGame = adapted.game;
+      nextChallengers = adapted.challengers;
       const capacity = this.addRefillCapacity(nextChallengers, {
         game: nextGame,
         winnerSide,
@@ -352,7 +374,12 @@ export class GameService {
       if (!draw.candidate) draw = this.drawFallback(challengers, game);
       challengers = draw.state;
       if (draw.candidate) {
-        game = completeSelection(game, draw.candidate);
+        const adapted = this.applyAdaptivePreferences(
+          completeSelection(game, draw.candidate),
+          challengers,
+        );
+        game = adapted.game;
+        challengers = adapted.challengers;
         await this.gameRepository.save(game);
         challengers = {
           ...challengers,
@@ -384,7 +411,7 @@ export class GameService {
     const { record, work, result } = observation;
     const expected = record.expectedJob;
 
-    if (expected.preferenceSeed !== game.preferenceSeed) {
+    if (!this.jobMatchesGenerationPreferences(expected, game)) {
       // Do not interrupt a worker that already owns the old request. Once it
       // terminates, archive the result without admitting it to the ready FIFO.
       if (work && !result) return { game, challengers };
@@ -539,9 +566,8 @@ export class GameService {
   ): CapacityResult {
     const jobs: GenerationJob[] = [];
     const records: RefillJobRecord[] = [];
-    const currentPreferenceJobs = state.refillJobs.filter(
-      ({ expectedJob }) =>
-        expectedJob.preferenceSeed === context.game.preferenceSeed,
+    const currentPreferenceJobs = state.refillJobs.filter(({ expectedJob }) =>
+      this.jobMatchesGenerationPreferences(expectedJob, context.game),
     ).length;
     const deficit = Math.max(
       0,
@@ -568,6 +594,9 @@ export class GameService {
         selectionHistory: context.game.history.slice(-12),
         recentConcepts: recentConcepts(context.game, 10),
         preferenceSeed: context.game.preferenceSeed,
+        preferenceProfile:
+          context.game.preferenceProfile ??
+          preferenceProfileFromSeed(context.game.preferenceSeed),
         sessionId: state.sessionId,
         pinnedWinnerId: context.retainedWinner.id,
       };
@@ -784,19 +813,22 @@ export class GameService {
       if (challengers.ready.length < 2) return { game, challengers };
       const leftDraw = popReady(challengers);
       const rightDraw = popReady(leftDraw.state);
-      const completed = completeChampionRetirement(
-        game,
-        leftDraw.candidate!,
-        rightDraw.candidate!,
+      const adapted = this.applyAdaptivePreferences(
+        completeChampionRetirement(
+          game,
+          leftDraw.candidate!,
+          rightDraw.candidate!,
+        ),
+        rightDraw.state,
       );
-      await this.gameRepository.save(completed);
+      await this.gameRepository.save(adapted.game);
       const finalized = {
-        ...rightDraw.state,
+        ...adapted.challengers,
         pendingComparison: null,
         pendingSelectionBaseline: null,
       };
       await this.challengerRepository.save(finalized);
-      return { game: completed, challengers: finalized };
+      return { game: adapted.game, challengers: finalized };
     }
 
     if (game.pendingSelection.kind !== "buffer") {
@@ -820,17 +852,48 @@ export class GameService {
     }
     if (!draw.candidate) return { game, challengers };
 
-    const completed = completeSelection(game, draw.candidate);
-    await this.gameRepository.save(completed);
+    const adapted = this.applyAdaptivePreferences(
+      completeSelection(game, draw.candidate),
+      draw.state,
+    );
+    await this.gameRepository.save(adapted.game);
     const finalized = {
-      ...draw.state,
+      ...adapted.challengers,
       pendingComparison: null,
       pendingSelectionBaseline: null,
     };
-    if (draw.state !== challengers || challengers.pendingComparison !== null) {
+    if (
+      adapted.challengers !== challengers ||
+      challengers.pendingComparison !== null
+    ) {
       await this.challengerRepository.save(finalized);
     }
-    return { game: completed, challengers: finalized };
+    return { game: adapted.game, challengers: finalized };
+  }
+
+  private applyAdaptivePreferences(
+    game: GameState,
+    challengers: ChallengerState,
+  ): { game: GameState; challengers: ChallengerState } {
+    const selection = game.history.at(-1);
+    const profile = game.preferenceProfile;
+    if (!selection || !profile || profile.adaptationMode !== "adaptive") {
+      return { game, challengers };
+    }
+    const winner = challengers.ratings.find(
+      ({ candidate }) => candidate.id === selection.winnerId,
+    )?.candidate;
+    if (!winner) return { game, challengers };
+    const nextProfile = applyWinnerPreferenceRevision(profile, winner);
+    if (nextProfile === profile) return { game, challengers };
+    const preferenceSeed = composePreferenceSeed(nextProfile);
+    return {
+      game: { ...game, preferenceProfile: nextProfile, preferenceSeed },
+      challengers:
+        preferenceSeed === game.preferenceSeed
+          ? challengers
+          : { ...challengers, ready: [] },
+    };
   }
 
   private async removeDisplayedCandidatesFromReady(
@@ -895,6 +958,7 @@ export class GameService {
       concept: result.proposal.concept,
       style: result.proposal.styleTags,
       reasoningSummary: result.proposal.reasoningSummary,
+      preferenceRevision: result.proposal.preferenceRevision,
       createdAt: result.completedAt,
       winCount: 0,
     };
@@ -976,6 +1040,17 @@ export class GameService {
 
   private sameJob(left: GenerationJob, right: GenerationJob): boolean {
     return isDeepStrictEqual(left, right);
+  }
+
+  private jobMatchesGenerationPreferences(
+    job: GenerationJob,
+    game: GameState,
+  ): boolean {
+    return (
+      job.preferenceSeed === game.preferenceSeed &&
+      (job.preferenceProfile?.adaptationMode ?? "static") ===
+        (game.preferenceProfile?.adaptationMode ?? "static")
+    );
   }
 
   private withStateLocks<T>(operation: () => Promise<T>): Promise<T> {

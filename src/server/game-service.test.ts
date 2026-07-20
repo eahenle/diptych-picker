@@ -3,7 +3,11 @@ import type {
   CandidateRating,
   ChallengerState,
 } from "@/domain/challenger-state";
-import type { Candidate, GameState } from "@/domain/game";
+import {
+  preferenceProfileFromSeed,
+  type Candidate,
+  type GameState,
+} from "@/domain/game";
 import type {
   GenerationJob,
   GenerationMailbox,
@@ -222,6 +226,65 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("adopts a model-authored profile revision only after its candidate wins", async () => {
+    const baseProfile = preferenceProfileFromSeed(
+      "industrial, gothic, natural, and surprising",
+    );
+    const game = gameState({
+      preferenceProfile: {
+        ...baseProfile,
+        inspiration: "Keep the lighting stark.",
+        adaptationMode: "adaptive",
+      },
+      round: {
+        ...gameState().round,
+        leftCandidate: {
+          ...candidate("left"),
+          preferenceRevision: {
+            themes: "Clearly adult alternative portrait studies",
+            inspiration:
+              "Favor ultraviolet rim light and severe off-axis framing.",
+            mediaTypes: "large-format photography",
+            visualStyle: "severe and cinematic",
+            colorPalette: "ultraviolet and oxblood",
+            contentLevel: "adult-allowed",
+            avoid: "readable text",
+          },
+        },
+      },
+    });
+    const context = serviceFor({
+      game,
+      challengers: challengerState(game),
+      bufferTarget: 2,
+      createId: ids("adaptive-refill-1", "adaptive-refill-2"),
+    });
+
+    const updated = await context.service.select("left", 3);
+
+    expect(updated.preferenceProfile).toMatchObject({
+      themes: "Clearly adult alternative portrait studies",
+      inspiration: "Favor ultraviolet rim light and severe off-axis framing.",
+      mediaTypes: "large-format photography",
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["left"],
+    });
+    expect(updated.preferenceSeed).toContain(
+      "Inspiration: Favor ultraviolet rim light and severe off-axis framing.",
+    );
+    expect(updated.preferenceSeed).toContain(
+      "Themes and subjects: Clearly adult alternative portrait studies",
+    );
+    expect(
+      context.queue.enqueue.mock.calls.map(
+        ([job]) => job.preferenceProfile?.adaptationMode,
+      ),
+    ).toEqual(["adaptive", "adaptive"]);
+    expect(
+      context.queue.enqueue.mock.calls.map(([job]) => job.preferenceSeed),
+    ).toEqual([updated.preferenceSeed, updated.preferenceSeed]);
+  });
+
   it("replaces buffered capacity when preferences change", async () => {
     const game = gameState({
       round: {
@@ -283,6 +346,110 @@ describe("GameService challenger buffer", () => {
         "photographic portraits of clearly adult alternative women",
       ),
     );
+  });
+
+  it("replaces buffered capacity when only inspiration mode changes", async () => {
+    const profile = preferenceProfileFromSeed(
+      "industrial, gothic, natural, and surprising",
+    );
+    const game = gameState({
+      preferenceProfile: profile,
+      round: {
+        ...gameState().round,
+        retainedCandidateId: "left",
+        winStreak: 1,
+      },
+    });
+    const context = serviceFor({
+      game,
+      challengers: challengerState(game),
+      bufferTarget: 2,
+      createId: ids("adaptive-1", "adaptive-2"),
+    });
+
+    await context.service.updatePreferenceSeed(game.preferenceSeed, {
+      ...profile,
+      adaptationMode: "adaptive",
+    });
+
+    expect((await context.challengerRepository.load())?.ready).toEqual([]);
+    expect(
+      context.queue.enqueue.mock.calls.map(
+        ([job]) => job.preferenceProfile?.adaptationMode,
+      ),
+    ).toEqual(["adaptive", "adaptive"]);
+  });
+
+  it("rejects a stale preference editor without overwriting adaptive changes", async () => {
+    const currentSeed = "industrial, gothic, natural, and surprising";
+    const originalProfile = preferenceProfileFromSeed(currentSeed);
+    const game = gameState({
+      preferenceSeed: currentSeed,
+      preferenceProfile: {
+        ...originalProfile,
+        adaptationMode: "adaptive",
+        adaptationSourceWinnerIds: ["adaptive-winner"],
+      },
+    });
+    const context = serviceFor({ game });
+
+    await expect(
+      context.service.updatePreferenceSeed(
+        "stale preferences from the still-open editor",
+        preferenceProfileFromSeed(
+          "stale preferences from the still-open editor",
+        ),
+        originalProfile,
+      ),
+    ).rejects.toThrow(
+      "Preferences changed while this editor was open. Reopen Preferences and try again.",
+    );
+
+    await expect(context.gameRepository.load()).resolves.toEqual(game);
+    expect(context.queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a pre-feature profile-less generation work file", async () => {
+    const game = gameState({
+      round: {
+        ...gameState().round,
+        status: "generating",
+        replacingSide: "right",
+        retainedCandidateId: "left",
+      },
+      pendingSelection: {
+        kind: "generation",
+        winnerSide: "left",
+        selectedAt: NOW,
+        generationJobId: "legacy-generation",
+      },
+    });
+    const legacyWork: GenerationJob = {
+      id: "legacy-generation",
+      kind: "challenger",
+      createdAt: NOW,
+      roundNumber: game.round.roundNumber,
+      winnerSide: "left",
+      retainedWinner: game.round.leftCandidate,
+      rejectedCandidate: game.round.rightCandidate,
+      selectionHistory: game.history,
+      recentConcepts: ["recent loser concept", "recent winner concept"],
+      preferenceSeed: game.preferenceSeed,
+    };
+    const queue = mailbox();
+    queue.setWork(legacyWork);
+    queue.setResult(completedResult(legacyWork.id));
+    const context = serviceFor({ game, queue });
+
+    const recovered = await context.service.reconcile();
+
+    expect(recovered?.round).toMatchObject({
+      status: "idle",
+      leftCandidate: { id: "left" },
+      rightCandidate: { id: "challenger-legacy-generation" },
+    });
+    expect(context.assets.verify).toHaveBeenCalledOnce();
+    expect(queue.archive).toHaveBeenCalledWith("legacy-generation");
   });
 
   it("discards a completed refill from an earlier preference seed", async () => {

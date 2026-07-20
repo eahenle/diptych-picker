@@ -3,12 +3,14 @@ import {
   beginChampionRetirement,
   beginBufferedSelection,
   beginSelection,
+  applyWinnerPreferenceRevision,
   completeChampionRetirement,
   completeSelection,
   composePreferenceSeed,
   failSelection,
   isSelectionBoundWait,
   mergeServerResult,
+  migrateGameState,
   preferenceProfileFromSeed,
   recentConcepts,
   recoverInterruptedSelection,
@@ -47,11 +49,14 @@ describe("round transitions", () => {
       preferenceProfileFromSeed("prefer strange crafted landscapes"),
     ).toEqual({
       themes: "prefer strange crafted landscapes",
+      inspiration: "",
       mediaTypes: "",
       visualStyle: "",
       colorPalette: "",
       contentLevel: "family-friendly",
       avoid: "",
+      adaptationMode: "static",
+      adaptationSourceWinnerIds: [],
     });
   });
 
@@ -59,15 +64,19 @@ describe("round transitions", () => {
     expect(
       composePreferenceSeed({
         themes: "mythic engineering and strange ecosystems",
+        inspiration: "lean into unusual framing",
         mediaTypes: "large-format photography, linocut",
         visualStyle: "tactile, cinematic, austere",
         colorPalette: "ultraviolet, copper, oxblood",
         contentLevel: "adult-allowed",
         avoid: "cute mascots and readable text",
+        adaptationMode: "static",
+        adaptationSourceWinnerIds: [],
       }),
     ).toBe(
       [
         "Themes and subjects: mythic engineering and strange ecosystems",
+        "Inspiration: lean into unusual framing",
         "Preferred media: large-format photography, linocut",
         "Visual style and mood: tactile, cinematic, austere",
         "Color palette: ultraviolet, copper, oxblood",
@@ -75,6 +84,66 @@ describe("round transitions", () => {
         "Avoid or de-emphasize: cute mascots and readable text",
       ].join("\n"),
     );
+  });
+
+  it("only adopts a model-authored winner profile in adaptive mode", () => {
+    const profile = preferenceProfileFromSeed(
+      "prefer strange crafted landscapes",
+    );
+    const winner = {
+      ...candidate("winner", "left"),
+      preferenceRevision: {
+        themes: "prefer severe architectural portraits",
+        inspiration: "Favor low-key lighting and asymmetrical framing.",
+        mediaTypes: "large-format photography",
+        visualStyle: "austere",
+        colorPalette: "oxblood and black",
+        contentLevel: "adult-allowed" as const,
+        avoid: "readable text",
+      },
+    };
+
+    expect(applyWinnerPreferenceRevision(profile, winner)).toBe(profile);
+    expect(
+      applyWinnerPreferenceRevision(
+        { ...profile, adaptationMode: "adaptive" },
+        winner,
+      ),
+    ).toMatchObject({
+      themes: "prefer severe architectural portraits",
+      inspiration: "Favor low-key lighting and asymmetrical framing.",
+      mediaTypes: "large-format photography",
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["winner"],
+    });
+  });
+
+  it("migrates the transitional inspiration-only toggle to profile-wide adaptation", () => {
+    const transitional = game();
+    transitional.preferenceProfile = {
+      themes: "prefer strange crafted landscapes",
+      inspiration: "stark lighting",
+      inspirationBase: "stark lighting",
+      inspirationMode: "adaptive",
+      inspirationSourceWinnerIds: ["winner"],
+      mediaTypes: "photography",
+      visualStyle: "cinematic",
+      colorPalette: "oxblood",
+      contentLevel: "family-friendly",
+      avoid: "readable text",
+    } as unknown as GameState["preferenceProfile"];
+
+    expect(migrateGameState(transitional).preferenceProfile).toEqual({
+      themes: "prefer strange crafted landscapes",
+      inspiration: "stark lighting",
+      mediaTypes: "photography",
+      visualStyle: "cinematic",
+      colorPalette: "oxblood",
+      contentLevel: "family-friendly",
+      avoid: "readable text",
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["winner"],
+    });
   });
 
   it("binds an in-flight selection to exactly one generation job", () => {

@@ -55,7 +55,18 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
   },
   "selectionHistory": [],
   "recentConcepts": ["concept"],
-  "preferenceSeed": "editable preference profile"
+  "preferenceSeed": "editable preference profile",
+  "preferenceProfile": {
+    "themes": "explicit subjects and themes",
+    "inspiration": "optional aesthetic cues",
+    "mediaTypes": "photography",
+    "visualStyle": "cinematic",
+    "colorPalette": "oxblood and ultraviolet",
+    "contentLevel": "family-friendly",
+    "avoid": "readable text",
+    "adaptationMode": "static",
+    "adaptationSourceWinnerIds": []
+  }
 }
 ```
 
@@ -72,7 +83,9 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
 
 The remaining request fields carry the same preference context. A missing `kind` is tolerated as a legacy challenger.
 
-The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
+The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the image proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
+
+New jobs include the structured `preferenceProfile`; legacy jobs may omit it and are treated as Static. In Static mode, omit `preferenceRevision` and preserve every preference field exactly. In Adaptive mode, the worker must add a complete `preferenceRevision` conditioned on the retained winner and selection history. The app adopts that revision only if this generated candidate later wins, records that winner's ID as its source, and rebuilds future generation capacity from the revised profile.
 
 Refill jobs carry the same preference context plus durable session and pinned-winner ownership:
 
@@ -111,11 +124,20 @@ Write this strict JSON object to `<data-root>/agent-work/<jobId>/proposal.json`:
   "concept": "short distinct concept",
   "visualPrompt": "prompt for one standalone square image",
   "styleTags": ["specific visual tag"],
-  "reasoningSummary": "why this challenger tests the learned preference"
+  "reasoningSummary": "why this challenger tests the learned preference",
+  "preferenceRevision": {
+    "themes": "complete revised themes of at least 20 characters",
+    "inspiration": "revised aesthetic cues",
+    "mediaTypes": "revised media",
+    "visualStyle": "revised visual style",
+    "colorPalette": "revised palette",
+    "contentLevel": "family-friendly",
+    "avoid": "revised exclusions"
+  }
 }
 ```
 
-Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. `reasoningSummary` must explain how the proposal follows the authoritative preference seed while staying distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
+The four base proposal fields are always required. `preferenceRevision` must be omitted for Static jobs and is required for Adaptive jobs; it must contain every preference field except the mode and source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed while staying distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
 
 ## Completed result
 
@@ -130,7 +152,16 @@ Every proposal string, including each `styleTags` entry, is trimmed and must con
     "concept": "concept",
     "visualPrompt": "prompt",
     "styleTags": ["tag"],
-    "reasoningSummary": "reason"
+    "reasoningSummary": "reason",
+    "preferenceRevision": {
+      "themes": "complete revised themes of at least 20 characters",
+      "inspiration": "revised aesthetic cues",
+      "mediaTypes": "revised media",
+      "visualStyle": "revised visual style",
+      "colorPalette": "revised palette",
+      "contentLevel": "family-friendly",
+      "avoid": "revised exclusions"
+    }
   },
   "asset": {
     "candidateId": "challenger-job-id",

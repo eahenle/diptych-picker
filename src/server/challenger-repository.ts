@@ -31,6 +31,60 @@ interface LockOwner {
   acquiredAt: string;
 }
 
+const preferenceRevisionSchema = z
+  .object({
+    themes: z
+      .string()
+      .max(2_000)
+      .refine((value) => value.trim().length >= 20),
+    inspiration: z.string().max(1_000),
+    mediaTypes: z.string().max(500),
+    visualStyle: z.string().max(500),
+    colorPalette: z.string().max(500),
+    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
+    avoid: z.string().max(800),
+  })
+  .strict();
+
+const currentPreferenceProfileSchema = preferenceRevisionSchema.extend({
+  adaptationMode: z.enum(["static", "adaptive"]),
+  adaptationSourceWinnerIds: z.array(z.string().trim().min(1).max(200)).max(12),
+});
+
+const transitionalPreferenceProfileSchema = preferenceRevisionSchema
+  .extend({
+    inspirationBase: z.string().max(1_000).optional(),
+    inspirationMode: z.enum(["static", "adaptive"]),
+    inspirationSourceWinnerIds: z
+      .array(z.string().trim().min(1).max(200))
+      .max(12)
+      .optional(),
+    adaptationMode: z.enum(["static", "adaptive"]).optional(),
+    adaptationSourceWinnerIds: z
+      .array(z.string().trim().min(1).max(200))
+      .max(12)
+      .optional(),
+  })
+  .transform((profile) => ({
+    themes: profile.themes,
+    inspiration: profile.inspiration,
+    mediaTypes: profile.mediaTypes,
+    visualStyle: profile.visualStyle,
+    colorPalette: profile.colorPalette,
+    contentLevel: profile.contentLevel,
+    avoid: profile.avoid,
+    adaptationMode: profile.adaptationMode ?? profile.inspirationMode,
+    adaptationSourceWinnerIds:
+      profile.adaptationSourceWinnerIds ??
+      profile.inspirationSourceWinnerIds ??
+      [],
+  }));
+
+const preferenceProfileSchema = z.union([
+  currentPreferenceProfileSchema,
+  transitionalPreferenceProfileSchema,
+]);
+
 const candidateSchema = z
   .object({
     id: z.string().min(1),
@@ -41,6 +95,7 @@ const candidateSchema = z
     createdAt: z.string().min(1),
     winCount: z.number().int().nonnegative(),
     reasoningSummary: z.string().optional(),
+    preferenceRevision: preferenceRevisionSchema.optional(),
   })
   .strict();
 
@@ -90,6 +145,7 @@ const refillGenerationJobSnapshotSchema = z
     selectionHistory: z.array(selectionHistorySchema),
     recentConcepts: z.array(z.string().min(1)),
     preferenceSeed: z.string().min(1),
+    preferenceProfile: preferenceProfileSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
     pinnedWinnerId: z.string().min(1),
   })

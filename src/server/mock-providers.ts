@@ -67,10 +67,42 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
 
     for (let offset = 0; offset < concepts.length; offset += 1) {
       const proposal = concepts[(start + offset) % concepts.length];
-      if (!recent.has(proposal.concept.toLowerCase())) return proposal;
+      if (!recent.has(proposal.concept.toLowerCase()))
+        return this.withPreferenceRevision(proposal, input);
     }
 
-    return concepts[start];
+    return this.withPreferenceRevision(concepts[start], input);
+  }
+
+  private withPreferenceRevision(
+    proposal: ProposedChallenger,
+    input: ChallengerPromptInput,
+  ): ProposedChallenger {
+    if (input.preferenceProfile.adaptationMode !== "adaptive") return proposal;
+    const priorWinner = input.selectionHistory.at(-1)?.winnerConcept;
+    const fields = {
+      themes: input.preferenceProfile.themes,
+      inspiration: input.preferenceProfile.inspiration,
+      mediaTypes: input.preferenceProfile.mediaTypes,
+      visualStyle: input.preferenceProfile.visualStyle,
+      colorPalette: input.preferenceProfile.colorPalette,
+      contentLevel: input.preferenceProfile.contentLevel,
+      avoid: input.preferenceProfile.avoid,
+    };
+    return {
+      ...proposal,
+      preferenceRevision: {
+        ...fields,
+        inspiration: `Favor ${proposal.styleTags.join(", ")} treatments${
+          priorWinner
+            ? ` that evolve the winning direction of ${priorWinner}`
+            : ""
+        } while continuing to explore distinct compositions.`,
+        visualStyle: [fields.visualStyle, ...proposal.styleTags]
+          .filter(Boolean)
+          .join(", "),
+      },
+    };
   }
 }
 

@@ -2,6 +2,7 @@ import type {
   BufferHealth,
   Candidate,
   DisplayedEloRatings,
+  PreferenceProfile,
   SelectionHistory,
   Side,
 } from "./game";
@@ -48,6 +49,7 @@ export interface RefillGenerationJobSnapshot {
   selectionHistory: SelectionHistory[];
   recentConcepts: string[];
   preferenceSeed: string;
+  preferenceProfile?: PreferenceProfile;
   sessionId: string;
   pinnedWinnerId: string;
 }

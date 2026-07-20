@@ -18,6 +18,60 @@ const jobIdSchema = z
   .min(1)
   .regex(GENERATION_JOB_ID_PATTERN, "Invalid generation job ID");
 
+const preferenceRevisionSchema = z
+  .object({
+    themes: z
+      .string()
+      .refine((value) => value.trim().length >= 20)
+      .max(2_000),
+    inspiration: z.string().max(1_000),
+    mediaTypes: z.string().max(500),
+    visualStyle: z.string().max(500),
+    colorPalette: z.string().max(500),
+    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
+    avoid: z.string().max(800),
+  })
+  .strict();
+
+const currentPreferenceProfileSchema = preferenceRevisionSchema.extend({
+  adaptationMode: z.enum(["static", "adaptive"]),
+  adaptationSourceWinnerIds: z.array(nonBlankStringSchema.max(200)).max(12),
+});
+
+const transitionalPreferenceProfileSchema = preferenceRevisionSchema
+  .extend({
+    inspirationBase: z.string().optional(),
+    inspirationMode: z.enum(["static", "adaptive"]),
+    inspirationSourceWinnerIds: z
+      .array(nonBlankStringSchema.max(200))
+      .max(12)
+      .optional(),
+    adaptationMode: z.enum(["static", "adaptive"]).optional(),
+    adaptationSourceWinnerIds: z
+      .array(nonBlankStringSchema.max(200))
+      .max(12)
+      .optional(),
+  })
+  .transform((profile) => ({
+    themes: profile.themes,
+    inspiration: profile.inspiration,
+    mediaTypes: profile.mediaTypes,
+    visualStyle: profile.visualStyle,
+    colorPalette: profile.colorPalette,
+    contentLevel: profile.contentLevel,
+    avoid: profile.avoid,
+    adaptationMode: profile.adaptationMode ?? profile.inspirationMode,
+    adaptationSourceWinnerIds:
+      profile.adaptationSourceWinnerIds ??
+      profile.inspirationSourceWinnerIds ??
+      [],
+  }));
+
+const preferenceProfileSchema = z.union([
+  currentPreferenceProfileSchema,
+  transitionalPreferenceProfileSchema,
+]);
+
 const candidateSchema = z
   .object({
     id: nonBlankStringSchema,
@@ -28,6 +82,7 @@ const candidateSchema = z
     createdAt: timestampSchema,
     winCount: z.number().int().nonnegative(),
     reasoningSummary: nonBlankStringSchema.optional(),
+    preferenceRevision: preferenceRevisionSchema.optional(),
   })
   .strict();
 
@@ -53,6 +108,7 @@ const generationJobFields = {
   selectionHistory: z.array(selectionHistorySchema),
   recentConcepts: z.array(nonBlankStringSchema),
   preferenceSeed: nonBlankStringSchema,
+  preferenceProfile: preferenceProfileSchema.optional(),
 };
 
 const challengerGenerationJobSchema = z
@@ -103,6 +159,7 @@ const proposedChallengerSchema = z
     visualPrompt: nonBlankStringSchema,
     styleTags: z.array(nonBlankStringSchema),
     reasoningSummary: nonBlankStringSchema,
+    preferenceRevision: preferenceRevisionSchema.optional(),
   })
   .strict();
 
