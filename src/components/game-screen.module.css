@@ -370,6 +370,7 @@
   margin: 18px auto 0;
   display: flex;
   justify-content: center;
+  gap: 10px;
 }
 
 .tieButton {
@@ -402,6 +403,12 @@
 
 .tieButton kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.bothLoseButton:hover:not(:disabled),
+.bothLoseButton:focus-visible {
+  border-color: #b66d62;
+  color: #f2d7d2;
 }
 .shortcuts kbd {
   display: inline-grid;

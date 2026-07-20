@@ -186,6 +186,7 @@ export class InitialGameService {
           losses: 0,
           source,
           poolMember: source === "curated",
+          poolEligible: true,
           lastServedAt: null,
         };
       });

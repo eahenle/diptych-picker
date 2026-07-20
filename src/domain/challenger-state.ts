@@ -20,6 +20,7 @@ export interface CandidateRating {
   losses: number;
   source: "curated" | "generated";
   poolMember: boolean;
+  poolEligible?: boolean;
   lastServedAt: string | null;
   favorite?: boolean;
 }
@@ -52,7 +53,7 @@ export interface RefillGenerationJobSnapshot {
   preferenceProfile?: PreferenceProfile;
   sessionId: string;
   pinnedWinnerId: string;
-  comparisonOutcome?: "tie";
+  comparisonOutcome?: "tie" | "both-lose";
 }
 
 export interface WinningComparisonReceipt {
@@ -72,8 +73,16 @@ export interface TieComparisonReceipt {
   rightId: string;
 }
 
+export interface BothLoseComparisonReceipt {
+  kind: "both-lose";
+  selectedAt: string;
+  roundNumber: number;
+  leftId: string;
+  rightId: string;
+}
+
 export type PendingComparisonReceipt =
-  WinningComparisonReceipt | TieComparisonReceipt;
+  WinningComparisonReceipt | TieComparisonReceipt | BothLoseComparisonReceipt;
 
 export interface PendingSelectionBaseline {
   ready: BufferedCandidate[];
@@ -145,8 +154,18 @@ export interface TieComparisonHistoryEntry {
   right: ComparisonHistoryCandidate;
 }
 
+export interface BothLoseComparisonHistoryEntry {
+  outcome: "both-lose";
+  decisionNumber: number;
+  selectedAt: string;
+  left: ComparisonHistoryCandidate;
+  right: ComparisonHistoryCandidate;
+}
+
 export type ComparisonHistoryEntry =
-  WinningComparisonHistoryEntry | TieComparisonHistoryEntry;
+  | WinningComparisonHistoryEntry
+  | TieComparisonHistoryEntry
+  | BothLoseComparisonHistoryEntry;
 
 export interface FallbackDrawOptions {
   now: string;
@@ -238,26 +257,24 @@ export function summarizeComparisonHistory(
   };
 
   return history
-    .map((selection, index): ComparisonHistoryEntry =>
-      selection.outcome === "tie"
-        ? {
-            outcome: "tie",
-            decisionNumber: index + 1,
-            selectedAt: selection.selectedAt,
-            left: displayCandidate(selection.leftId, selection.leftConcept),
-            right: displayCandidate(selection.rightId, selection.rightConcept),
-          }
-        : {
-            outcome: "selection",
-            decisionNumber: index + 1,
-            selectedAt: selection.selectedAt,
-            winner: displayCandidate(
-              selection.winnerId,
-              selection.winnerConcept,
-            ),
-            loser: displayCandidate(selection.loserId, selection.loserConcept),
-          },
-    )
+    .map((selection, index): ComparisonHistoryEntry => {
+      if (selection.outcome === "tie" || selection.outcome === "both-lose") {
+        return {
+          outcome: selection.outcome,
+          decisionNumber: index + 1,
+          selectedAt: selection.selectedAt,
+          left: displayCandidate(selection.leftId, selection.leftConcept),
+          right: displayCandidate(selection.rightId, selection.rightConcept),
+        };
+      }
+      return {
+        outcome: "selection",
+        decisionNumber: index + 1,
+        selectedAt: selection.selectedAt,
+        winner: displayCandidate(selection.winnerId, selection.winnerConcept),
+        loser: displayCandidate(selection.loserId, selection.loserConcept),
+      };
+    })
     .toReversed()
     .slice(0, Math.max(0, Math.floor(limit)));
 }
@@ -316,7 +333,12 @@ export function admitGeneratedCandidate(
   const candidate = repairedRatings.find(
     (item) => item.candidate.id === candidateId,
   );
-  if (!candidate || candidate.source !== "generated" || candidate.poolMember) {
+  if (
+    !candidate ||
+    candidate.source !== "generated" ||
+    candidate.poolMember ||
+    candidate.poolEligible === false
+  ) {
     return repairedState;
   }
 
@@ -352,7 +374,12 @@ export function backfillGeneratedPool(
   poolMaximum = DEFAULT_POOL_MAXIMUM,
 ): ChallengerState {
   return state.ratings
-    .filter((item) => item.source === "generated" && !item.poolMember)
+    .filter(
+      (item) =>
+        item.source === "generated" &&
+        !item.poolMember &&
+        item.poolEligible !== false,
+    )
     .map((item, index) => ({ item, index }))
     .sort(
       (left, right) =>

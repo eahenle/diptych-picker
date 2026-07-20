@@ -195,6 +195,46 @@ test("declares an equal-Elo tie and replaces both active candidates", async ({
   });
 });
 
+test("rejects both active candidates and removes them from the pool", async ({
+  page,
+  request,
+}) => {
+  const originalIds = await Promise.all([
+    page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
+    page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
+  ]);
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/select") &&
+      response.request().method() === "POST",
+  );
+
+  await page.getByRole("button", { name: /both lose/i }).click();
+  const response = await responsePromise;
+  expect(response.status()).toBe(200);
+  expect(response.request().postDataJSON()).toEqual({
+    outcome: "both-lose",
+    roundNumber: 1,
+  });
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
+
+  const historyResponse = await request.get("/api/game/history");
+  expect(historyResponse.status()).toBe(200);
+  expect((await historyResponse.json()).entries[0]).toMatchObject({
+    outcome: "both-lose",
+    left: { id: originalIds[0] },
+    right: { id: originalIds[1] },
+  });
+
+  expect((await request.get("/api/game")).status()).toBe(200);
+  const leaderboardResponse = await request.get("/api/game/leaderboard");
+  const poolIds = (await leaderboardResponse.json()).entries.map(
+    (entry: { candidate: { id: string } }) => entry.candidate.id,
+  );
+  expect(poolIds).not.toContain(originalIds[0]);
+  expect(poolIds).not.toContain(originalIds[1]);
+});
+
 test("loads a distinct pair from the pool after tying with an empty queue", async ({
   page,
 }) => {

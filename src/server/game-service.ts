@@ -16,12 +16,14 @@ import {
 } from "@/domain/challenger-state";
 import {
   beginChampionRetirement,
+  beginBothLose,
   beginBufferedSelection,
   beginTie,
   applyWinnerPreferenceRevision,
   candidateAt,
   composePreferenceSeed,
   completeChampionRetirement,
+  completeBothLose,
   completeSelection,
   completeTie,
   failSelection,
@@ -64,7 +66,7 @@ interface RefillContext {
   winnerSide: Side;
   retainedWinner: Candidate;
   rejectedCandidate: Candidate;
-  comparisonOutcome?: "tie";
+  comparisonOutcome?: "tie" | "both-lose";
 }
 
 interface CapacityResult {
@@ -289,14 +291,31 @@ export class GameService {
   }
 
   async tie(expectedRoundNumber: number): Promise<GameState> {
+    return this.replacePair(expectedRoundNumber, "tie");
+  }
+
+  async bothLose(expectedRoundNumber: number): Promise<GameState> {
+    return this.replacePair(expectedRoundNumber, "both-lose");
+  }
+
+  private async replacePair(
+    expectedRoundNumber: number,
+    outcome: "tie" | "both-lose",
+  ): Promise<GameState> {
     return this.withStateLocks(async () => {
       const current = await this.gameRepository.load();
       if (!current) {
-        throw new MissingGameError("Start a game before declaring a tie");
+        throw new MissingGameError(
+          outcome === "tie"
+            ? "Start a game before declaring a tie"
+            : "Start a game before rejecting both candidates",
+        );
       }
       if (current.round.roundNumber !== expectedRoundNumber) {
         throw new SelectionConflictError(
-          "The round changed before this tie arrived",
+          outcome === "tie"
+            ? "The round changed before this tie arrived"
+            : "The round changed before this dual rejection arrived",
         );
       }
 
@@ -309,7 +328,10 @@ export class GameService {
 
       const selectedAt = this.now();
       const referenceSide = this.tieReferenceSide(current, challengerState);
-      const inFlight = beginTie(current, referenceSide, selectedAt);
+      const inFlight =
+        outcome === "tie"
+          ? beginTie(current, referenceSide, selectedAt)
+          : beginBothLose(current, referenceSide, selectedAt);
       if (!inFlight) {
         throw new SelectionConflictError(
           "A challenger is already being generated",
@@ -318,33 +340,41 @@ export class GameService {
 
       const left = current.round.leftCandidate;
       const right = current.round.rightCandidate;
-      let nextChallengers = this.recordTie(
-        {
-          ...challengerState,
-          pendingSelectionBaseline:
-            this.pendingSelectionBaseline(challengerState),
-        },
-        left,
-        right,
-        {
-          kind: "tie",
-          selectedAt,
-          roundNumber: current.round.roundNumber,
-          leftId: left.id,
-          rightId: right.id,
-        },
-      );
+      const receipt: PendingComparisonReceipt = {
+        kind: outcome,
+        selectedAt,
+        roundNumber: current.round.roundNumber,
+        leftId: left.id,
+        rightId: right.id,
+      };
+      const baseline = {
+        ...challengerState,
+        pendingSelectionBaseline:
+          this.pendingSelectionBaseline(challengerState),
+      };
+      let nextChallengers =
+        outcome === "tie"
+          ? this.recordTie(baseline, left, right, receipt)
+          : this.recordBothLose(baseline, left, right, receipt);
       let preparedReadyHeads: BufferedCandidate[] = [];
       let nextGame = inFlight;
-      const replacements = this.drawTieReplacements(nextChallengers, current);
+      const replacements = this.drawPairReplacements(nextChallengers, current);
       nextChallengers = replacements.state;
       if (replacements.candidates) {
         preparedReadyHeads = replacements.readyHeads;
-        nextGame = completeTie(
-          inFlight,
-          replacements.candidates[0],
-          replacements.candidates[1],
+        nextGame =
+          outcome === "tie"
+            ? completeTie(inFlight, ...replacements.candidates)
+            : completeBothLose(inFlight, ...replacements.candidates);
+      }
+
+      if (outcome === "both-lose" && nextGame.round.status === "idle") {
+        const adapted = this.applyAdaptivePreferences(
+          nextGame,
+          nextChallengers,
         );
+        nextGame = adapted.game;
+        nextChallengers = adapted.challengers;
       }
 
       const reference = candidateAt(current.round, referenceSide);
@@ -357,7 +387,7 @@ export class GameService {
         winnerSide: referenceSide,
         retainedWinner: reference,
         rejectedCandidate: contrasted,
-        comparisonOutcome: "tie",
+        comparisonOutcome: outcome,
       });
       const durableChallengers =
         preparedReadyHeads.length > 0
@@ -866,6 +896,40 @@ export class GameService {
     return admitGeneratedCandidate(withLeft, right.id, this.config.poolMaximum);
   }
 
+  private recordBothLose(
+    state: ChallengerState,
+    left: Candidate,
+    right: Candidate,
+    receipt: PendingComparisonReceipt,
+  ): ChallengerState {
+    let ratings = state.ratings;
+    for (const candidate of [left, right]) {
+      if (!ratings.some((item) => item.candidate.id === candidate.id)) {
+        const source = this.sourceOf(candidate);
+        ratings = [
+          ...ratings,
+          this.newRating(candidate, source, source === "curated"),
+        ];
+      }
+    }
+
+    const rejectedIds = new Set([left.id, right.id]);
+    return {
+      ...state,
+      pendingComparison: receipt,
+      ratings: ratings.map((item) =>
+        rejectedIds.has(item.candidate.id)
+          ? {
+              ...item,
+              losses: item.losses + 1,
+              poolMember: false,
+              poolEligible: false,
+            }
+          : item,
+      ),
+    };
+  }
+
   private tieReferenceSide(game: GameState, state: ChallengerState): Side {
     const leftRating =
       state.ratings.find(
@@ -902,7 +966,8 @@ export class GameService {
       !pending ||
       (pending.kind !== "buffer" &&
         pending.kind !== "retirement" &&
-        pending.kind !== "tie")
+        pending.kind !== "tie" &&
+        pending.kind !== "both-lose")
     ) {
       if (
         challengers.pendingComparison === null &&
@@ -920,9 +985,9 @@ export class GameService {
     }
 
     const receipt: PendingComparisonReceipt =
-      pending.kind === "tie"
+      pending.kind === "tie" || pending.kind === "both-lose"
         ? {
-            kind: "tie",
+            kind: pending.kind,
             selectedAt: pending.selectedAt,
             roundNumber: game.round.roundNumber,
             leftId: game.round.leftCandidate.id,
@@ -952,12 +1017,19 @@ export class GameService {
             game.round.rightCandidate,
             receipt,
           )
-        : this.recordComparison(
-            baseline,
-            candidateAt(game.round, pending.winnerSide),
-            candidateAt(game.round, oppositeSide(pending.winnerSide)),
-            receipt,
-          );
+        : pending.kind === "both-lose"
+          ? this.recordBothLose(
+              baseline,
+              game.round.leftCandidate,
+              game.round.rightCandidate,
+              receipt,
+            )
+          : this.recordComparison(
+              baseline,
+              candidateAt(game.round, pending.winnerSide),
+              candidateAt(game.round, oppositeSide(pending.winnerSide)),
+              receipt,
+            );
     await this.challengerRepository.save(compared);
     return compared;
   }
@@ -979,14 +1051,17 @@ export class GameService {
       };
     }
 
-    if (game.pendingSelection?.kind === "tie") {
+    if (
+      game.pendingSelection?.kind === "tie" ||
+      game.pendingSelection?.kind === "both-lose"
+    ) {
       const referenceSide = game.pendingSelection.referenceSide;
       return {
         game,
         winnerSide: referenceSide,
         retainedWinner: candidateAt(game.round, referenceSide),
         rejectedCandidate: candidateAt(game.round, oppositeSide(referenceSide)),
-        comparisonOutcome: "tie",
+        comparisonOutcome: game.pendingSelection.kind,
       };
     }
 
@@ -1002,7 +1077,9 @@ export class GameService {
 
     const lastSelection = game.history.at(-1);
     const rejectedCandidate =
-      lastSelection && lastSelection.outcome !== "tie"
+      lastSelection &&
+      (lastSelection.outcome === undefined ||
+        lastSelection.outcome === "selection")
         ? challengers.ratings.find(
             ({ candidate }) => candidate.id === lastSelection.loserId,
           )?.candidate
@@ -1046,23 +1123,34 @@ export class GameService {
       return { game: adapted.game, challengers: finalized };
     }
 
-    if (game.pendingSelection.kind === "tie") {
-      const replacements = this.drawTieReplacements(challengers, game);
+    if (
+      game.pendingSelection.kind === "tie" ||
+      game.pendingSelection.kind === "both-lose"
+    ) {
+      const outcome = game.pendingSelection.kind;
+      const replacements = this.drawPairReplacements(challengers, game);
       if (!replacements.candidates) {
         if (replacements.state !== challengers) {
           await this.challengerRepository.save(replacements.state);
         }
         return { game, challengers: replacements.state };
       }
-      const completed = completeTie(game, ...replacements.candidates);
-      await this.gameRepository.save(completed);
+      const completed =
+        outcome === "tie"
+          ? completeTie(game, ...replacements.candidates)
+          : completeBothLose(game, ...replacements.candidates);
+      const adapted =
+        outcome === "both-lose"
+          ? this.applyAdaptivePreferences(completed, replacements.state)
+          : { game: completed, challengers: replacements.state };
+      await this.gameRepository.save(adapted.game);
       const finalized = {
-        ...replacements.state,
+        ...adapted.challengers,
         pendingComparison: null,
         pendingSelectionBaseline: null,
       };
       await this.challengerRepository.save(finalized);
-      return { game: completed, challengers: finalized };
+      return { game: adapted.game, challengers: finalized };
     }
 
     if (game.pendingSelection.kind !== "buffer") {
@@ -1119,20 +1207,35 @@ export class GameService {
     ) {
       return { game, challengers };
     }
-    const winner = challengers.ratings.find(
-      ({ candidate }) => candidate.id === selection.winnerId,
-    );
-    const rejected = challengers.ratings.find(
-      ({ candidate }) => candidate.id === selection.loserId,
-    );
-    let nextProfile = winner
-      ? applyWinnerPreferenceRevision(profile, winner.candidate)
-      : profile;
-    if (rejected?.source === "generated") {
-      nextProfile = recordRejectedPreferenceEvidence(
-        nextProfile,
-        rejected.candidate.id,
+    let nextProfile = profile;
+    if (selection.outcome === "both-lose") {
+      for (const rejectedId of [selection.leftId, selection.rightId]) {
+        const rejected = challengers.ratings.find(
+          ({ candidate }) => candidate.id === rejectedId,
+        );
+        if (rejected?.source === "generated") {
+          nextProfile = recordRejectedPreferenceEvidence(
+            nextProfile,
+            rejected.candidate.id,
+          );
+        }
+      }
+    } else {
+      const winner = challengers.ratings.find(
+        ({ candidate }) => candidate.id === selection.winnerId,
       );
+      const rejected = challengers.ratings.find(
+        ({ candidate }) => candidate.id === selection.loserId,
+      );
+      nextProfile = winner
+        ? applyWinnerPreferenceRevision(profile, winner.candidate)
+        : profile;
+      if (rejected?.source === "generated") {
+        nextProfile = recordRejectedPreferenceEvidence(
+          nextProfile,
+          rejected.candidate.id,
+        );
+      }
     }
     if (nextProfile === profile) return { game, challengers };
     const composedProfile = composePreferenceSeed(profile);
@@ -1175,7 +1278,7 @@ export class GameService {
     const recentCandidateIds = game.history
       .slice(-10)
       .flatMap((decision) =>
-        decision.outcome === "tie"
+        decision.outcome === "tie" || decision.outcome === "both-lose"
           ? [decision.leftId, decision.rightId]
           : [decision.winnerId, decision.loserId],
       );
@@ -1192,7 +1295,7 @@ export class GameService {
     });
   }
 
-  private drawTieReplacements(
+  private drawPairReplacements(
     state: ChallengerState,
     game: GameState,
   ): {
@@ -1215,7 +1318,7 @@ export class GameService {
     const recentCandidateIds = game.history
       .slice(-10)
       .flatMap((decision) =>
-        decision.outcome === "tie"
+        decision.outcome === "tie" || decision.outcome === "both-lose"
           ? [decision.leftId, decision.rightId]
           : [decision.winnerId, decision.loserId],
       );
@@ -1307,6 +1410,7 @@ export class GameService {
       losses: 0,
       source,
       poolMember,
+      poolEligible: true,
       lastServedAt: null,
     };
   }

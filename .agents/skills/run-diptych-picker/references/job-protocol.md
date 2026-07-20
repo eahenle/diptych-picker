@@ -90,6 +90,8 @@ New jobs include the structured `preferenceProfile`; legacy jobs may omit it and
 
 Tie-triggered refill jobs include `"comparisonOutcome": "tie"`. Their compatibility fields use the lower-rated tied candidate as `retainedWinner` (or the left candidate when ratings are equal) and the other tied candidate as `rejectedCandidate`, but both are neutral preference context. The latest history item is an explicit tie with left/right candidate metadata; it must not be interpreted as positive or negative adaptive evidence.
 
+Dual-rejection refill jobs include `"comparisonOutcome": "both-lose"`. Their compatibility fields still name one candidate as `retainedWinner`, but neither candidate won. Treat both candidates in the latest `both-lose` history item as negative preference evidence, avoid both rejected concepts, and do not carry either candidate's identity or likeness forward.
+
 Refill jobs carry the same preference context plus durable session and pinned-winner ownership:
 
 ```json
@@ -102,7 +104,7 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 }
 ```
 
-`pinnedWinnerId` must equal `retainedWinner.id`. `comparisonOutcome` is optional and currently appears only as `tie`; ordinary refill jobs omit it. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
+`pinnedWinnerId` must equal `retainedWinner.id`. `comparisonOutcome` is optional and appears as `tie` or `both-lose`; ordinary refill jobs omit it. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
 
 At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 

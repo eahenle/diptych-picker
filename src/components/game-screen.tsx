@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   beginChampionRetirement,
+  beginBothLose,
   beginSelection,
   beginTie,
   isSelectionBoundWait,
@@ -51,6 +52,7 @@ interface ActiveSelection {
   generationJobId: string | null;
   retirement: boolean;
   tie: boolean;
+  bothLose: boolean;
   controller: AbortController;
   polling: boolean;
   retryAttempt: number;
@@ -120,16 +122,17 @@ function matchingPendingSelection(
   selection: ActiveSelection,
 ): boolean {
   const pending = server.pendingSelection;
-  if (selection.tie) {
+  if (selection.tie || selection.bothLose) {
     return (
       server.round.roundNumber === selection.expectedRound &&
-      pending?.kind === "tie"
+      pending?.kind === (selection.tie ? "tie" : "both-lose")
     );
   }
   if (
     server.round.roundNumber !== selection.expectedRound ||
     !pending ||
     pending.kind === "tie" ||
+    pending.kind === "both-lose" ||
     pending.winnerSide !== selection.winnerSide
   ) {
     return false;
@@ -157,9 +160,9 @@ function matchingCompletedSelection(
     return false;
   }
   const history = server.history.at(-1);
-  if (selection.tie) {
+  if (selection.tie || selection.bothLose) {
     return (
-      history?.outcome === "tie" &&
+      history?.outcome === (selection.tie ? "tie" : "both-lose") &&
       history.leftId === selection.original.round.leftCandidate.id &&
       history.rightId === selection.original.round.rightCandidate.id
     );
@@ -174,6 +177,7 @@ function matchingCompletedSelection(
       : selection.original.round.leftCandidate;
   return (
     history?.outcome !== "tie" &&
+    history?.outcome !== "both-lose" &&
     history?.winnerId === winner.id &&
     history.loserId === loser.id
   );
@@ -592,7 +596,8 @@ export function GameScreen() {
       token: crypto.randomUUID(),
       original: game,
       winnerSide:
-        game.pendingSelection.kind === "tie"
+        game.pendingSelection.kind === "tie" ||
+        game.pendingSelection.kind === "both-lose"
           ? game.pendingSelection.referenceSide
           : game.pendingSelection.winnerSide,
       expectedRound: game.round.roundNumber,
@@ -602,6 +607,7 @@ export function GameScreen() {
           : null,
       retirement: game.pendingSelection.kind === "retirement",
       tie: game.pendingSelection.kind === "tie",
+      bothLose: game.pendingSelection.kind === "both-lose",
       controller: new AbortController(),
       polling: false,
       retryAttempt: 0,
@@ -636,6 +642,7 @@ export function GameScreen() {
         generationJobId: null,
         retirement,
         tie: false,
+        bothLose: false,
         controller: new AbortController(),
         polling: false,
         retryAttempt: 0,
@@ -666,7 +673,7 @@ export function GameScreen() {
           selection.retirement = true;
         }
         if (matchingCompletedSelection(server, selection)) {
-          if (selection.retirement || selection.tie) {
+          if (selection.retirement || selection.tie || selection.bothLose) {
             await preloadChangedAssets(
               current,
               server,
@@ -703,10 +710,13 @@ export function GameScreen() {
     [commitGame, startPolling],
   );
 
-  const submitTie = useCallback(
-    async (current: GameState) => {
+  const submitPairDecision = useCallback(
+    async (current: GameState, outcome: "tie" | "both-lose") => {
       const selectedAt = new Date().toISOString();
-      const optimistic = beginTie(current, "left", selectedAt);
+      const optimistic =
+        outcome === "tie"
+          ? beginTie(current, "left", selectedAt)
+          : beginBothLose(current, "left", selectedAt);
       if (!optimistic) return;
 
       selectionLocked.current = true;
@@ -719,7 +729,8 @@ export function GameScreen() {
         expectedRound: current.round.roundNumber,
         generationJobId: null,
         retirement: false,
-        tie: true,
+        tie: outcome === "tie",
+        bothLose: outcome === "both-lose",
         controller: new AbortController(),
         polling: false,
         retryAttempt: 0,
@@ -732,7 +743,7 @@ export function GameScreen() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            outcome: "tie",
+            outcome,
             roundNumber: current.round.roundNumber,
           }),
           signal: selection.controller.signal,
@@ -788,8 +799,20 @@ export function GameScreen() {
     ) {
       return;
     }
-    void submitTie(current);
-  }, [submitTie]);
+    void submitPairDecision(current, "tie");
+  }, [submitPairDecision]);
+
+  const bothLose = useCallback(() => {
+    const current = gameRef.current;
+    if (
+      !current ||
+      selectionLocked.current ||
+      current.round.status === "generating"
+    ) {
+      return;
+    }
+    void submitPairDecision(current, "both-lose");
+  }, [submitPairDecision]);
 
   const retrySelection = useCallback(() => {
     const failed = gameRef.current;
@@ -845,7 +868,8 @@ export function GameScreen() {
             token: crypto.randomUUID(),
             original: server,
             winnerSide:
-              server.pendingSelection.kind === "tie"
+              server.pendingSelection.kind === "tie" ||
+              server.pendingSelection.kind === "both-lose"
                 ? server.pendingSelection.referenceSide
                 : server.pendingSelection.winnerSide,
             expectedRound: server.round.roundNumber,
@@ -855,6 +879,7 @@ export function GameScreen() {
                 : null,
             retirement: server.pendingSelection.kind === "retirement",
             tie: server.pendingSelection.kind === "tie",
+            bothLose: server.pendingSelection.kind === "both-lose",
             controller: new AbortController(),
             polling: false,
             retryAttempt: 0,
@@ -869,8 +894,12 @@ export function GameScreen() {
         if (server.round.status === "error" && server.pendingSelection) {
           setReconcilingRetry(false);
           commitGame(server);
-          if (server.pendingSelection.kind === "tie") void submitTie(server);
-          else if (server.pendingSelection.kind === "generation")
+          if (
+            server.pendingSelection.kind === "tie" ||
+            server.pendingSelection.kind === "both-lose"
+          ) {
+            void submitPairDecision(server, server.pendingSelection.kind);
+          } else if (server.pendingSelection.kind === "generation")
             void submitSelection(server, server.pendingSelection.winnerSide);
           else selectionLocked.current = false;
           return;
@@ -896,7 +925,13 @@ export function GameScreen() {
     };
 
     void reconcile();
-  }, [commitGame, commitStartState, startPolling, submitSelection, submitTie]);
+  }, [
+    commitGame,
+    commitStartState,
+    startPolling,
+    submitPairDecision,
+    submitSelection,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -918,10 +953,12 @@ export function GameScreen() {
       if (key === "a" || key === "1") void select("left");
       if (key === "b" || key === "2") void select("right");
       if (key === "c" || key === "3") void tie();
+      if (key === "d" || key === "4") void bothLose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    bothLose,
     historyOpen,
     inspectedCandidate,
     leaderboardOpen,
@@ -1001,7 +1038,7 @@ export function GameScreen() {
       );
       setHistoryEntries((entries) =>
         entries.map((entry) =>
-          entry.outcome === "tie"
+          entry.outcome === "tie" || entry.outcome === "both-lose"
             ? {
                 ...entry,
                 left:
@@ -1287,7 +1324,10 @@ export function GameScreen() {
     status === "generating" && game?.pendingSelection?.kind === "retirement";
   const tieLoading =
     status === "generating" && game?.pendingSelection?.kind === "tie";
-  const bothCandidatesLoading = retirementLoading || tieLoading;
+  const bothLoseLoading =
+    status === "generating" && game?.pendingSelection?.kind === "both-lose";
+  const bothCandidatesLoading =
+    retirementLoading || tieLoading || bothLoseLoading;
   const bufferStatus = bufferHealth
     ? bufferHealth.ready >= bufferHealth.target
       ? "ready"
@@ -1506,11 +1546,24 @@ export function GameScreen() {
                 <kbd>C</kbd> / <kbd>3</kbd>
               </span>
             </button>
+            <button
+              type="button"
+              className={`${styles.tieButton} ${styles.bothLoseButton}`}
+              disabled={status === "generating" || reconcilingRetry}
+              onClick={bothLose}
+            >
+              Both lose{" "}
+              <span>
+                <kbd>D</kbd> / <kbd>4</kbd>
+              </span>
+            </button>
           </div>
 
           <p className={styles.shortcuts}>
             {bothCandidatesLoading ? (
-              tieLoading ? (
+              bothLoseLoading ? (
+                "Both rejected — preparing a fresh matchup…"
+              ) : tieLoading ? (
                 "Tie recorded — preparing a fresh matchup…"
               ) : (
                 "Ten-win champion retired — preparing a fresh matchup…"
@@ -1519,7 +1572,8 @@ export function GameScreen() {
               <>
                 Choose with <kbd>A</kbd> or <kbd>1</kbd> for left <span>•</span>{" "}
                 <kbd>B</kbd> or <kbd>2</kbd> for right <span>•</span> tie with{" "}
-                <kbd>C</kbd> or <kbd>3</kbd>
+                <kbd>C</kbd> or <kbd>3</kbd> <span>•</span> reject both with{" "}
+                <kbd>D</kbd> or <kbd>4</kbd>
               </>
             )}
           </p>
@@ -1660,10 +1714,10 @@ export function GameScreen() {
                 </p>
                 <ol className={styles.historyList}>
                   {historyEntries.map((entry) => {
-                    const primary =
-                      entry.outcome === "tie" ? entry.left : entry.winner;
-                    const secondary =
-                      entry.outcome === "tie" ? entry.right : entry.loser;
+                    const pairDecision =
+                      entry.outcome === "tie" || entry.outcome === "both-lose";
+                    const primary = pairDecision ? entry.left : entry.winner;
+                    const secondary = pairDecision ? entry.right : entry.loser;
                     return (
                       <li key={`${entry.decisionNumber}-${entry.selectedAt}`}>
                         <span className={styles.historyDecision}>
@@ -1692,7 +1746,11 @@ export function GameScreen() {
                             </small>
                             <span className={styles.candidateFooter}>
                               <em>
-                                {entry.outcome === "tie" ? "Tied" : "Winner"}
+                                {entry.outcome === "tie"
+                                  ? "Tied"
+                                  : entry.outcome === "both-lose"
+                                    ? "Rejected"
+                                    : "Winner"}
                               </em>
                               {primary.favorite !== null ? (
                                 <button
@@ -1723,7 +1781,11 @@ export function GameScreen() {
                           className={styles.historyVersus}
                           aria-hidden="true"
                         >
-                          {entry.outcome === "tie" ? "with" : "over"}
+                          {entry.outcome === "tie"
+                            ? "with"
+                            : entry.outcome === "both-lose"
+                              ? "and"
+                              : "over"}
                         </span>
                         <span className={styles.historyCandidate}>
                           {secondary.imageUrl ? (

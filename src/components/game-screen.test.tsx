@@ -152,6 +152,54 @@ function completedTieGame(): GameState {
   return game;
 }
 
+function bothLoseGeneratingGame(): GameState {
+  const game = cloneGame();
+  game.round.status = "generating";
+  game.round.replacingSide = null;
+  game.pendingSelection = {
+    kind: "both-lose",
+    referenceSide: "left",
+    selectedAt: "2026-07-16T12:00:01.000Z",
+  };
+  return game;
+}
+
+function completedBothLoseGame(): GameState {
+  const game = cloneGame();
+  const rejectedLeft = game.round.leftCandidate;
+  const rejectedRight = game.round.rightCandidate;
+  game.round = {
+    leftCandidate: {
+      ...rejectedLeft,
+      id: "both-lose-left",
+      imageUrl: "/api/assets/both-lose-left.png",
+      concept: "dual rejection replacement left",
+    },
+    rightCandidate: {
+      ...rejectedRight,
+      id: "both-lose-right",
+      imageUrl: "/api/assets/both-lose-right.png",
+      concept: "dual rejection replacement right",
+    },
+    status: "idle",
+    replacingSide: null,
+    roundNumber: 2,
+    retainedCandidateId: null,
+    winStreak: 0,
+  };
+  game.history.push({
+    outcome: "both-lose",
+    leftId: rejectedLeft.id,
+    rightId: rejectedRight.id,
+    leftPrompt: rejectedLeft.prompt,
+    rightPrompt: rejectedRight.prompt,
+    leftConcept: rejectedLeft.concept,
+    rightConcept: rejectedRight.concept,
+    selectedAt: "2026-07-16T12:00:01.000Z",
+  });
+  return game;
+}
+
 function bufferedErrorGame(): GameState {
   const game = cloneGame();
   game.round.status = "error";
@@ -836,6 +884,64 @@ describe("GameScreen challenger reconciliation", () => {
     ).toBeVisible();
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       outcome: "tie",
+      roundNumber: 1,
+    });
+  });
+
+  it("rejects both candidates from the visible button", async () => {
+    const preloadedUrls: string[] = [];
+    installRecordedImagePreload(preloadedUrls);
+    const completed = completedBothLoseGame();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json({ ...completed, eloRatings: { left: 1000, right: 1000 } })
+          : json({
+              status: "ready",
+              game: initializedGame,
+              eloRatings: { left: 1000, right: 1000 },
+            }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: /both lose/i }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Game status")).toHaveTextContent("Round 2"),
+    );
+    expect(preloadedUrls).toEqual([
+      "/api/assets/both-lose-left.png",
+      "/api/assets/both-lose-right.png",
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      outcome: "both-lose",
+      roundNumber: 1,
+    });
+  });
+
+  it.each(["d", "4"])("maps %s to the both-lose action", async (key) => {
+    installSuccessfulImagePreload();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? json(bothLoseGeneratingGame(), 202)
+          : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.keyDown(document.body, { key });
+
+    expect(await screen.findByTestId("loading-left")).toBeVisible();
+    expect(screen.getByTestId("loading-right")).toBeVisible();
+    expect(
+      screen.getByText("Both rejected — preparing a fresh matchup…"),
+    ).toBeVisible();
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      outcome: "both-lose",
       roundNumber: 1,
     });
   });
