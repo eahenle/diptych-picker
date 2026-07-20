@@ -8,6 +8,7 @@ import {
   recordGenerationTurnaround,
   refillDeficit,
   summarizeBufferHealth,
+  summarizeComparisonHistory,
   summarizeDisplayedEloRatings,
   summarizePoolLeaderboard,
   updateElo,
@@ -530,5 +531,61 @@ describe("challenger state", () => {
     ]);
     expect(JSON.stringify(entries)).not.toContain("prompt");
     expect(JSON.stringify(entries)).not.toContain("excluded");
+  });
+
+  it("builds newest-first display-safe comparison history", () => {
+    const entries = summarizeComparisonHistory(
+      [
+        {
+          winnerId: "first-winner",
+          loserId: "first-loser",
+          winnerPrompt: "private first winner prompt",
+          loserPrompt: "private first loser prompt",
+          winnerConcept: "stored first winner",
+          loserConcept: "stored first loser",
+          selectedAt: "2026-07-16T00:01:00.000Z",
+        },
+        {
+          winnerId: "latest-winner",
+          loserId: "missing-loser",
+          winnerPrompt: "private latest winner prompt",
+          loserPrompt: "private missing loser prompt",
+          winnerConcept: "stored latest winner",
+          loserConcept: "archived loser concept",
+          selectedAt: "2026-07-16T00:02:00.000Z",
+        },
+      ],
+      state({
+        ratings: [
+          rating("first-winner", 1016),
+          rating("first-loser", 984),
+          rating("latest-winner", 1030),
+        ],
+      }),
+    );
+
+    expect(entries).toEqual([
+      {
+        decisionNumber: 2,
+        selectedAt: "2026-07-16T00:02:00.000Z",
+        winner: {
+          id: "latest-winner",
+          imageUrl: "/api/assets/latest-winner.png",
+          concept: "latest-winner concept",
+          style: ["latest-winner"],
+        },
+        loser: {
+          id: "missing-loser",
+          imageUrl: null,
+          concept: "archived loser concept",
+          style: [],
+        },
+      },
+      expect.objectContaining({
+        decisionNumber: 1,
+        winner: expect.objectContaining({ id: "first-winner" }),
+      }),
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("prompt");
   });
 });

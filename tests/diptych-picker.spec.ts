@@ -169,6 +169,29 @@ test("opens a display-safe reusable-pool leaderboard", async ({
   expect(JSON.stringify(body)).not.toContain('"prompt"');
 });
 
+test("opens a display-safe newest-first comparison history", async ({
+  page,
+  request,
+}) => {
+  await select(page, "left", 2);
+  await page
+    .getByRole("button", { name: "View comparison history; 1 decisions" })
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "Comparison history" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("listitem")).toHaveCount(1);
+  await expect(dialog.getByText("Winner", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Rejected", { exact: true })).toBeVisible();
+
+  const response = await request.get("/api/game/history");
+  expect(response.status()).toBe(200);
+  const body = await response.json();
+  expect(body.total).toBe(1);
+  expect(body.entries).toHaveLength(1);
+  expect(JSON.stringify(body)).not.toContain('"prompt"');
+});
+
 test("exports the last stable comparison while a challenger is loading", async ({
   page,
   request,

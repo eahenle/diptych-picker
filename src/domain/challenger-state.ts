@@ -99,6 +99,20 @@ export interface PoolLeaderboardEntry {
   source: CandidateRating["source"];
 }
 
+export interface ComparisonHistoryCandidate {
+  id: string;
+  imageUrl: string | null;
+  concept: string;
+  style: string[];
+}
+
+export interface ComparisonHistoryEntry {
+  decisionNumber: number;
+  selectedAt: string;
+  winner: ComparisonHistoryCandidate;
+  loser: ComparisonHistoryCandidate;
+}
+
 export interface FallbackDrawOptions {
   now: string;
   currentCandidateIds: readonly string[];
@@ -162,6 +176,38 @@ export function summarizePoolLeaderboard(
       losses,
       source,
     }));
+}
+
+export function summarizeComparisonHistory(
+  history: readonly SelectionHistory[],
+  state: ChallengerState | null,
+  limit = 50,
+): ComparisonHistoryEntry[] {
+  const ratings = new Map(
+    (state?.ratings ?? []).map(({ candidate }) => [candidate.id, candidate]),
+  );
+  const displayCandidate = (
+    id: string,
+    fallbackConcept: string,
+  ): ComparisonHistoryCandidate => {
+    const candidate = ratings.get(id);
+    return {
+      id,
+      imageUrl: candidate?.imageUrl ?? null,
+      concept: candidate?.concept ?? fallbackConcept,
+      style: candidate?.style ?? [],
+    };
+  };
+
+  return history
+    .map((selection, index) => ({
+      decisionNumber: index + 1,
+      selectedAt: selection.selectedAt,
+      winner: displayCandidate(selection.winnerId, selection.winnerConcept),
+      loser: displayCandidate(selection.loserId, selection.loserConcept),
+    }))
+    .toReversed()
+    .slice(0, Math.max(0, Math.floor(limit)));
 }
 
 function roundRating(rating: number): number {
