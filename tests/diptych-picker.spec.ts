@@ -191,6 +191,45 @@ test("declares an equal-Elo tie and replaces both active candidates", async ({
   });
 });
 
+test("opens either active image in a larger inspection view", async ({
+  page,
+}) => {
+  let selectionPosts = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/game/select")
+    ) {
+      selectionPosts += 1;
+    }
+  });
+  const leftSource = await page
+    .getByTestId("candidate-image")
+    .nth(0)
+    .getAttribute("src");
+
+  await page.getByRole("button", { name: "View image A larger" }).click();
+  const leftDialog = page.getByRole("dialog", {
+    name: /Expanded image:/,
+  });
+  await expect(leftDialog).toBeVisible();
+  await expect(leftDialog.getByRole("img")).toHaveAttribute("src", leftSource!);
+  await page.keyboard.press("a");
+  await expect(page.getByText("Round 1", { exact: true })).toBeVisible();
+  expect(selectionPosts).toBe(0);
+  await page.keyboard.press("Escape");
+  await expect(leftDialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "View image B larger" }).click();
+  await expect(
+    page.getByRole("dialog", { name: /Expanded image:/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close expanded image" }).click();
+  await expect(
+    page.getByRole("dialog", { name: /Expanded image:/ }),
+  ).toHaveCount(0);
+});
+
 test("opens a display-safe reusable-pool leaderboard", async ({
   page,
   request,
