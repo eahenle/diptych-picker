@@ -83,6 +83,8 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
     "contentLevel": "family-friendly",
     "avoid": "readable text",
     "adaptationMode": "static",
+    "adaptationStrength": "guided",
+    "adaptationLastDecision": 0,
     "adaptationSourceWinnerIds": [],
     "adaptationSourceRejectedIds": []
   }
@@ -179,7 +181,7 @@ The preference seed is the authoritative creative brief for every worker. Explic
 
 New refill jobs include `leaderboardEvidence`, a display-safe sample of at most 12 current reusable candidates. It contains the highest and lowest ranks when the pool is larger than the bound, plus the full pool size; it never contains prompts, image paths, reasoning, or mailbox state. When the cached fingerprint still matches the current leaders, the refill also includes `leaderboardVisualProfile` with the shared visual synthesis, source candidate IDs, reasoning, and analysis timestamp. Rank, Elo, win/loss record, repeated performance, favorites, and the matching visual synthesis are the primary basis for Adaptive steering. High-ranked candidates with repeated success are positive aggregate evidence; repeatedly losing low-ranked candidates are negative aggregate evidence. Omitted middle ranks are neutral, not negative. Recent selections, retained/rejected compatibility fields, and recent concepts are secondary novelty context and may break a tie only when aggregate evidence is sparse.
 
-New jobs include the structured `preferenceProfile`; legacy jobs may omit it and are treated as Static. In Static mode, omit `preferenceRevision` and preserve every preference field exactly. In Adaptive mode, the worker must add a complete `preferenceRevision` based primarily on `leaderboardEvidence`. The profile carries separate bounded source-ID lists for positive and negative provenance. The app adopts a model-authored revision only if its generated candidate later wins, while every generated loser is recorded immediately as negative provenance for future jobs.
+New jobs include the structured `preferenceProfile`. The freedom slider has three stops. Frozen uses `adaptationMode: "static"`; workers omit `preferenceRevision` and preserve every field exactly. Guided uses `adaptationMode: "adaptive"` with `adaptationStrength: "guided"`; workers emit restrained, incremental full-profile revisions and the app may adopt one after every 15 completed decisions. Unfettered uses `adaptationStrength: "unfettered"`; workers may broadly rewrite the full profile and the app may adopt one after every 5 completed decisions. Legacy jobs without a profile are Frozen, and legacy Adaptive profiles without a strength migrate to Guided. Both adaptive levels remain winner-gated and based primarily on `leaderboardEvidence`; rejection evidence continues accumulating between cadence checkpoints. `adaptationLastDecision` records the last eligible rewrite checkpoint. The profile carries separate bounded source-ID lists for positive and negative provenance.
 
 Tie-triggered refill jobs include `"comparisonOutcome": "tie"`. Their compatibility fields use the lower-rated tied candidate as `retainedWinner` (or the left candidate when ratings are equal) and the other tied candidate as `rejectedCandidate`, but both are neutral preference context. The latest history item is an explicit tie with left/right candidate metadata; it must not be interpreted as positive or negative adaptive evidence.
 
@@ -236,7 +238,7 @@ Write this strict JSON object to `<data-root>/agent-work/<jobId>/proposal.json`:
 }
 ```
 
-The four base proposal fields are always required. `preferenceRevision` must be omitted for Static jobs and is required for Adaptive jobs; it must contain every preference field except the mode and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed, responds to aggregate numeric and visual leaderboard evidence, and stays distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
+The four base proposal fields are always required. `preferenceRevision` must be omitted for Frozen jobs and is required for Guided and Unfettered jobs; it must contain every preference field except adaptation metadata and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed, responds to aggregate numeric and visual leaderboard evidence at the selected freedom level, and stays distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
 
 ## Completed result
 

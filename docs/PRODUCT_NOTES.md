@@ -26,7 +26,7 @@ History and pool rows let the player favorite exceptional candidates. Favorite s
 
 ### Profile-wide adaptation
 
-The Preference profile title row exposes **Static / Adaptive** for the entire profile. Static is the default and prevents model mutation of every preference field. Adaptive lets each generated proposal carry a complete trajectory-conditioned profile revision; the app adopts it only if that candidate later wins. Separate bounded winner and rejected-generated-candidate source lists preserve which comparison outcome supplied each signal. Future workers receive those lists plus recent comparison history and must treat winners as positive evidence and generated losers as negative evidence when authoring the next revision. Provenance-only updates do not flush already-buffered work, while a model-authored field revision still invalidates earlier-profile capacity and composes future jobs from the revised fields. Generation failures, cancellations, moderation blocks, and invalid worker output remain operational outcomes and do not influence taste preferences.
+The Preference profile title row exposes a three-stop freedom slider for the entire profile. **Frozen** is the default and prevents model mutation of every field. **Guided** permits restrained, incremental full-profile revisions after every 15 completed rounds. **Unfettered** permits broad full-profile revisions after every 5 rounds. Both adaptive levels remain winner-gated. Separate bounded winner and rejected-generated-candidate source lists preserve which comparison outcome supplied each signal, and rejection evidence continues accumulating between rewrite checkpoints. Future workers receive those lists plus recent comparison history and must treat winners as positive evidence and generated losers as negative evidence when authoring the next revision. Provenance-only updates do not flush already-buffered work, while a model-authored field revision still invalidates earlier-profile capacity and composes future jobs from the revised fields. Generation failures, cancellations, moderation blocks, and invalid worker output remain operational outcomes and do not influence taste preferences.
 
 ### Moderation feedback
 
@@ -38,7 +38,7 @@ Mailbox failures carry an explicit operational, moderation, or invalid-output ca
 
 ### Source-image profile ingestion
 
-The Preference profile modal accepts one private PNG, JPEG, or WebP source image up to 20 MB and 4096 by 4096 pixels. The server fully decodes it, strips metadata by normalizing it to a content-addressed local PNG, and sends a durable source-profile job to a fresh analysis worker. The worker returns transferable subject, setting, composition, medium, style, palette, content-range, and avoidance guidance without identifying a depicted person or requesting identity, likeness, or exact reproduction. Analysis animates in the modal, preserves the selected Static/Adaptive mode, clears stale adaptation provenance, and populates an editable draft that is never saved automatically. Source uploads remain private and are not copied into candidate assets or exports.
+The Preference profile modal accepts one private PNG, JPEG, or WebP source image up to 20 MB and 4096 by 4096 pixels. The server fully decodes it, strips metadata by normalizing it to a content-addressed local PNG, and sends a durable source-profile job to a fresh analysis worker. The worker returns transferable subject, setting, composition, medium, style, palette, content-range, and avoidance guidance without identifying a depicted person or requesting identity, likeness, or exact reproduction. Analysis animates in the modal, preserves the selected freedom level, clears stale adaptation provenance, resets its rewrite checkpoint, and populates an editable draft that is never saved automatically. Source uploads remain private and are not copied into candidate assets or exports.
 
 ### Leaderboard-driven preference adaptation
 
@@ -65,7 +65,7 @@ The detailed handoff, protocol, safety constraints, and staged migration are in 
 
 Eventually derive editable inspiration signals from winning generated images. Learn transferable attributes such as lighting, composition, palette, mood, medium, and concept—not a person's identity or likeness. Keep this inferred inspiration profile separate from explicit card weights and verdict edits, show which winners influenced it, and let the player weaken, edit, reset, or disable it.
 
-Place a **Static / Adaptive** toggle on the top line of the Preference profile modal and apply it to every preference field. Static is the default and preserves the profile as entered. Adaptive explicitly permits the model to revise the full profile from the game trajectory; revisions remain attributable to the influencing winners.
+Place a **Frozen / Guided / Unfettered** freedom slider on the top line of the Preference profile modal and apply it to every preference field. Frozen is the default and preserves the profile as entered. Guided permits restrained revisions every 15 rounds; Unfettered permits broad revisions every 5 rounds. Revisions remain attributable to the influencing winners.
 
 ## 2026-07-17
 

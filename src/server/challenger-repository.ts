@@ -48,6 +48,8 @@ const preferenceRevisionSchema = z
 
 const currentPreferenceProfileSchema = preferenceRevisionSchema.extend({
   adaptationMode: z.enum(["static", "adaptive"]),
+  adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
+  adaptationLastDecision: z.number().int().nonnegative().optional(),
   adaptationSourceWinnerIds: z.array(z.string().trim().min(1).max(200)).max(12),
   adaptationSourceRejectedIds: z
     .array(z.string().trim().min(1).max(200))
@@ -64,6 +66,8 @@ const transitionalPreferenceProfileSchema = preferenceRevisionSchema
       .max(12)
       .optional(),
     adaptationMode: z.enum(["static", "adaptive"]).optional(),
+    adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
+    adaptationLastDecision: z.number().int().nonnegative().optional(),
     adaptationSourceWinnerIds: z
       .array(z.string().trim().min(1).max(200))
       .max(12)
@@ -82,6 +86,12 @@ const transitionalPreferenceProfileSchema = preferenceRevisionSchema
     contentLevel: profile.contentLevel,
     avoid: profile.avoid,
     adaptationMode: profile.adaptationMode ?? profile.inspirationMode,
+    ...(profile.adaptationStrength
+      ? { adaptationStrength: profile.adaptationStrength }
+      : {}),
+    ...(profile.adaptationLastDecision !== undefined
+      ? { adaptationLastDecision: profile.adaptationLastDecision }
+      : {}),
     adaptationSourceWinnerIds:
       profile.adaptationSourceWinnerIds ??
       profile.inspirationSourceWinnerIds ??

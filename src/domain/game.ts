@@ -2,6 +2,9 @@ export type Side = "left" | "right";
 export type RoundStatus = "idle" | "generating" | "error";
 export type PreferenceContentLevel = "family-friendly" | "adult-allowed";
 export type PreferenceAdaptationMode = "static" | "adaptive";
+export type PreferenceAdaptationStrength = "guided" | "unfettered";
+export type PreferenceAdaptationFreedom =
+  "frozen" | PreferenceAdaptationStrength;
 export const GENERATION_JOB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 export const CHAMPION_RETIREMENT_STREAK = 10;
 
@@ -14,13 +17,19 @@ export interface PreferenceProfile {
   contentLevel: PreferenceContentLevel;
   avoid: string;
   adaptationMode: PreferenceAdaptationMode;
+  adaptationStrength?: PreferenceAdaptationStrength;
+  adaptationLastDecision?: number;
   adaptationSourceWinnerIds: string[];
   adaptationSourceRejectedIds: string[];
 }
 
 export type PreferenceRevision = Omit<
   PreferenceProfile,
-  "adaptationMode" | "adaptationSourceWinnerIds" | "adaptationSourceRejectedIds"
+  | "adaptationMode"
+  | "adaptationStrength"
+  | "adaptationLastDecision"
+  | "adaptationSourceWinnerIds"
+  | "adaptationSourceRejectedIds"
 >;
 
 export interface Candidate {
@@ -138,6 +147,8 @@ export function preferenceProfileFromSeed(
     contentLevel: "family-friendly",
     avoid: "",
     adaptationMode: "static",
+    adaptationStrength: "guided",
+    adaptationLastDecision: 0,
     adaptationSourceWinnerIds: [],
     adaptationSourceRejectedIds: [],
   };
@@ -168,19 +179,61 @@ export function composePreferenceSeed(profile: PreferenceProfile): string {
 export function applyWinnerPreferenceRevision(
   profile: PreferenceProfile,
   winner: Candidate,
+  completedDecisionCount: number,
 ): PreferenceProfile {
-  if (profile.adaptationMode !== "adaptive" || !winner.preferenceRevision) {
+  if (
+    profile.adaptationMode !== "adaptive" ||
+    !winner.preferenceRevision ||
+    !isPreferenceAdaptationDue(profile, completedDecisionCount)
+  ) {
     return profile;
   }
+  const strength = preferenceAdaptationStrength(profile);
   return {
+    ...profile,
     ...winner.preferenceRevision,
     adaptationMode: "adaptive",
+    adaptationStrength: strength,
+    adaptationLastDecision: completedDecisionCount,
     adaptationSourceWinnerIds: appendAdaptationSource(
       profile.adaptationSourceWinnerIds,
       winner.id,
     ),
     adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds,
   };
+}
+
+export function preferenceAdaptationStrength(
+  profile: PreferenceProfile,
+): PreferenceAdaptationStrength {
+  return profile.adaptationStrength ?? "guided";
+}
+
+export function preferenceAdaptationFreedom(
+  profile: PreferenceProfile,
+): PreferenceAdaptationFreedom {
+  return profile.adaptationMode === "static"
+    ? "frozen"
+    : preferenceAdaptationStrength(profile);
+}
+
+export function preferenceAdaptationInterval(
+  profile: PreferenceProfile,
+): 5 | 15 | null {
+  if (profile.adaptationMode !== "adaptive") return null;
+  return preferenceAdaptationStrength(profile) === "unfettered" ? 5 : 15;
+}
+
+export function isPreferenceAdaptationDue(
+  profile: PreferenceProfile,
+  completedDecisionCount: number,
+): boolean {
+  const interval = preferenceAdaptationInterval(profile);
+  if (interval === null) return false;
+  return (
+    profile.adaptationLastDecision === undefined ||
+    completedDecisionCount - profile.adaptationLastDecision >= interval
+  );
 }
 
 export function recordRejectedPreferenceEvidence(
@@ -679,6 +732,8 @@ export function migratePreferenceProfileState(state: GameState): GameState {
       inspirationMode?: PreferenceAdaptationMode;
       inspirationSourceWinnerIds?: string[];
       adaptationSourceRejectedIds?: string[];
+      adaptationStrength?: PreferenceAdaptationStrength;
+      adaptationLastDecision?: number;
     };
     const preferenceProfile: PreferenceProfile = {
       themes: legacy.themes,
@@ -690,6 +745,9 @@ export function migratePreferenceProfileState(state: GameState): GameState {
       avoid: legacy.avoid,
       adaptationMode:
         legacy.adaptationMode ?? legacy.inspirationMode ?? "static",
+      adaptationStrength: legacy.adaptationStrength ?? "guided",
+      adaptationLastDecision:
+        legacy.adaptationLastDecision ?? state.history.length,
       adaptationSourceWinnerIds:
         legacy.adaptationSourceWinnerIds ??
         legacy.inspirationSourceWinnerIds ??

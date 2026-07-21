@@ -66,6 +66,8 @@ const currentPreferenceProfileSchema = z
     contentLevel: z.enum(["family-friendly", "adult-allowed"]),
     avoid: z.string().max(800),
     adaptationMode: z.enum(["static", "adaptive"]).optional(),
+    adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
+    adaptationLastDecision: z.number().int().nonnegative().optional(),
     adaptationSourceWinnerIds: z
       .array(z.string().trim().min(1).max(200))
       .max(12)
@@ -103,6 +105,8 @@ const transitionalPreferenceProfileSchema = z
     contentLevel: z.enum(["family-friendly", "adult-allowed"]),
     avoid: z.string().max(800),
     adaptationMode: z.enum(["static", "adaptive"]).optional(),
+    adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
+    adaptationLastDecision: z.number().int().nonnegative().optional(),
     adaptationSourceWinnerIds: z
       .array(z.string().trim().min(1).max(200))
       .max(12)
@@ -122,6 +126,12 @@ const transitionalPreferenceProfileSchema = z
     contentLevel: profile.contentLevel,
     avoid: profile.avoid,
     adaptationMode: profile.adaptationMode ?? profile.inspirationMode,
+    ...(profile.adaptationStrength
+      ? { adaptationStrength: profile.adaptationStrength }
+      : {}),
+    ...(profile.adaptationLastDecision !== undefined
+      ? { adaptationLastDecision: profile.adaptationLastDecision }
+      : {}),
     adaptationSourceWinnerIds:
       profile.adaptationSourceWinnerIds ??
       profile.inspirationSourceWinnerIds ??

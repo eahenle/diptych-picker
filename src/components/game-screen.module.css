@@ -980,38 +980,47 @@
 .preferencesModal .preferenceTitleRow h2 {
   margin: 0;
 }
-.adaptationMode {
+.adaptationFreedom {
+  width: min(330px, 54vw);
+  display: grid;
+  gap: 4px;
+}
+.adaptationFreedom label {
   display: flex;
-  margin: 0;
-  padding: 2px;
-  border: 1px solid #403b3e;
-  border-radius: 2px;
-  background: #090b0d;
-}
-.adaptationMode label {
-  position: relative;
-  cursor: pointer;
-}
-.adaptationMode input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-.adaptationMode span {
-  display: block;
-  padding: 5px 9px;
+  justify-content: space-between;
   color: #817b77;
-  font-size: 10px;
-  letter-spacing: 0.05em;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.adaptationMode label:has(input:checked) span {
-  color: var(--text);
-  background: rgba(180, 104, 73, 0.2);
+.adaptationFreedom label strong {
+  color: var(--copper-bright);
+  font-size: inherit;
 }
-.adaptationMode label:has(input:focus-visible) span {
-  box-shadow: 0 0 0 2px rgba(167, 107, 239, 0.28);
+.adaptationFreedom input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--copper-bright);
+  cursor: pointer;
+}
+.adaptationFreedom input:focus-visible {
+  outline: 2px solid rgba(167, 107, 239, 0.42);
+  outline-offset: 2px;
+}
+.adaptationFreedomTicks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  color: #817b77;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.adaptationFreedomTicks small:nth-child(2) {
+  text-align: center;
+}
+.adaptationFreedomTicks small:last-child {
+  text-align: right;
 }
 .contentField {
   min-width: 0;
