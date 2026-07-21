@@ -17,6 +17,7 @@ import {
   isSelectionBoundWait,
   mergeServerResult,
   preferenceAdaptationFreedom,
+  preferenceAdaptationProgress,
   preferenceProfileFromSeed,
   willRetireChampion,
   type BufferHealth,
@@ -1455,6 +1456,9 @@ export function GameScreen() {
     guided: 1,
     unfettered: 2,
   }[adaptationFreedom];
+  const adaptationProgress = game
+    ? preferenceAdaptationProgress(preferenceDraft, game.history.length)
+    : null;
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
   const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
@@ -2416,6 +2420,29 @@ export function GameScreen() {
                 : null}
               Novelty rules still take priority.
             </p>
+            {adaptationProgress ? (
+              <div
+                className={styles.adaptationCadence}
+                role="status"
+                aria-label="Preference rewrite cadence"
+              >
+                <span>
+                  {adaptationProgress.due
+                    ? "Rewrite checkpoint ready"
+                    : `Next rewrite checkpoint in ${adaptationProgress.remaining} ${adaptationProgress.remaining === 1 ? "round" : "rounds"}`}
+                </span>
+                <progress
+                  aria-label="Rounds toward next preference rewrite"
+                  max={adaptationProgress.interval}
+                  value={adaptationProgress.completed}
+                />
+                <small>
+                  {adaptationProgress.due
+                    ? "The next winning generated candidate may update this profile."
+                    : `${adaptationProgress.completed} of ${adaptationProgress.interval} rounds completed since the last rewrite checkpoint.`}
+                </small>
+              </div>
+            ) : null}
             <div className={styles.sourceProfileImport}>
               <span>
                 <strong>Start from an image</strong>

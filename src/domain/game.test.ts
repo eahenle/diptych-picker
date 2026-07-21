@@ -15,6 +15,7 @@ import {
   isPreferenceAdaptationDue,
   isSelectionBoundWait,
   mergeServerResult,
+  preferenceAdaptationProgress,
   migrateGameState,
   preferenceProfileFromSeed,
   recordRejectedPreferenceEvidence,
@@ -121,6 +122,12 @@ describe("round transitions", () => {
       adaptationLastDecision: 0,
     };
     expect(applyWinnerPreferenceRevision(guided, winner, 14)).toBe(guided);
+    expect(preferenceAdaptationProgress(guided, 14)).toEqual({
+      interval: 15,
+      completed: 14,
+      remaining: 1,
+      due: false,
+    });
     expect(applyWinnerPreferenceRevision(guided, winner, 15)).toMatchObject({
       themes: "prefer severe architectural portraits",
       inspiration: "Favor low-key lighting and asymmetrical framing.",
@@ -139,6 +146,12 @@ describe("round transitions", () => {
       adaptationLastDecision: 0,
     };
     expect(isPreferenceAdaptationDue(unfettered, 4)).toBe(false);
+    expect(preferenceAdaptationProgress(unfettered, 5)).toEqual({
+      interval: 5,
+      completed: 5,
+      remaining: 0,
+      due: true,
+    });
     expect(applyWinnerPreferenceRevision(unfettered, winner, 5)).toMatchObject({
       themes: "prefer severe architectural portraits",
       adaptationStrength: "unfettered",
