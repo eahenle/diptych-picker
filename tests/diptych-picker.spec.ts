@@ -295,6 +295,14 @@ test("opens either active image in a larger inspection view", async ({
     .getByTestId("candidate-image")
     .nth(0)
     .getAttribute("src");
+  const leftConcept = await page
+    .getByTestId("candidate-image")
+    .nth(0)
+    .getAttribute("alt");
+  const rightConcept = await page
+    .getByTestId("candidate-image")
+    .nth(1)
+    .getAttribute("alt");
 
   await page.getByRole("button", { name: "View image A larger" }).click();
   const leftDialog = page.getByRole("dialog", {
@@ -305,6 +313,14 @@ test("opens either active image in a larger inspection view", async ({
   await page.keyboard.press("a");
   await expect(page.getByText("Round 1", { exact: true })).toBeVisible();
   expect(selectionPosts).toBe(0);
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    page.getByRole("dialog", { name: `Expanded image: ${rightConcept}` }),
+  ).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(
+    page.getByRole("dialog", { name: `Expanded image: ${leftConcept}` }),
+  ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(leftDialog).toHaveCount(0);
 

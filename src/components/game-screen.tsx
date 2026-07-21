@@ -65,7 +65,11 @@ interface ActiveSelection {
 
 type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
 type GameTransferAction = "exporting" | "importing" | "resetting";
-type InspectableCandidate = Pick<Candidate, "imageUrl" | "concept">;
+type InspectableCandidate = Pick<Candidate, "id" | "imageUrl" | "concept">;
+interface ImageInspectorState {
+  candidates: InspectableCandidate[];
+  index: number;
+}
 type SourceProfileResponse =
   | { status: "analyzing"; jobId: string }
   | {
@@ -290,8 +294,8 @@ export function GameScreen() {
   const [newGameOpen, setNewGameOpen] = useState(false);
   const [loadGameOpen, setLoadGameOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [inspectedCandidate, setInspectedCandidate] =
-    useState<InspectableCandidate | null>(null);
+  const [imageInspector, setImageInspector] =
+    useState<ImageInspectorState | null>(null);
   const [historyEntries, setHistoryEntries] = useState<
     ComparisonHistoryEntry[]
   >([]);
@@ -340,6 +344,30 @@ export function GameScreen() {
   const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
   const queuedPreferenceSaveStartedRef = useRef(false);
+  const inspectedCandidate = imageInspector?.candidates[imageInspector.index];
+
+  const openImageInspector = useCallback(
+    (
+      candidate: InspectableCandidate,
+      candidates: readonly InspectableCandidate[],
+    ) => {
+      const uniqueCandidates = candidates.filter(
+        (item, index) =>
+          item.imageUrl &&
+          candidates.findIndex((candidate) => candidate.id === item.id) ===
+            index,
+      );
+      const index = uniqueCandidates.findIndex(
+        (item) => item.id === candidate.id,
+      );
+      setImageInspector({
+        candidates:
+          uniqueCandidates.length > 0 ? uniqueCandidates : [candidate],
+        index: index >= 0 ? index : 0,
+      });
+    },
+    [],
+  );
 
   const commitGame = useCallback((next: GameState) => {
     gameRef.current = next;
@@ -1010,13 +1038,30 @@ export function GameScreen() {
   ]);
 
   useEffect(() => {
-    if (!inspectedCandidate) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setInspectedCandidate(null);
+    if (!imageInspector) return;
+    const navigateInspector = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setImageInspector(null);
+        return;
+      }
+      const direction =
+        event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+      if (direction === 0 || imageInspector.candidates.length < 2) return;
+      event.preventDefault();
+      setImageInspector((current) =>
+        current
+          ? {
+              ...current,
+              index:
+                (current.index + direction + current.candidates.length) %
+                current.candidates.length,
+            }
+          : current,
+      );
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [inspectedCandidate]);
+    window.addEventListener("keydown", navigateInspector);
+    return () => window.removeEventListener("keydown", navigateInspector);
+  }, [imageInspector]);
 
   const openComparisonHistory = async () => {
     setHistoryOpen(true);
@@ -1046,16 +1091,32 @@ export function GameScreen() {
     candidate: PoolLeaderboardEntry["candidate"],
   ) => {
     setLeaderboardOpen(false);
-    setInspectedCandidate(candidate);
+    openImageInspector(
+      candidate,
+      leaderboardEntries.map((entry) => entry.candidate),
+    );
   };
 
   const inspectHistoryCandidate = (candidate: ComparisonHistoryCandidate) => {
     if (!candidate.imageUrl) return;
     setHistoryOpen(false);
-    setInspectedCandidate({
-      imageUrl: candidate.imageUrl,
-      concept: candidate.concept,
-    });
+    const candidates = historyEntries.flatMap((entry) =>
+      entry.outcome === "tie" || entry.outcome === "both-lose"
+        ? [entry.left, entry.right]
+        : [entry.winner, entry.loser],
+    );
+    openImageInspector(
+      {
+        id: candidate.id,
+        imageUrl: candidate.imageUrl,
+        concept: candidate.concept,
+      },
+      candidates.flatMap((item) =>
+        item.imageUrl
+          ? [{ id: item.id, imageUrl: item.imageUrl, concept: item.concept }]
+          : [],
+      ),
+    );
   };
 
   const openPoolLeaderboard = async () => {
@@ -1656,7 +1717,12 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
-                onInspect={setInspectedCandidate}
+                onInspect={(candidate) =>
+                  openImageInspector(candidate, [
+                    game.round.leftCandidate,
+                    game.round.rightCandidate,
+                  ])
+                }
                 eloRating={eloRatings?.left}
               />
               <CandidateCard
@@ -1670,7 +1736,12 @@ export function GameScreen() {
                 }
                 disabled={status === "generating" || reconcilingRetry}
                 onSelect={select}
-                onInspect={setInspectedCandidate}
+                onInspect={(candidate) =>
+                  openImageInspector(candidate, [
+                    game.round.leftCandidate,
+                    game.round.rightCandidate,
+                  ])
+                }
                 eloRating={eloRatings?.right}
               />
             </section>
@@ -1778,7 +1849,7 @@ export function GameScreen() {
         <div
           className={styles.modalBackdrop}
           role="presentation"
-          onMouseDown={() => setInspectedCandidate(null)}
+          onMouseDown={() => setImageInspector(null)}
         >
           <section
             className={styles.imageInspector}
@@ -1791,17 +1862,67 @@ export function GameScreen() {
               type="button"
               className={styles.leaderboardClose}
               aria-label="Close expanded image"
-              onClick={() => setInspectedCandidate(null)}
+              onClick={() => setImageInspector(null)}
               autoFocus
             >
               ×
             </button>
+            {imageInspector.candidates.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  className={`${styles.inspectorNavigation} ${styles.inspectorPrevious}`}
+                  aria-label="Previous expanded image"
+                  onClick={() =>
+                    setImageInspector((current) =>
+                      current
+                        ? {
+                            ...current,
+                            index:
+                              (current.index - 1 + current.candidates.length) %
+                              current.candidates.length,
+                          }
+                        : current,
+                    )
+                  }
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.inspectorNavigation} ${styles.inspectorNext}`}
+                  aria-label="Next expanded image"
+                  onClick={() =>
+                    setImageInspector((current) =>
+                      current
+                        ? {
+                            ...current,
+                            index:
+                              (current.index + 1) % current.candidates.length,
+                          }
+                        : current,
+                    )
+                  }
+                >
+                  ›
+                </button>
+              </>
+            ) : null}
             <figure>
               <img
                 src={inspectedCandidate.imageUrl}
                 alt={inspectedCandidate.concept}
               />
-              <figcaption>{inspectedCandidate.concept}</figcaption>
+              <figcaption>
+                {inspectedCandidate.concept}
+                {imageInspector.candidates.length > 1 ? (
+                  <small>
+                    {imageInspector.index + 1} of{" "}
+                    {imageInspector.candidates.length}
+                    {" · Use Left and Right arrow keys"}
+                  </small>
+                ) : null}
+              </figcaption>
             </figure>
           </section>
         </div>

@@ -493,6 +493,20 @@ describe("GameScreen challenger reconciliation", () => {
 
     fireEvent.keyDown(document.body, { key: "a" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    const rightDialog = screen.getByRole("dialog", {
+      name: "Expanded image: right concept",
+    });
+    expect(rightDialog).toBeVisible();
+    expect(
+      within(rightDialog).getByRole("img", { name: "right concept" }),
+    ).toHaveAttribute("src", "/api/assets/generated-right.png");
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(
+      screen.getByRole("dialog", {
+        name: "Expanded image: left concept",
+      }),
+    ).toBeVisible();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(dialog).not.toBeInTheDocument();
 
@@ -741,6 +755,15 @@ describe("GameScreen challenger reconciliation", () => {
       "src",
       "/api/assets/pool-leader.png",
     );
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(
+      screen.getByRole("dialog", {
+        name: "Expanded image: Violet portrait",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("2 of 2 · Use Left and Right arrow keys"),
+    ).toBeVisible();
     fireEvent.click(
       screen.getByRole("button", { name: "Close expanded image" }),
     );
@@ -871,6 +894,12 @@ describe("GameScreen challenger reconciliation", () => {
       "src",
       "/api/assets/latest-winner.png",
     );
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    expect(
+      screen.getByRole("dialog", {
+        name: "Expanded image: Older winner",
+      }),
+    ).toBeVisible();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(imageDialog).not.toBeInTheDocument();
   });
