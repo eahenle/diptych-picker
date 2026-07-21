@@ -725,8 +725,21 @@ describe("GameScreen challenger reconciliation", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/game/leaderboard", {
       cache: "no-store",
     });
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Copper portrait larger" }),
+    );
     expect(dialog).not.toBeInTheDocument();
+    const imageDialog = screen.getByRole("dialog", {
+      name: "Expanded image: Copper portrait",
+    });
+    expect(imageDialog.getElementsByTagName("img")[0]).toHaveAttribute(
+      "src",
+      "/api/assets/pool-leader.png",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close expanded image" }),
+    );
+    expect(imageDialog).not.toBeInTheDocument();
   });
 
   it("opens newest-first comparison history from the Round metric", async () => {

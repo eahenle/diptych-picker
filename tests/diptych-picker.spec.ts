@@ -338,6 +338,24 @@ test("opens a display-safe reusable-pool leaderboard", async ({
   const body = await response.json();
   expect(body.entries).toHaveLength(7);
   expect(JSON.stringify(body)).not.toContain('"prompt"');
+
+  const firstCard = dialog
+    .getByRole("button", { name: /View .* larger/ })
+    .first();
+  const thumbnailSource = await firstCard.locator("img").getAttribute("src");
+  await firstCard.click();
+
+  await expect(dialog).toHaveCount(0);
+  const imageDialog = page.getByRole("dialog", {
+    name: /Expanded image:/,
+  });
+  await expect(imageDialog).toBeVisible();
+  await expect(imageDialog.getByRole("img")).toHaveAttribute(
+    "src",
+    thumbnailSource!,
+  );
+  await page.keyboard.press("Escape");
+  await expect(imageDialog).toHaveCount(0);
 });
 
 test("opens a display-safe newest-first comparison history", async ({
