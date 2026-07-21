@@ -166,6 +166,16 @@ const leaderboardPreferenceEvidenceSchema = z
     }
   });
 
+const leaderboardVisualProfileSchema = z
+  .object({
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    sourceCandidateIds: z.array(nonBlankStringSchema.max(200)).min(2).max(4),
+    profile: preferenceRevisionSchema,
+    reasoningSummary: nonBlankStringSchema.max(2_000),
+    analyzedAt: timestampSchema,
+  })
+  .strict();
+
 const generationJobFields = {
   id: jobIdSchema,
   createdAt: timestampSchema,
@@ -176,6 +186,7 @@ const generationJobFields = {
   selectionHistory: z.array(selectionHistorySchema),
   recentConcepts: z.array(nonBlankStringSchema),
   leaderboardEvidence: leaderboardPreferenceEvidenceSchema.optional(),
+  leaderboardVisualProfile: leaderboardVisualProfileSchema.optional(),
   preferenceSeed: nonBlankStringSchema,
   preferenceProfile: preferenceProfileSchema.optional(),
 };
@@ -210,39 +221,88 @@ const refillGenerationJobSchema = z
     path: ["pinnedWinnerId"],
   });
 
+const profileSourceImageSchema = z
+  .object({
+    filename: z.string().regex(/^[a-f0-9]{64}\.png$/),
+    path: z.string().regex(/^profile-sources\/[a-f0-9]{64}\.png$/),
+    contentType: z.literal("image/png"),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    byteLength: z.number().int().positive(),
+  })
+  .strict()
+  .superRefine((image, context) => {
+    if (image.width > 4096 || image.height > 4096) {
+      context.addIssue({
+        code: "custom",
+        message: "Source image dimensions must not exceed 4096 pixels",
+      });
+    }
+    if (image.path !== `profile-sources/${image.filename}`) {
+      context.addIssue({
+        code: "custom",
+        path: ["path"],
+        message: "Source image path must match its content-addressed filename",
+      });
+    }
+  });
+
 const sourceProfileJobSchema = z
   .object({
     id: jobIdSchema,
     kind: z.literal("source-profile"),
     createdAt: timestampSchema,
-    sourceImage: z
-      .object({
-        filename: z.string().regex(/^[a-f0-9]{64}\.png$/),
-        path: z.string().regex(/^profile-sources\/[a-f0-9]{64}\.png$/),
-        contentType: z.literal("image/png"),
-        width: z.number().int().positive(),
-        height: z.number().int().positive(),
-        byteLength: z.number().int().positive(),
-      })
-      .strict()
-      .superRefine((image, context) => {
-        if (image.width > 4096 || image.height > 4096) {
-          context.addIssue({
-            code: "custom",
-            message: "Source image dimensions must not exceed 4096 pixels",
-          });
-        }
-        if (image.path !== `profile-sources/${image.filename}`) {
-          context.addIssue({
-            code: "custom",
-            path: ["path"],
-            message:
-              "Source image path must match its content-addressed filename",
-          });
-        }
-      }),
+    sourceImage: profileSourceImageSchema,
   })
   .strict();
+
+const leaderboardProfileJobSchema = z
+  .object({
+    id: jobIdSchema,
+    kind: z.literal("leaderboard-profile"),
+    createdAt: timestampSchema,
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    sources: z
+      .array(
+        z
+          .object({
+            candidateId: nonBlankStringSchema.max(200),
+            rank: z.number().int().positive(),
+            rating: z.number().int(),
+            wins: z.number().int().nonnegative(),
+            losses: z.number().int().nonnegative(),
+            favorite: z.boolean(),
+            source: z.enum(["curated", "generated"]),
+            concept: nonBlankStringSchema.max(240),
+            style: z.array(nonBlankStringSchema.max(80)).max(4),
+            sourceImage: profileSourceImageSchema,
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(4),
+  })
+  .strict()
+  .superRefine((job, context) => {
+    const candidateIds = new Set(
+      job.sources.map(({ candidateId }) => candidateId),
+    );
+    const ranks = new Set(job.sources.map(({ rank }) => rank));
+    if (candidateIds.size !== job.sources.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["sources"],
+        message: "Leaderboard profile sources must use unique candidate IDs",
+      });
+    }
+    if (ranks.size !== job.sources.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["sources"],
+        message: "Leaderboard profile sources must use unique ranks",
+      });
+    }
+  });
 
 const discriminatedGenerationJobSchema = z.discriminatedUnion("kind", [
   challengerGenerationJobSchema,
@@ -269,6 +329,7 @@ const mailboxJobSchema = z.preprocess(
     initialGenerationJobSchema,
     refillGenerationJobSchema,
     sourceProfileJobSchema,
+    leaderboardProfileJobSchema,
   ]),
 );
 
@@ -344,6 +405,18 @@ const completedSourceProfileResultSchema = z
   })
   .strict();
 
+const completedLeaderboardProfileResultSchema = z
+  .object({
+    jobId: jobIdSchema,
+    kind: z.literal("leaderboard-profile"),
+    status: z.literal("completed"),
+    completedAt: timestampSchema,
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    profile: preferenceRevisionSchema,
+    reasoningSummary: nonBlankStringSchema.max(2_000),
+  })
+  .strict();
+
 const failedGenerationResultSchema = z
   .object({
     jobId: jobIdSchema,
@@ -367,9 +440,15 @@ const sourceProfileResultSchema = z.union([
   failedGenerationResultSchema,
 ]);
 
+const leaderboardProfileResultSchema = z.union([
+  completedLeaderboardProfileResultSchema,
+  failedGenerationResultSchema,
+]);
+
 const mailboxResultSchema = z.union([
   completedGenerationResultSchema,
   completedSourceProfileResultSchema,
+  completedLeaderboardProfileResultSchema,
   failedGenerationResultSchema,
 ]);
 
@@ -378,8 +457,13 @@ export type { LeaderboardPreferenceEvidence };
 export type GenerationResult = z.infer<typeof generationResultSchema>;
 export type SourceProfileJob = z.infer<typeof sourceProfileJobSchema>;
 export type SourceProfileResult = z.infer<typeof sourceProfileResultSchema>;
-export type AgentJob = GenerationJob | SourceProfileJob;
-export type AgentResult = GenerationResult | SourceProfileResult;
+export type LeaderboardProfileJob = z.infer<typeof leaderboardProfileJobSchema>;
+export type LeaderboardProfileResult = z.infer<
+  typeof leaderboardProfileResultSchema
+>;
+export type AgentJob = GenerationJob | SourceProfileJob | LeaderboardProfileJob;
+export type AgentResult =
+  GenerationResult | SourceProfileResult | LeaderboardProfileResult;
 
 const reservedJobRecordSchema = z
   .object({
@@ -426,10 +510,21 @@ export interface SourceProfileMailbox {
   archiveSourceProfile(jobId: string): Promise<void>;
 }
 
+export interface LeaderboardProfileMailbox {
+  enqueueLeaderboardProfile(job: LeaderboardProfileJob): Promise<void>;
+  readLeaderboardProfileWork(
+    jobId: string,
+  ): Promise<LeaderboardProfileJob | null>;
+  readLeaderboardProfileResult(
+    jobId: string,
+  ): Promise<LeaderboardProfileResult | null>;
+  archiveLeaderboardProfile(jobId: string): Promise<void>;
+}
+
 export class DuplicateGenerationJobError extends Error {}
 
 export class FileGenerationMailbox
-  implements GenerationMailbox, SourceProfileMailbox
+  implements GenerationMailbox, SourceProfileMailbox, LeaderboardProfileMailbox
 {
   private static readonly inFlightEnqueues = new Map<string, string>();
 
@@ -448,6 +543,11 @@ export class FileGenerationMailbox
 
   async enqueueSourceProfile(job: SourceProfileJob): Promise<void> {
     const validated = sourceProfileJobSchema.parse(job);
+    await this.enqueueValidated(validated);
+  }
+
+  async enqueueLeaderboardProfile(job: LeaderboardProfileJob): Promise<void> {
+    const validated = leaderboardProfileJobSchema.parse(job);
     await this.enqueueValidated(validated);
   }
 
@@ -594,6 +694,36 @@ export class FileGenerationMailbox
     return result ? sourceProfileResultSchema.parse(result) : null;
   }
 
+  async readLeaderboardProfileWork(
+    jobId: string,
+  ): Promise<LeaderboardProfileJob | null> {
+    const validatedJobId = jobIdSchema.parse(jobId);
+    const pending = await this.readJobAt(
+      join(this.rootDirectory, "pending", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (pending) return leaderboardProfileJobSchema.parse(pending);
+    const active = await this.readJobAt(
+      join(this.rootDirectory, "active", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (active) return leaderboardProfileJobSchema.parse(active);
+    const record = await this.readValidated(
+      join(this.rootDirectory, "ids", `${validatedJobId}.json`),
+      generationJobRecordSchema,
+    );
+    return record?.state === "reserved"
+      ? leaderboardProfileJobSchema.parse(record.job)
+      : null;
+  }
+
+  async readLeaderboardProfileResult(
+    jobId: string,
+  ): Promise<LeaderboardProfileResult | null> {
+    const result = await this.readMailboxResult(jobId);
+    return result ? leaderboardProfileResultSchema.parse(result) : null;
+  }
+
   private async readMailboxResult(jobId: string): Promise<AgentResult | null> {
     const validatedJobId = jobIdSchema.parse(jobId);
     const [completed, failed] = await Promise.all([
@@ -658,6 +788,10 @@ export class FileGenerationMailbox
   }
 
   archiveSourceProfile(jobId: string): Promise<void> {
+    return this.archive(jobId);
+  }
+
+  archiveLeaderboardProfile(jobId: string): Promise<void> {
     return this.archive(jobId);
   }
 

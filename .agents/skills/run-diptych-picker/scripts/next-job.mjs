@@ -236,10 +236,8 @@ async function claim(entry) {
 }
 
 function compareJobs(left, right) {
-  const leftRank =
-    left.job.kind === "initial" && left.job.initialSide === "left" ? 0 : 1;
-  const rightRank =
-    right.job.kind === "initial" && right.job.initialSide === "left" ? 0 : 1;
+  const leftRank = priorityRank(left.job);
+  const rightRank = priorityRank(right.job);
   const leftCreatedAt = Date.parse(left.job.createdAt ?? "");
   const rightCreatedAt = Date.parse(right.job.createdAt ?? "");
   const ageOrder =
@@ -254,6 +252,14 @@ function compareJobs(left, right) {
     ageOrder ||
     left.filename.localeCompare(right.filename)
   );
+}
+
+function priorityRank(job) {
+  if (job.kind === "initial" && job.initialSide === "left") return 0;
+  if (job.kind === "source-profile") return 1;
+  if (job.kind === "leaderboard-profile") return 3;
+  if (job.kind === "refill") return 4;
+  return 2;
 }
 
 function isInitialBatch(job, batch) {

@@ -82,6 +82,7 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
     const leader = input.leaderboardEvidence?.entries.find(
       ({ rank }) => rank === 1,
     );
+    const visual = input.leaderboardVisualProfile?.profile;
     const fields = {
       themes: input.preferenceProfile.themes,
       inspiration: input.preferenceProfile.inspiration,
@@ -95,15 +96,27 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
       ...proposal,
       preferenceRevision: {
         ...fields,
-        inspiration: leader
-          ? `Favor transferable qualities from pool leader ${leader.concept} (${leader.wins} wins, ${leader.losses} losses, Elo ${leader.rating}) while continuing to explore distinct compositions.`
-          : `Continue exploring distinct ${proposal.styleTags.join(", ")} treatments until the pool establishes a durable leader.`,
+        inspiration: visual
+          ? [fields.inspiration, visual.inspiration].filter(Boolean).join("; ")
+          : leader
+            ? `Favor transferable qualities from pool leader ${leader.concept} (${leader.wins} wins, ${leader.losses} losses, Elo ${leader.rating}) while continuing to explore distinct compositions.`
+            : `Continue exploring distinct ${proposal.styleTags.join(", ")} treatments until the pool establishes a durable leader.`,
         visualStyle: [
           fields.visualStyle,
-          ...(leader?.style ?? proposal.styleTags),
+          ...(visual?.visualStyle
+            ? [visual.visualStyle]
+            : (leader?.style ?? proposal.styleTags)),
         ]
           .filter(Boolean)
           .join(", "),
+        colorPalette: visual
+          ? [fields.colorPalette, visual.colorPalette]
+              .filter(Boolean)
+              .join(", ")
+          : fields.colorPalette,
+        avoid: visual
+          ? [fields.avoid, visual.avoid].filter(Boolean).join(", ")
+          : fields.avoid,
       },
     };
   }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import type { ChallengerState } from "@/domain/challenger-state";
-import type { GenerationJob } from "./agent-mailbox";
+import type { GenerationJob, LeaderboardProfileJob } from "./agent-mailbox";
 import {
   JsonChallengerRepository,
   MemoryChallengerRepository,
@@ -37,6 +37,32 @@ const expectedRefillJob: GenerationJob = {
   pinnedWinnerId: "winner-1",
 };
 
+const expectedLeaderboardJob: LeaderboardProfileJob = {
+  id: "leaderboard-profile-1",
+  kind: "leaderboard-profile",
+  createdAt: "2026-07-16T20:04:00.000Z",
+  fingerprint: "b".repeat(64),
+  sources: [1, 2].map((rank) => ({
+    candidateId: `leader-${rank}`,
+    rank,
+    rating: 1120 - rank * 20,
+    wins: 4 - rank,
+    losses: rank,
+    favorite: rank === 1,
+    source: "generated" as const,
+    concept: `leader ${rank} concept`,
+    style: ["cinematic"],
+    sourceImage: {
+      filename: `${String(rank).repeat(64)}.png`,
+      path: `profile-sources/${String(rank).repeat(64)}.png`,
+      contentType: "image/png" as const,
+      width: 100,
+      height: 100,
+      byteLength: 1024,
+    },
+  })),
+};
+
 const populatedState: ChallengerState = {
   version: 1,
   sessionId: "session-1",
@@ -56,6 +82,9 @@ const populatedState: ChallengerState = {
       expectedJob: expectedRefillJob,
     },
   ],
+  leaderboardProfileJob: null,
+  leaderboardVisualProfile: null,
+  leaderboardProfileAttemptedFingerprint: null,
   pendingComparison: null,
   pendingSelectionBaseline: null,
   ratings: [
@@ -141,6 +170,45 @@ describe("JsonChallengerRepository", () => {
         },
       ],
     } as ChallengerState;
+
+    await repository.save(expanded);
+
+    await expect(repository.load()).resolves.toEqual(expanded);
+  });
+
+  it("strictly persists leaderboard analysis intent and its cached profile", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "diptych-leaderboard-intent-"),
+    );
+    const repository = new JsonChallengerRepository(
+      join(directory, "challenger-state.json"),
+    );
+    const expanded: ChallengerState = {
+      ...populatedState,
+      leaderboardProfileJob: {
+        jobId: expectedLeaderboardJob.id,
+        fingerprint: expectedLeaderboardJob.fingerprint,
+        enqueuedAt: expectedLeaderboardJob.createdAt,
+        expectedJob: expectedLeaderboardJob,
+      },
+      leaderboardVisualProfile: {
+        fingerprint: "a".repeat(64),
+        sourceCandidateIds: ["older-leader-1", "older-leader-2"],
+        profile: {
+          themes: "architectural portrait studies",
+          inspiration: "diagonal window light",
+          mediaTypes: "editorial photography",
+          visualStyle: "dramatic and tactile",
+          colorPalette: "violet and pale gold",
+          contentLevel: "family-friendly",
+          avoid: "logos and readable text",
+        },
+        reasoningSummary: "Shared traits from the previous leading cohort.",
+        analyzedAt: "2026-07-16T20:03:00.000Z",
+      },
+      leaderboardProfileAttemptedFingerprint:
+        expectedLeaderboardJob.fingerprint,
+    };
 
     await repository.save(expanded);
 

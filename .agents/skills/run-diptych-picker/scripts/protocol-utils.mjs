@@ -60,17 +60,33 @@ export function validateJobKind(job) {
   const kind = job.kind ?? "challenger";
   if (kind === "challenger") return;
   if (kind === "source-profile") {
-    if (
-      !job.sourceImage ||
-      !/^[a-f0-9]{64}\.png$/.test(job.sourceImage.filename ?? "") ||
-      job.sourceImage.path !== `profile-sources/${job.sourceImage.filename}` ||
-      job.sourceImage.contentType !== "image/png" ||
-      !Number.isInteger(job.sourceImage.width) ||
-      !Number.isInteger(job.sourceImage.height) ||
-      !Number.isInteger(job.sourceImage.byteLength)
-    ) {
+    if (!validProfileSource(job.sourceImage)) {
       throw new Error(
         `Source-profile job ${job.id} has invalid image metadata`,
+      );
+    }
+    return;
+  }
+  if (kind === "leaderboard-profile") {
+    const sources = job.sources;
+    if (
+      !/^[a-f0-9]{64}$/.test(job.fingerprint ?? "") ||
+      !Array.isArray(sources) ||
+      sources.length < 2 ||
+      sources.length > 4 ||
+      sources.some(
+        (source) =>
+          typeof source.candidateId !== "string" ||
+          source.candidateId.length === 0 ||
+          !Number.isInteger(source.rank) ||
+          !validProfileSource(source.sourceImage),
+      ) ||
+      new Set(sources.map(({ candidateId }) => candidateId)).size !==
+        sources.length ||
+      new Set(sources.map(({ rank }) => rank)).size !== sources.length
+    ) {
+      throw new Error(
+        `Leaderboard-profile job ${job.id} has invalid source metadata`,
       );
     }
     return;
@@ -97,6 +113,23 @@ export function validateJobKind(job) {
   if (job.initialSide !== "left" && job.initialSide !== "right") {
     throw new Error(`Initial job ${job.id} requires initialSide left or right`);
   }
+}
+
+function validProfileSource(sourceImage) {
+  return Boolean(
+    sourceImage &&
+    /^[a-f0-9]{64}\.png$/.test(sourceImage.filename ?? "") &&
+    sourceImage.path === `profile-sources/${sourceImage.filename}` &&
+    sourceImage.contentType === "image/png" &&
+    Number.isInteger(sourceImage.width) &&
+    sourceImage.width > 0 &&
+    sourceImage.width <= 4096 &&
+    Number.isInteger(sourceImage.height) &&
+    sourceImage.height > 0 &&
+    sourceImage.height <= 4096 &&
+    Number.isInteger(sourceImage.byteLength) &&
+    sourceImage.byteLength > 0,
+  );
 }
 
 export async function reserveOutcome(mailbox, jobId, outcome) {

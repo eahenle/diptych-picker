@@ -34,31 +34,38 @@ const analysisSchema = z
 
 const args = parseArgs(process.argv.slice(2));
 const jobId = required(args, "job");
-if (!JOB_ID.test(jobId)) throw new Error("Invalid source-profile job ID");
+if (!JOB_ID.test(jobId)) throw new Error("Invalid profile-analysis job ID");
 const analysis = analysisSchema.parse(
   JSON.parse(await readFile(required(args, "profile-file"), "utf8")),
 );
 const mailbox = join(dataDirectory(), "agent-mailbox");
 const activeJob = await assertActiveJob(mailbox, jobId);
-if (activeJob.kind !== "source-profile") {
-  throw new Error(`Job ${jobId} is not a source-profile analysis`);
-}
-const sourceStat = await stat(
-  join(dataDirectory(), activeJob.sourceImage.path),
-);
 if (
-  !sourceStat.isFile() ||
-  sourceStat.size !== activeJob.sourceImage.byteLength
+  activeJob.kind !== "source-profile" &&
+  activeJob.kind !== "leaderboard-profile"
 ) {
-  throw new Error("Source image no longer matches the active analysis job");
+  throw new Error(`Job ${jobId} is not a profile analysis`);
+}
+const sourceImages =
+  activeJob.kind === "source-profile"
+    ? [activeJob.sourceImage]
+    : activeJob.sources.map(({ sourceImage }) => sourceImage);
+for (const sourceImage of sourceImages) {
+  const sourceStat = await stat(join(dataDirectory(), sourceImage.path));
+  if (!sourceStat.isFile() || sourceStat.size !== sourceImage.byteLength) {
+    throw new Error("Source image no longer matches the active analysis job");
+  }
 }
 
 await reserveOutcome(mailbox, jobId, "completed");
 const published = await publishTerminal(mailbox, jobId, "completed", {
   jobId,
-  kind: "source-profile",
+  kind: activeJob.kind,
   status: "completed",
   completedAt: new Date().toISOString(),
+  ...(activeJob.kind === "leaderboard-profile"
+    ? { fingerprint: activeJob.fingerprint }
+    : {}),
   ...analysis,
 });
 process.stdout.write(`${JSON.stringify(published)}\n`);

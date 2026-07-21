@@ -605,6 +605,94 @@ describe("agent mailbox scripts", () => {
     });
   });
 
+  it("publishes one shared profile for a leaderboard image cohort", async () => {
+    const root = await createDataDirectory();
+    const id = "leaderboard-profile-1";
+    const fingerprint = "b".repeat(64);
+    const sourceDirectory = join(root, "profile-sources");
+    await mkdir(sourceDirectory, { recursive: true });
+    const sources = await Promise.all(
+      ["#713c89", "#c58b35"].map(async (background, index) => {
+        const bytes = await sharp({
+          create: { width: 48, height: 48, channels: 3, background },
+        })
+          .png()
+          .toBuffer();
+        const filename = `${createHash("sha256").update(bytes).digest("hex")}.png`;
+        await writeFile(join(sourceDirectory, filename), bytes);
+        return {
+          candidateId: `leader-${index + 1}`,
+          rank: index + 1,
+          rating: 1120 - index * 20,
+          wins: 4 - index,
+          losses: index,
+          favorite: index === 0,
+          source: "generated",
+          concept: `leader ${index + 1} concept`,
+          style: ["cinematic"],
+          sourceImage: {
+            filename,
+            path: `profile-sources/${filename}`,
+            contentType: "image/png",
+            width: 48,
+            height: 48,
+            byteLength: bytes.byteLength,
+          },
+        };
+      }),
+    );
+    await putJob(root, "active", {
+      id,
+      kind: "leaderboard-profile",
+      createdAt: "2026-07-20T20:00:00.000Z",
+      fingerprint,
+      sources,
+    });
+    const analysis = {
+      profile: {
+        themes: "violet architectural portrait variations",
+        inspiration: "low-angle framing and diagonal window light",
+        mediaTypes: "editorial photography",
+        visualStyle: "dramatic, geometric, and tactile",
+        colorPalette: "violet, charcoal, and pale gold",
+        contentLevel: "family-friendly",
+        avoid: "exact identity, logos, and readable text",
+      },
+      reasoningSummary:
+        "Summarizes shared visual traits across the strongest pool images.",
+    };
+    const profilePath = await writeWorkFile(
+      root,
+      id,
+      "profile.json",
+      `${JSON.stringify(analysis)}\n`,
+    );
+
+    const completed = JSON.parse(
+      (
+        await runScript(
+          "complete-source-profile.mjs",
+          ["--job", id, "--profile-file", profilePath],
+          root,
+        )
+      ).stdout,
+    );
+
+    expect(completed).toMatchObject({
+      jobId: id,
+      kind: "leaderboard-profile",
+      status: "completed",
+      fingerprint,
+      ...analysis,
+    });
+    await expect(readdir(join(root, "assets"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readdir(join(root, "exports"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("trims every proposal string before publishing", async () => {
     const root = await createDataDirectory();
     await putJob(root, "active", job("job-trimmed"));

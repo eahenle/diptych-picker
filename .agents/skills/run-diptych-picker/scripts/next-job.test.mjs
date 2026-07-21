@@ -69,6 +69,34 @@ function sourceProfile(id, createdAt) {
   };
 }
 
+function leaderboardProfile(id, createdAt) {
+  return {
+    id,
+    kind: "leaderboard-profile",
+    createdAt,
+    fingerprint: "b".repeat(64),
+    sources: [1, 2].map((rank) => ({
+      candidateId: `leader-${rank}`,
+      rank,
+      rating: 1100 - rank * 10,
+      wins: 4 - rank,
+      losses: rank,
+      favorite: rank === 1,
+      source: "generated",
+      concept: `leader ${rank} concept`,
+      style: ["cinematic"],
+      sourceImage: {
+        filename: `${String(rank).repeat(64)}.png`,
+        path: `profile-sources/${String(rank).repeat(64)}.png`,
+        contentType: "image/png",
+        width: 100,
+        height: 100,
+        byteLength: 1024,
+      },
+    })),
+  };
+}
+
 async function dataRoot() {
   return mkdtemp(join(tmpdir(), "diptych-next-job-"));
 }
@@ -183,6 +211,48 @@ test("prioritizes an interactive source-profile analysis before refills", async 
     JSON.parse(stdout),
     sourceProfile("source-profile-1", "2026-07-16T01:00:10.000Z"),
   );
+  await assert.doesNotReject(() =>
+    readFile(
+      join(root, "agent-mailbox", "pending", "older-refill.json"),
+      "utf8",
+    ),
+  );
+});
+
+test("prioritizes interactive source analysis before cached leaderboard analysis", async () => {
+  const root = await dataRoot();
+  await put(
+    root,
+    "pending",
+    leaderboardProfile("leaderboard-profile-1", "2026-07-16T01:00:00.000Z"),
+  );
+  await put(
+    root,
+    "pending",
+    sourceProfile("source-profile-1", "2026-07-16T01:00:10.000Z"),
+  );
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.equal(JSON.parse(stdout).id, "source-profile-1");
+});
+
+test("prioritizes cached leaderboard analysis before refills", async () => {
+  const root = await dataRoot();
+  await put(
+    root,
+    "pending",
+    refill("older-refill", "2026-07-16T01:00:00.000Z"),
+  );
+  const analysis = leaderboardProfile(
+    "leaderboard-profile-1",
+    "2026-07-16T01:00:10.000Z",
+  );
+  await put(root, "pending", analysis);
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.deepEqual(JSON.parse(stdout), analysis);
   await assert.doesNotReject(() =>
     readFile(
       join(root, "agent-mailbox", "pending", "older-refill.json"),

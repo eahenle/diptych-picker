@@ -3,6 +3,7 @@ import type {
   CandidateRating,
   ChallengerState,
 } from "@/domain/challenger-state";
+import { summarizePoolLeaderboard } from "@/domain/challenger-state";
 import {
   preferenceProfileFromSeed,
   type Candidate,
@@ -12,6 +13,8 @@ import type {
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
+  LeaderboardProfileJob,
+  LeaderboardProfileResult,
 } from "./agent-mailbox";
 import {
   MemoryChallengerRepository,
@@ -19,6 +22,7 @@ import {
 } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
 import { GameService, SelectionConflictError } from "./game-service";
+import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import type { AssetStore } from "./providers";
 import { MemoryGameRepository, type GameRepository } from "./repository";
 
@@ -143,6 +147,79 @@ function mailbox() {
   };
 }
 
+function leaderboardProfiles() {
+  const work = new Map<string, LeaderboardProfileJob>();
+  const results = new Map<string, LeaderboardProfileResult>();
+  const fingerprint = "b".repeat(64);
+  const desired = vi.fn<LeaderboardProfileCoordinator["desired"]>((state) => {
+    const entries = summarizePoolLeaderboard(state).slice(0, 4);
+    return entries.length >= 2 ? { fingerprint, entries } : null;
+  });
+  const prepare = vi.fn<LeaderboardProfileCoordinator["prepare"]>(
+    async (id, createdAt, request) => ({
+      id,
+      kind: "leaderboard-profile",
+      createdAt,
+      fingerprint: request.fingerprint,
+      sources: request.entries.map((entry) => ({
+        candidateId: entry.candidate.id,
+        rank: entry.rank,
+        rating: entry.rating,
+        wins: entry.wins,
+        losses: entry.losses,
+        favorite: entry.favorite,
+        source: entry.source,
+        concept: entry.candidate.concept,
+        style: entry.candidate.style,
+        sourceImage: {
+          filename: `${String(entry.rank).repeat(64)}.png`,
+          path: `profile-sources/${String(entry.rank).repeat(64)}.png`,
+          contentType: "image/png",
+          width: 100,
+          height: 100,
+          byteLength: 1024,
+        },
+      })),
+    }),
+  );
+  const enqueue = vi.fn<LeaderboardProfileCoordinator["enqueue"]>(
+    async (job) => {
+      work.set(job.id, job);
+    },
+  );
+  const readWork = vi.fn<LeaderboardProfileCoordinator["readWork"]>(
+    async (jobId) => work.get(jobId) ?? null,
+  );
+  const readResult = vi.fn<LeaderboardProfileCoordinator["readResult"]>(
+    async (jobId) => results.get(jobId) ?? null,
+  );
+  const archive = vi.fn<LeaderboardProfileCoordinator["archive"]>(
+    async (jobId) => {
+      work.delete(jobId);
+      results.delete(jobId);
+    },
+  );
+  const coordinator: LeaderboardProfileCoordinator = {
+    desired,
+    prepare,
+    enqueue,
+    readWork,
+    readResult,
+    archive,
+  };
+  return {
+    coordinator,
+    fingerprint,
+    desired,
+    prepare,
+    enqueue,
+    archive,
+    setResult(result: LeaderboardProfileResult) {
+      results.set(result.jobId, result);
+    },
+  };
+}
+
 function completedResult(
   jobId: string,
   completedAt = "2026-07-16T01:01:40.000Z",
@@ -190,6 +267,7 @@ function serviceFor(options: {
   createId?: () => string;
   random?: () => number;
   bufferTarget?: number;
+  leaderboardProfiles?: ReturnType<typeof leaderboardProfiles>;
 }) {
   const game = options.game ?? gameState();
   const gameRepository =
@@ -215,6 +293,7 @@ function serviceFor(options: {
     options.createId ??
       ids("refill-1", "refill-2", "refill-3", "refill-4", "refill-5"),
     options.random ?? (() => 0),
+    options.leaderboardProfiles?.coordinator,
   );
   return {
     service,
@@ -226,6 +305,77 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("caches leaderboard image analysis and includes it in adaptive refills", async () => {
+    const base = gameState();
+    const game = gameState({
+      preferenceProfile: {
+        ...preferenceProfileFromSeed(base.preferenceSeed),
+        adaptationMode: "adaptive",
+      },
+    });
+    const analysis = leaderboardProfiles();
+    const context = serviceFor({
+      game,
+      challengers: challengerState(game),
+      leaderboardProfiles: analysis,
+      createId: ids("analysis-1", "refill-1"),
+    });
+
+    await context.service.reconcile();
+
+    expect(analysis.enqueue).toHaveBeenCalledOnce();
+    await expect(context.challengerRepository.load()).resolves.toMatchObject({
+      leaderboardProfileJob: {
+        jobId: "analysis-1",
+        fingerprint: analysis.fingerprint,
+      },
+      leaderboardProfileAttemptedFingerprint: analysis.fingerprint,
+    });
+
+    analysis.setResult({
+      jobId: "analysis-1",
+      kind: "leaderboard-profile",
+      status: "completed",
+      completedAt: "2026-07-16T01:01:00.000Z",
+      fingerprint: analysis.fingerprint,
+      profile: {
+        themes: "architectural portrait studies",
+        inspiration: "diagonal window light and low-angle framing",
+        mediaTypes: "editorial photography",
+        visualStyle: "dramatic, geometric, and tactile",
+        colorPalette: "violet, charcoal, and pale gold",
+        contentLevel: "family-friendly",
+        avoid: "logos and readable text",
+      },
+      reasoningSummary: "Shared traits across the strongest pool images.",
+    });
+
+    await context.service.reconcile();
+
+    const cached = await context.challengerRepository.load();
+    expect(cached).toMatchObject({
+      leaderboardProfileJob: null,
+      leaderboardVisualProfile: {
+        fingerprint: analysis.fingerprint,
+        profile: {
+          inspiration: "diagonal window light and low-angle framing",
+        },
+      },
+    });
+    expect(analysis.archive).toHaveBeenCalledWith("analysis-1");
+
+    await context.service.select("left", 3);
+
+    expect(context.queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "refill-1",
+        kind: "refill",
+        leaderboardVisualProfile: cached?.leaderboardVisualProfile,
+      }),
+    );
+    expect(analysis.prepare).toHaveBeenCalledOnce();
+  });
+
   it("adopts a model-authored profile revision only after its candidate wins", async () => {
     const baseProfile = preferenceProfileFromSeed(
       "industrial, gothic, natural, and surprising",

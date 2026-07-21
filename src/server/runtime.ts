@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   BufferHealth,
@@ -12,6 +13,7 @@ import {
   summarizeComparisonHistory,
   summarizeDisplayedScores,
   summarizePoolLeaderboard,
+  type PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
 import { FileGenerationMailbox } from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
@@ -30,11 +32,13 @@ import {
 import {
   MockAgentWorker,
   MockGenerationMailbox,
+  MockLeaderboardProfileMailbox,
   MockSourceProfileMailbox,
 } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
 import { challengerConfig } from "./challenger-config";
 import { SourceProfileService } from "./source-profile-service";
+import { LeaderboardProfileService } from "./leaderboard-profile-service";
 import {
   CoProcGenerationTransport,
   TransportNotifyingGenerationMailbox,
@@ -118,11 +122,58 @@ const sourceProfileService = new SourceProfileService({
   mailbox: sourceProfileMailbox,
   sourceDirectory: join(dataDirectory, "profile-sources"),
 });
+const leaderboardProfileMailbox = mockAgent
+  ? new MockLeaderboardProfileMailbox(fileGenerationMailbox, mockAgent)
+  : fileGenerationMailbox;
+const leaderboardProfileService = new LeaderboardProfileService({
+  mailbox: leaderboardProfileMailbox,
+  sourceDirectory: join(dataDirectory, "profile-sources"),
+  readCandidateImage: async (entry: PoolLeaderboardEntry) => {
+    if (entry.source === "generated") {
+      const match = entry.candidate.imageUrl.match(
+        /^\/api\/assets\/([a-zA-Z0-9-]+\.png)$/,
+      );
+      if (!match) {
+        throw new Error(
+          `Invalid generated leaderboard asset URL for ${entry.candidate.id}`,
+        );
+      }
+      return {
+        contents: await assetStore.read(match[1]),
+        contentType: "image/png",
+      };
+    }
+    const match = entry.candidate.imageUrl.match(
+      /^\/seed-assets\/([a-z0-9]+(?:-[a-z0-9]+)*\.png)$/,
+    );
+    if (!match) {
+      throw new Error(
+        `Invalid curated leaderboard asset URL for ${entry.candidate.id}`,
+      );
+    }
+    return {
+      contents: await readFile(
+        join(
+          /* turbopackIgnore: true */ process.cwd(),
+          "public",
+          "seed-assets",
+          match[1],
+        ),
+      ),
+      contentType: "image/png",
+    };
+  },
+});
 export const gameService = new GameService(
   repository,
   challengerRepository,
   generationMailbox,
   assetStore,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  leaderboardProfileService,
 );
 const forceGeneratedInitial =
   process.env.GENERATE_INITIAL_CANDIDATES === "true";
