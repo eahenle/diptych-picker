@@ -557,6 +557,36 @@ describe("GameScreen challenger reconciliation", () => {
     );
   });
 
+  it("accepts gameplay shortcuts after preference focus returns to its opener", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    const preferencesButton = screen.getByRole("button", {
+      name: "Preferences",
+    });
+    preferencesButton.focus();
+    fireEvent.click(preferencesButton);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(preferencesButton).toHaveFocus();
+    fireEvent.keyDown(preferencesButton, { key: "b" });
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/game/select",
+        expect.objectContaining({
+          body: JSON.stringify({ winnerSide: "right", roundNumber: 1 }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        }),
+      ),
+    );
+  });
+
   it("shows live ready-queue and reusable-pool health", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1429,19 +1459,26 @@ describe("GameScreen challenger reconciliation", () => {
         name: "Rounds toward next preference rewrite",
       }),
     ).toHaveAttribute("value", "5");
+    const freedomSlider = screen.getByRole("slider", {
+      name: "Model rewrite freedom",
+    });
+    expect(freedomSlider).toHaveValue("2");
+    expect(freedomSlider.style.getPropertyValue("--adaptation-fill")).toBe(
+      "100%",
+    );
 
-    fireEvent.change(
-      screen.getByRole("slider", { name: "Model rewrite freedom" }),
-      { target: { value: "1" } },
+    fireEvent.change(freedomSlider, { target: { value: "1" } });
+    expect(freedomSlider.style.getPropertyValue("--adaptation-fill")).toBe(
+      "50%",
     );
     expect(cadence).toHaveTextContent("Next rewrite checkpoint in 15 rounds");
     expect(cadence).toHaveTextContent(
       "0 of 15 rounds completed since the last rewrite checkpoint.",
     );
 
-    fireEvent.change(
-      screen.getByRole("slider", { name: "Model rewrite freedom" }),
-      { target: { value: "0" } },
+    fireEvent.change(freedomSlider, { target: { value: "0" } });
+    expect(freedomSlider.style.getPropertyValue("--adaptation-fill")).toBe(
+      "0%",
     );
     expect(
       screen.queryByRole("status", { name: "Preference rewrite cadence" }),
