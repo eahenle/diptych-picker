@@ -831,6 +831,33 @@ describe("GameScreen challenger reconciliation", () => {
       screen.getByRole("button", { name: "Close expanded image" }),
     );
     expect(imageDialog).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "Pool leaderboard" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Close leaderboard" }),
+    ).toHaveFocus();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Violet portrait larger" }),
+    );
+    expect(
+      screen.getByRole("dialog", {
+        name: "Expanded image: Violet portrait",
+      }),
+    ).toBeVisible();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", {
+        name: "Expanded image: Violet portrait",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "Pool leaderboard" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Close leaderboard" }),
+    ).toHaveFocus();
   });
 
   it("closes non-busy dialogs with Escape", async () => {
