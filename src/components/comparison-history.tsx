@@ -11,7 +11,7 @@ import modalStyles from "./game-modal.module.css";
 import styles from "./comparison-history.module.css";
 
 interface ComparisonHistoryProps {
-  entries: ComparisonHistoryEntry[];
+  entries: readonly ComparisonHistoryEntry[];
   total: number;
   loading: boolean;
   error: string | null;
