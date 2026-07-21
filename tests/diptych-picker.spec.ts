@@ -709,8 +709,10 @@ test("uses an enabled weighted prompt card for future generation jobs", async ({
       response.url().endsWith("/api/game/preferences/deck") &&
       response.request().method() === "PATCH",
   );
-  await page.getByRole("checkbox").check();
+  const deckToggle = page.getByRole("checkbox");
+  await deckToggle.click();
   expect((await enableResponse).status()).toBe(200);
+  await expect(deckToggle).toBeChecked();
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await select(page, "left", 2);
