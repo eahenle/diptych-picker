@@ -463,4 +463,45 @@ describe("POST /api/game/select", () => {
     expect(bothLose).toHaveBeenCalledWith(6);
     expect(select).not.toHaveBeenCalled();
   });
+
+  it("returns a client error for malformed selection JSON", async () => {
+    const { POST } = await import("./select/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/game/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not-json",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Selection must be valid JSON.",
+    });
+    expect(select).not.toHaveBeenCalled();
+    expect(tie).not.toHaveBeenCalled();
+    expect(bothLose).not.toHaveBeenCalled();
+  });
+
+  it("rejects ambiguous selection payloads", async () => {
+    const { POST } = await import("./select/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/game/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          winnerSide: "left",
+          outcome: "tie",
+          roundNumber: 7,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(select).not.toHaveBeenCalled();
+    expect(tie).not.toHaveBeenCalled();
+    expect(bothLose).not.toHaveBeenCalled();
+  });
 });
