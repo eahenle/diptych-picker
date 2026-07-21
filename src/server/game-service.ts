@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   drawFallback,
@@ -128,6 +129,7 @@ export class GameService {
       preferenceSeed,
     ),
     expectedPreferenceProfile?: PreferenceProfile,
+    variationSourceCandidateId?: string | null,
   ): Promise<GameState> {
     return this.withStateLocks(async () => {
       const [current, challengers] = await Promise.all([
@@ -155,18 +157,27 @@ export class GameService {
         );
       }
 
+      const variationSource = this.resolveVariationSource(
+        current,
+        challengers,
+        variationSourceCandidateId,
+      );
       const updated = this.withoutGenerationNotice({
         ...current,
         preferenceSeed,
         preferenceProfile,
+        ...(variationSource ? { variationSource } : {}),
       });
+      if (!variationSource) delete updated.variationSource;
       await this.gameRepository.save(updated);
       const generationPreferencesChanged =
         current.preferenceSeed !== preferenceSeed ||
         (current.preferenceProfile?.adaptationMode ?? "static") !==
           preferenceProfile.adaptationMode ||
         (current.preferenceProfile?.adaptationStrength ?? "guided") !==
-          (preferenceProfile.adaptationStrength ?? "guided");
+          (preferenceProfile.adaptationStrength ?? "guided") ||
+        current.variationSource?.candidateId !==
+          updated.variationSource?.candidateId;
       if (!challengers || !generationPreferencesChanged) {
         return updated;
       }
@@ -623,7 +634,7 @@ export class GameService {
       };
     }
 
-    const generated = this.candidateFromResult(result);
+    const generated = this.candidateFromResult(result, expected);
     if (!generated) {
       return {
         game,
@@ -899,6 +910,9 @@ export class GameService {
         preferenceProfile:
           context.game.preferenceProfile ??
           preferenceProfileFromSeed(context.game.preferenceSeed),
+        ...(context.game.variationSource
+          ? { variationSource: context.game.variationSource }
+          : {}),
         sessionId: state.sessionId,
         pinnedWinnerId: context.retainedWinner.id,
         comparisonOutcome: context.comparisonOutcome,
@@ -1521,6 +1535,7 @@ export class GameService {
 
   private candidateFromResult(
     result: Extract<GenerationResult, { status: "completed" }>,
+    expectedJob?: Pick<GenerationJob, "preferenceSeed" | "variationSource">,
   ): Candidate | null {
     const expectedCandidateId = `challenger-${result.jobId}`;
     if (result.asset.candidateId !== expectedCandidateId) return null;
@@ -1532,6 +1547,18 @@ export class GameService {
       style: result.proposal.styleTags,
       reasoningSummary: result.proposal.reasoningSummary,
       preferenceRevision: result.proposal.preferenceRevision,
+      ...(expectedJob?.variationSource
+        ? {
+            lineage: {
+              kind: "variation" as const,
+              parentCandidateId: expectedJob.variationSource.candidateId,
+              parentConcept: expectedJob.variationSource.concept,
+              preferenceFingerprint: createHash("sha256")
+                .update(expectedJob.preferenceSeed)
+                .digest("hex"),
+            },
+          }
+        : {}),
       createdAt: result.completedAt,
       winCount: 0,
     };
@@ -1548,6 +1575,27 @@ export class GameService {
       state.ready.some(({ candidate }) => candidate.id === candidateId) ||
       state.ratings.some(({ candidate }) => candidate.id === candidateId)
     );
+  }
+
+  private resolveVariationSource(
+    game: GameState,
+    challengers: ChallengerState | null,
+    candidateId: string | null | undefined,
+  ) {
+    if (candidateId === undefined) return game.variationSource;
+    if (candidateId === null) return undefined;
+    const candidates = [
+      game.round.leftCandidate,
+      game.round.rightCandidate,
+      ...(challengers?.ratings.map(({ candidate }) => candidate) ?? []),
+    ];
+    const source = candidates.find((candidate) => candidate.id === candidateId);
+    if (!source) {
+      throw new SelectionConflictError(
+        "That variation source is no longer available in this game.",
+      );
+    }
+    return { candidateId: source.id, concept: source.concept };
   }
 
   private newRating(

@@ -9,7 +9,7 @@ normal implementation and play-testing loop.
 1. [x] Make Queue inspectable so the compact count clearly separates ready images,
        jobs actively generating, jobs waiting for a worker, and superseded work
        draining after a preference change. Keep the endpoint aggregate-only.
-2. [ ] Add **Explore variations** from active candidates, leaderboard entries,
+2. [x] Add **Explore variations** from active candidates, leaderboard entries,
        history, and favorites. Reuse the private source-image analysis pipeline to
        extract transferable visual themes, then preserve parent and profile lineage
        for every resulting branch.
@@ -38,6 +38,19 @@ worker concurrency. When preferences change while work is active, the view also
 reports old-profile jobs that are safely draining before replacement capacity
 opens. Prompts, job identifiers, and mailbox paths remain private.
 
+### Candidate-derived variation setup
+
+Every expanded candidate view now offers **Explore variations**. Because active,
+leaderboard, history, and favorited candidates share that inspector, the action
+works consistently from each surface. It privately reuses source-image
+normalization and analysis to populate an editable preference draft from the
+candidate's transferable themes, composition, medium, style, and palette; it
+does not save the profile automatically. Saving records the canonical source
+candidate on the game and on each resulting generation request. Generated
+candidates preserve the parent's ID and concept plus a SHA-256 fingerprint of
+the exact composed preference profile that produced them; the expanded view
+surfaces the parent concept without exposing prompt text.
+
 ## 2026-07-20
 
 ### Large image inspection
@@ -60,7 +73,7 @@ The lower-left score overlay shows rounded Elo for established candidates, `✦`
 
 The Round metric opens a newest-first timeline of prior decisions. Each row resolves display-safe winner and rejected-candidate thumbnails, concepts, and concise style tags from the durable rating catalog without exposing prompts. Available thumbnails open the same full-size image inspector as active and leaderboard images. The first iteration shows up to fifty decisions and retains a total count.
 
-History and pool rows let the player favorite exceptional candidates. Favorite state belongs to the durable rating catalog, is shared across both views, survives new games and save-file round trips, and remains independent of Elo and reusable-pool membership. Richer lineage remains a separate follow-up.
+History and pool rows let the player favorite exceptional candidates. Favorite state belongs to the durable rating catalog, is shared across both views, survives new games and save-file round trips, and remains independent of Elo and reusable-pool membership. Candidate-derived variation branches now retain direct parent and profile-fingerprint lineage; a richer branching gallery remains a separate follow-up.
 
 ### Profile-wide adaptation
 

@@ -23,6 +23,7 @@ import {
   type PreferenceProfile,
   type PreferenceRevision,
   type Side,
+  type VariationSource,
 } from "@/domain/game";
 import type {
   ComparisonHistoryCandidate,
@@ -319,6 +320,8 @@ export function GameScreen() {
   );
   const [preferenceDraftBaseProfile, setPreferenceDraftBaseProfile] =
     useState<PreferenceProfile>(() => preferenceProfileFromSeed(""));
+  const [preferenceVariationSource, setPreferenceVariationSource] =
+    useState<VariationSource | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [bufferHealth, setBufferHealth] = useState<BufferHealth | null>(null);
@@ -339,6 +342,9 @@ export function GameScreen() {
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
+  const queuedPreferenceVariationSourceRef = useRef<VariationSource | null>(
+    null,
+  );
   const queuedPreferenceSaveStartedRef = useRef(false);
   const openImageInspector = useCallback(
     (
@@ -1300,7 +1306,11 @@ export function GameScreen() {
   };
 
   const persistPreferences = useCallback(
-    async (profile: PreferenceProfile, expectedProfile: PreferenceProfile) => {
+    async (
+      profile: PreferenceProfile,
+      expectedProfile: PreferenceProfile,
+      variationSource: VariationSource | null,
+    ) => {
       setPreferencesSaving(true);
       try {
         const state = await readJson<GameState>(
@@ -1310,6 +1320,7 @@ export function GameScreen() {
             body: JSON.stringify({
               preferenceProfile: profile,
               expectedPreferenceProfile: expectedProfile,
+              variationSourceCandidateId: variationSource?.candidateId ?? null,
             }),
           }),
         );
@@ -1322,6 +1333,7 @@ export function GameScreen() {
         );
       } finally {
         queuedPreferenceProfileRef.current = null;
+        queuedPreferenceVariationSourceRef.current = null;
         queuedPreferenceSaveStartedRef.current = false;
         setPreferenceSaveQueued(false);
         setPreferencesSaving(false);
@@ -1333,16 +1345,24 @@ export function GameScreen() {
   const savePreferences = async () => {
     if (selectionBoundWait) {
       queuedPreferenceProfileRef.current = preferenceDraft;
+      queuedPreferenceVariationSourceRef.current = preferenceVariationSource;
       queuedPreferenceSaveStartedRef.current = false;
       setPreferenceSaveQueued(true);
       setPreferencesSaving(true);
       setLocalError(null);
       return;
     }
-    await persistPreferences(preferenceDraft, preferenceDraftBaseProfile);
+    await persistPreferences(
+      preferenceDraft,
+      preferenceDraftBaseProfile,
+      preferenceVariationSource,
+    );
   };
 
-  const analyzeSourceImage = async (image: File) => {
+  const analyzeSourceImage = async (
+    image: File,
+    variationSource: VariationSource | null = null,
+  ) => {
     if (sourceProfileAnalyzing || preferencesSaving) return;
     const controller = new AbortController();
     sourceProfileControllerRef.current?.abort();
@@ -1379,6 +1399,7 @@ export function GameScreen() {
         adaptationSourceRejectedIds: [],
       }));
       setSourceProfileSummary(result.reasoningSummary);
+      setPreferenceVariationSource(variationSource);
       const acknowledged = await fetch(
         `/api/game/preferences/source?jobId=${encodeURIComponent(result.jobId)}`,
         { method: "DELETE", signal: controller.signal },
@@ -1417,6 +1438,7 @@ export function GameScreen() {
     const currentProfile =
       game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed);
     queuedPreferenceProfileRef.current = null;
+    queuedPreferenceVariationSourceRef.current = null;
     queuedPreferenceSaveStartedRef.current = false;
     setPreferenceSaveQueued(false);
     setPreferencesSaving(false);
@@ -1424,7 +1446,43 @@ export function GameScreen() {
     setSourceProfileSummary(null);
     setPreferenceDraft(currentProfile);
     setPreferenceDraftBaseProfile(currentProfile);
+    setPreferenceVariationSource(game.variationSource ?? null);
     setPreferencesOpen(true);
+  };
+
+  const exploreCandidateVariations = async (
+    candidate: InspectableCandidate,
+  ) => {
+    setImageInspector(null);
+    openPreferences();
+    try {
+      const response = await fetch(candidate.imageUrl, {
+        cache: "force-cache",
+      });
+      if (!response.ok) {
+        throw new Error("The selected image could not be loaded for analysis.");
+      }
+      const contents = await response.blob();
+      const contentType = contents.type || "image/png";
+      const extension =
+        contentType === "image/jpeg"
+          ? "jpg"
+          : contentType === "image/webp"
+            ? "webp"
+            : "png";
+      await analyzeSourceImage(
+        new File([contents], `${candidate.id}.${extension}`, {
+          type: contentType,
+        }),
+        { candidateId: candidate.id, concept: candidate.concept },
+      );
+    } catch (error) {
+      setSourceProfileError(
+        error instanceof Error
+          ? error.message
+          : "Could not analyze the selected image",
+      );
+    }
   };
 
   const dismissGenerationNotice = async () => {
@@ -1507,7 +1565,11 @@ export function GameScreen() {
     const currentProfile =
       game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed);
     queuedPreferenceSaveStartedRef.current = true;
-    void persistPreferences(queuedProfile, currentProfile);
+    void persistPreferences(
+      queuedProfile,
+      currentProfile,
+      queuedPreferenceVariationSourceRef.current,
+    );
   }, [game, persistPreferences, preferenceSaveQueued, selectionBoundWait]);
 
   return (
@@ -1806,6 +1868,7 @@ export function GameScreen() {
           state={imageInspector}
           onClose={closeImageInspector}
           onNavigate={navigateImageInspector}
+          onExplore={(candidate) => void exploreCandidateVariations(candidate)}
         />
       ) : null}
 
@@ -1879,6 +1942,7 @@ export function GameScreen() {
           sourceAnalyzing={sourceProfileAnalyzing}
           sourceError={sourceProfileError}
           sourceSummary={sourceProfileSummary}
+          variationSource={preferenceVariationSource}
           selectionBoundWait={selectionBoundWait}
           onClose={closePreferences}
           onSave={() => void savePreferences()}

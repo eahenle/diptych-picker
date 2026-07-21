@@ -47,12 +47,24 @@ const preferencePatchSchema = z
       .object({
         preferenceProfile: preferenceProfileSchema,
         expectedPreferenceProfile: preferenceProfileSchema.optional(),
+        variationSourceCandidateId: z
+          .string()
+          .trim()
+          .min(1)
+          .nullable()
+          .optional(),
       })
       .strict(),
     z
       .object({
         preferenceSeed: z.string().trim().min(20).max(4_000),
         expectedPreferenceProfile: preferenceProfileSchema.optional(),
+        variationSourceCandidateId: z
+          .string()
+          .trim()
+          .min(1)
+          .nullable()
+          .optional(),
       })
       .strict(),
   ])
@@ -64,6 +76,7 @@ const preferencePatchSchema = z
     return {
       preferenceProfile,
       expectedPreferenceProfile: value.expectedPreferenceProfile,
+      variationSourceCandidateId: value.variationSourceCandidateId,
       preferenceSeed:
         "preferenceProfile" in value
           ? composePreferenceSeed(preferenceProfile)
@@ -112,6 +125,7 @@ export async function PATCH(request: Request) {
         parsed.data.preferenceSeed,
         parsed.data.preferenceProfile,
         parsed.data.expectedPreferenceProfile,
+        parsed.data.variationSourceCandidateId,
       ),
     );
   } catch (error) {

@@ -104,6 +104,22 @@ const preferenceProfileSchema = z.union([
   transitionalPreferenceProfileSchema,
 ]);
 
+const variationSourceSchema = z
+  .object({
+    candidateId: z.string().min(1),
+    concept: z.string().min(1),
+  })
+  .strict();
+
+const candidateLineageSchema = z
+  .object({
+    kind: z.literal("variation"),
+    parentCandidateId: z.string().min(1),
+    parentConcept: z.string().min(1),
+    preferenceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+
 const candidateSchema = z
   .object({
     id: z.string().min(1),
@@ -115,6 +131,7 @@ const candidateSchema = z
     winCount: z.number().int().nonnegative(),
     reasoningSummary: z.string().optional(),
     preferenceRevision: preferenceRevisionSchema.optional(),
+    lineage: candidateLineageSchema.optional(),
   })
   .strict();
 
@@ -275,6 +292,7 @@ const refillGenerationJobSnapshotSchema = z
     leaderboardVisualProfile: leaderboardVisualProfileSchema.optional(),
     preferenceSeed: z.string().min(1),
     preferenceProfile: preferenceProfileSchema.optional(),
+    variationSource: variationSourceSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
     pinnedWinnerId: z.string().min(1),
     comparisonOutcome: z.enum(["tie", "both-lose"]).optional(),

@@ -353,6 +353,7 @@ export async function updatePreferenceSeed(
   preferenceSeed: string,
   preferenceProfile?: PreferenceProfile,
   expectedPreferenceProfile?: PreferenceProfile,
+  variationSourceCandidateId?: string | null,
 ): Promise<GameState> {
   const start = await getOrCreateGame();
   if (start.status !== "ready") {
@@ -364,6 +365,7 @@ export async function updatePreferenceSeed(
     preferenceSeed,
     preferenceProfile,
     expectedPreferenceProfile,
+    variationSourceCandidateId,
   );
 }
 

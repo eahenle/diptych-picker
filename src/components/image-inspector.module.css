@@ -44,9 +44,30 @@
   width: auto;
   max-width: 100%;
   height: auto;
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 190px);
   object-fit: contain;
   background: #050607;
+}
+
+.exploreButton {
+  min-height: 40px;
+  padding: 0 18px;
+  color: #ead8cc;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(180, 104, 73, 0.13);
+  border: 1px solid rgba(180, 104, 73, 0.65);
+  cursor: pointer;
+}
+
+.exploreButton:hover,
+.exploreButton:focus-visible {
+  color: #fff;
+  background: rgba(180, 104, 73, 0.24);
+  border-color: var(--copper-bright);
+  outline: none;
 }
 
 .dialog figcaption {

@@ -32,6 +32,18 @@ export type PreferenceRevision = Omit<
   | "adaptationSourceRejectedIds"
 >;
 
+export interface VariationSource {
+  candidateId: string;
+  concept: string;
+}
+
+export interface CandidateLineage {
+  kind: "variation";
+  parentCandidateId: string;
+  parentConcept: string;
+  preferenceFingerprint: string;
+}
+
 export interface Candidate {
   id: string;
   imageUrl: string;
@@ -42,6 +54,7 @@ export interface Candidate {
   winCount: number;
   reasoningSummary?: string;
   preferenceRevision?: PreferenceRevision;
+  lineage?: CandidateLineage;
 }
 
 export interface Round {
@@ -107,6 +120,7 @@ export interface GameState {
   history: SelectionHistory[];
   preferenceSeed: string;
   preferenceProfile?: PreferenceProfile;
+  variationSource?: VariationSource;
   pendingSelection?: PendingSelection;
   mailboxCleanupJobId?: string;
   errorMessage?: string;

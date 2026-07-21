@@ -9,7 +9,7 @@ import styles from "./image-inspector.module.css";
 
 export type InspectableCandidate = Pick<
   Candidate,
-  "id" | "imageUrl" | "concept"
+  "id" | "imageUrl" | "concept" | "lineage"
 >;
 
 export interface ImageInspectorState {
@@ -22,12 +22,14 @@ interface ImageInspectorProps {
   state: ImageInspectorState;
   onClose: () => void;
   onNavigate: (direction: -1 | 1) => void;
+  onExplore: (candidate: InspectableCandidate) => void;
 }
 
 export function ImageInspector({
   state,
   onClose,
   onNavigate,
+  onExplore,
 }: ImageInspectorProps) {
   const candidate = state.candidates[state.index];
 
@@ -90,7 +92,17 @@ export function ImageInspector({
                 {" · Use Left and Right arrow keys"}
               </small>
             ) : null}
+            {candidate.lineage ? (
+              <small>Variation of {candidate.lineage.parentConcept}</small>
+            ) : null}
           </figcaption>
+          <button
+            type="button"
+            className={styles.exploreButton}
+            onClick={() => onExplore(candidate)}
+          >
+            Explore variations
+          </button>
         </figure>
       </>
     </ModalShell>

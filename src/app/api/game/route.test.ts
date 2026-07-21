@@ -258,6 +258,7 @@ describe("PATCH /api/game", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           preferenceProfile,
+          variationSourceCandidateId: "candidate-parent",
           expectedPreferenceProfile: {
             ...preferenceProfile,
             adaptationMode: "static",
@@ -279,6 +280,7 @@ describe("PATCH /api/game", () => {
       ].join("\n"),
       preferenceProfile,
       { ...preferenceProfile, adaptationMode: "static" },
+      "candidate-parent",
     );
   });
 

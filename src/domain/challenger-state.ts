@@ -55,6 +55,7 @@ export interface RefillGenerationJobSnapshot {
   leaderboardVisualProfile?: LeaderboardVisualProfile;
   preferenceSeed: string;
   preferenceProfile?: PreferenceProfile;
+  variationSource?: import("./game").VariationSource;
   sessionId: string;
   pinnedWinnerId: string;
   comparisonOutcome?: "tie" | "both-lose";
@@ -174,7 +175,10 @@ export interface CandidateBatchDraw {
 
 export interface PoolLeaderboardEntry {
   rank: number;
-  candidate: Pick<Candidate, "id" | "imageUrl" | "concept" | "style">;
+  candidate: Pick<
+    Candidate,
+    "id" | "imageUrl" | "concept" | "style" | "lineage"
+  >;
   rating: number;
   wins: number;
   losses: number;
@@ -205,6 +209,7 @@ export interface ComparisonHistoryCandidate {
   concept: string;
   style: string[];
   favorite: boolean | null;
+  lineage?: Candidate["lineage"];
 }
 
 export interface WinningComparisonHistoryEntry {
@@ -268,16 +273,20 @@ export function summarizeBufferHealth(
 export function refillJobMatchesGenerationPreferences(
   job: Pick<
     RefillGenerationJobSnapshot,
-    "preferenceSeed" | "preferenceProfile"
+    "preferenceSeed" | "preferenceProfile" | "variationSource"
   >,
-  game: Pick<GameState, "preferenceSeed" | "preferenceProfile">,
+  game: Pick<
+    GameState,
+    "preferenceSeed" | "preferenceProfile" | "variationSource"
+  >,
 ): boolean {
   return (
     job.preferenceSeed === game.preferenceSeed &&
     (job.preferenceProfile?.adaptationMode ?? "static") ===
       (game.preferenceProfile?.adaptationMode ?? "static") &&
     (job.preferenceProfile?.adaptationStrength ?? "guided") ===
-      (game.preferenceProfile?.adaptationStrength ?? "guided")
+      (game.preferenceProfile?.adaptationStrength ?? "guided") &&
+    job.variationSource?.candidateId === game.variationSource?.candidateId
   );
 }
 
@@ -396,6 +405,7 @@ export function summarizePoolLeaderboard(
         imageUrl: candidate.imageUrl,
         concept: candidate.concept,
         style: candidate.style,
+        ...(candidate.lineage ? { lineage: candidate.lineage } : {}),
       },
       rating: Math.round(rating),
       wins,
@@ -459,6 +469,7 @@ export function summarizeComparisonHistory(
       concept: candidate?.concept ?? fallbackConcept,
       style: candidate?.style ?? [],
       favorite: rating ? Boolean(rating.favorite) : null,
+      ...(candidate?.lineage ? { lineage: candidate.lineage } : {}),
     };
   };
 

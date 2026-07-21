@@ -589,6 +589,103 @@ describe("GameService challenger buffer", () => {
     ).toEqual(["adaptive", "adaptive"]);
   });
 
+  it("starts a candidate-derived variation branch and carries it into refill work", async () => {
+    const game = gameState({
+      round: {
+        ...gameState().round,
+        retainedCandidateId: "left",
+        winStreak: 1,
+      },
+    });
+    const context = serviceFor({
+      game,
+      challengers: challengerState(game),
+      bufferTarget: 1,
+      createId: ids("variation-refill"),
+    });
+    const profile = preferenceProfileFromSeed(
+      "candidate-derived architectural portrait variations",
+    );
+
+    const saved = await context.service.updatePreferenceSeed(
+      profile.themes,
+      profile,
+      undefined,
+      "right",
+    );
+
+    expect(saved.variationSource).toEqual({
+      candidateId: "right",
+      concept: "right concept",
+    });
+    expect(context.queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "variation-refill",
+        variationSource: {
+          candidateId: "right",
+          concept: "right concept",
+        },
+      }),
+    );
+  });
+
+  it("preserves variation parent and preference lineage on generated candidates", async () => {
+    const variationSource = {
+      candidateId: "left",
+      concept: "left concept",
+    };
+    const game = gameState({ variationSource });
+    const refill: GenerationJob = {
+      id: "variation-refill",
+      kind: "refill",
+      createdAt: NOW,
+      roundNumber: game.round.roundNumber,
+      winnerSide: "left",
+      retainedWinner: game.round.leftCandidate,
+      rejectedCandidate: game.round.rightCandidate,
+      selectionHistory: game.history,
+      recentConcepts: [],
+      preferenceSeed: game.preferenceSeed,
+      variationSource,
+      sessionId: "session-1",
+      pinnedWinnerId: "left",
+    };
+    const challengers = challengerState(game, {
+      ready: [],
+      refillJobs: [
+        {
+          jobId: refill.id,
+          pinnedWinnerId: "left",
+          enqueuedAt: NOW,
+          expectedJob: refill,
+        },
+      ],
+    });
+    const queue = mailbox();
+    queue.setWork(refill);
+    queue.setResult(completedResult(refill.id));
+    const context = serviceFor({
+      game,
+      challengers,
+      queue,
+      bufferTarget: 1,
+    });
+
+    await context.service.reconcile();
+
+    expect(
+      (await context.challengerRepository.load())?.ratings.find(
+        ({ candidate: item }) => item.id === "challenger-variation-refill",
+      )?.candidate.lineage,
+    ).toEqual({
+      kind: "variation",
+      parentCandidateId: "left",
+      parentConcept: "left concept",
+      preferenceFingerprint:
+        "7475e123d2c54bbfd82c859e9a86edb92187bcab6dc30a7390ff1c68139a433f",
+    });
+  });
+
   it("rejects a stale preference editor without overwriting adaptive changes", async () => {
     const currentSeed = "industrial, gothic, natural, and surprising";
     const originalProfile = preferenceProfileFromSeed(currentSeed);
