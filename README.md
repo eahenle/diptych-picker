@@ -110,7 +110,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 
 - Click the complete A or B card.
 - Read each established candidate's rounded Elo score from its lower-left overlay. `✦` marks a first appearance; `⊖` warns that losing the current comparison would remove that candidate from the reusable pool.
-- Select the **Round** metric to review up to fifty recent decisions, newest first, with winner and rejected-candidate thumbnails and no generation prompts. Favorite exceptional candidates from history or the pool; favorites persist independently of Elo and pool membership.
+- Select the **Round** metric to review up to fifty recent decisions, newest first, with winner and rejected-candidate thumbnails and no generation prompts. Select an available thumbnail to inspect the immutable image at full size. Favorite exceptional candidates from history or the pool; favorites persist independently of Elo and pool membership.
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
 - Press `C` or `3` to declare a neutral tie and replace both images.

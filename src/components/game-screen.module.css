@@ -754,6 +754,30 @@
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+.historyImageButton {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  cursor: zoom-in;
+}
+.historyImageButton img {
+  display: block;
+  transition:
+    filter 140ms ease,
+    transform 140ms ease;
+}
+.historyImageButton:hover img,
+.historyImageButton:focus-visible img {
+  filter: brightness(1.1);
+  transform: scale(1.04);
+}
+.historyImageButton:focus-visible {
+  outline: 2px solid var(--copper-bright);
+  outline-offset: 2px;
+}
 .historyImagePlaceholder {
   display: grid;
   place-items: center;

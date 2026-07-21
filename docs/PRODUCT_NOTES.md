@@ -20,7 +20,7 @@ The lower-left score overlay shows rounded Elo for established candidates, `✦`
 
 ### Comparison history
 
-The Round metric opens a newest-first timeline of prior decisions. Each row resolves display-safe winner and rejected-candidate thumbnails, concepts, and concise style tags from the durable rating catalog without exposing prompts. The first iteration shows up to fifty decisions and retains a total count.
+The Round metric opens a newest-first timeline of prior decisions. Each row resolves display-safe winner and rejected-candidate thumbnails, concepts, and concise style tags from the durable rating catalog without exposing prompts. Available thumbnails open the same full-size image inspector as active and leaderboard images. The first iteration shows up to fifty decisions and retains a total count.
 
 History and pool rows let the player favorite exceptional candidates. Favorite state belongs to the durable rating catalog, is shared across both views, survives new games and save-file round trips, and remains independent of Elo and reusable-pool membership. Richer lineage remains a separate follow-up.
 
