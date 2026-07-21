@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+backup_directory="$(mktemp -d "${TMPDIR:-/tmp}/diptych-next-config.XXXXXX")"
+next_env_path="$repository_root/next-env.d.ts"
+tsconfig_path="$repository_root/tsconfig.json"
+next_env_existed=false
+tsconfig_existed=false
+
+if [[ -f "$next_env_path" ]]; then
+  cp "$next_env_path" "$backup_directory/next-env.d.ts"
+  next_env_existed=true
+fi
+if [[ -f "$tsconfig_path" ]]; then
+  cp "$tsconfig_path" "$backup_directory/tsconfig.json"
+  tsconfig_existed=true
+fi
+
+restore_generated_config() {
+  if [[ ! -d "$backup_directory" ]]; then
+    return
+  fi
+  if [[ "$next_env_existed" == true ]]; then
+    cp "$backup_directory/next-env.d.ts" "$next_env_path"
+  else
+    rm -f "$next_env_path"
+  fi
+  if [[ "$tsconfig_existed" == true ]]; then
+    cp "$backup_directory/tsconfig.json" "$tsconfig_path"
+  else
+    rm -f "$tsconfig_path"
+  fi
+  rm -rf "$backup_directory"
+}
+
+trap restore_generated_config EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+
+playwright="$repository_root/node_modules/.bin/playwright"
+if [[ ! -x "$playwright" ]]; then
+  printf '%s\n' "Playwright is not installed. Run npm install first." >&2
+  exit 127
+fi
+
+cd "$repository_root"
+"$playwright" test "$@"

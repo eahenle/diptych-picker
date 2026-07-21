@@ -770,6 +770,30 @@ describe("GameScreen challenger reconciliation", () => {
     expect(imageDialog).not.toBeInTheDocument();
   });
 
+  it("closes non-busy dialogs with Escape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: initializedGame })),
+    );
+
+    render(<GameScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preferences" }));
+    expect(
+      screen.getByRole("dialog", { name: "Preference profile" }),
+    ).toBeVisible();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: "Preference profile" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "New game" }));
+    expect(screen.getByRole("dialog", { name: "New game" })).toBeVisible();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: "New game" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("opens newest-first comparison history from the Round metric", async () => {
     const game = cloneGame();
     game.history = [
