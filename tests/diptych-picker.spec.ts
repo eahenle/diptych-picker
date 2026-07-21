@@ -4,7 +4,7 @@ import {
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const dataDirectory = join(process.cwd(), ".local-data", "test");
@@ -540,6 +540,54 @@ test("persists a fine-grained preference profile and composes generation context
   expect(state.game.preferenceSeed).toContain(
     "Content range: Adult themes may be used when relevant",
   );
+});
+
+test("derives an editable preference profile from a private source image", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page
+    .getByLabel("Choose source image")
+    .setInputFiles(
+      join(process.cwd(), "public/seed-assets/coastal-observatory.png"),
+    );
+
+  await expect(page.getByText("Analyzing source image")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save profile" }),
+  ).toBeDisabled();
+  await expect(page.getByText(/Profile populated for review/)).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(page.getByLabel("Themes & subjects")).toHaveValue(
+    "Variations on the uploaded source image's subjects, setting, and visual relationships",
+  );
+  await expect(page.getByLabel("Preferred media")).toHaveValue(
+    "digital illustration and photography",
+  );
+  await expect(page.getByRole("radio", { name: "Static" })).toBeChecked();
+
+  const saveResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game") &&
+      response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Save profile" }).click();
+  expect((await saveResponse).status()).toBe(200);
+
+  const state = await (await request.get("/api/game")).json();
+  expect(state.game.preferenceProfile).toMatchObject({
+    themes:
+      "Variations on the uploaded source image's subjects, setting, and visual relationships",
+    adaptationMode: "static",
+    adaptationSourceWinnerIds: [],
+    adaptationSourceRejectedIds: [],
+    avoid: expect.stringContaining("exact identity"),
+  });
+  expect(await readdir(join(dataDirectory, "profile-sources"))).toEqual([
+    expect.stringMatching(/^[a-f0-9]{64}\.png$/),
+  ]);
 });
 
 test("adopts a complete model-authored profile only after an adaptive candidate wins", async ({

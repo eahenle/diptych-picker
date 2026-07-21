@@ -586,6 +586,82 @@ describe("GameScreen challenger reconciliation", () => {
     );
   });
 
+  it("populates an editable profile from a source image without saving it", async () => {
+    const game = cloneGame();
+    game.preferenceProfile = {
+      ...preferenceProfileFromSeed(game.preferenceSeed),
+      adaptationMode: "adaptive",
+      adaptationSourceWinnerIds: ["prior-winner"],
+      adaptationSourceRejectedIds: ["prior-rejection"],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/game/preferences/source" && init?.method === "POST") {
+          return json({ status: "analyzing", jobId: "source-job-1" }, 202);
+        }
+        if (
+          url === "/api/game/preferences/source?jobId=source-job-1" &&
+          init?.method === "DELETE"
+        ) {
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/game/preferences/source?jobId=source-job-1") {
+          return json({
+            status: "completed",
+            jobId: "source-job-1",
+            profile: {
+              themes: "violet architectural portrait variations",
+              inspiration: "low-angle framing and diagonal window light",
+              mediaTypes: "editorial photography",
+              visualStyle: "dramatic, geometric, and tactile",
+              colorPalette: "violet, charcoal, and pale gold",
+              contentLevel: "family-friendly",
+              avoid: "exact identity, logos, and readable text",
+            },
+            reasoningSummary:
+              "Transfers composition and palette without copying identity.",
+          });
+        }
+        return json({ status: "ready", game });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GameScreen />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preferences" }));
+    fireEvent.change(screen.getByLabelText("Choose source image"), {
+      target: {
+        files: [
+          new File([new Uint8Array([1, 2, 3])], "reference.png", {
+            type: "image/png",
+          }),
+        ],
+      },
+    });
+
+    expect(await screen.findByText("Analyzing source image")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save profile" })).toBeDisabled();
+    expect(
+      await screen.findByText(/Profile populated for review/),
+    ).toHaveTextContent(/without copying identity/i);
+    expect(screen.getByLabelText("Themes & subjects")).toHaveValue(
+      "violet architectural portrait variations",
+    );
+    expect(screen.getByLabelText("Inspiration")).toHaveValue(
+      "low-angle framing and diagonal window light",
+    );
+    expect(screen.getByDisplayValue("editorial photography")).toBeVisible();
+    expect(
+      screen.getByDisplayValue("violet, charcoal, and pale gold"),
+    ).toBeVisible();
+    expect(screen.getByRole("radio", { name: "Adaptive" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
+  });
+
   it("opens the reusable-pool leaderboard from the Pool metric", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
       String(input).endsWith("/api/game/leaderboard")

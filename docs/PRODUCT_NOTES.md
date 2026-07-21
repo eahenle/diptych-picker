@@ -36,6 +36,14 @@ Mailbox failures carry an explicit operational, moderation, or invalid-output ca
 
 **Save profile** remains actionable while the active round waits for a challenger. Clicking it captures and locks the edited profile, displays animated queued/saving feedback inside the modal, and applies the profile automatically after the round settles. The queued edit deliberately supersedes an adaptive revision from that in-flight round while exact-profile conflict protection still rejects unrelated concurrent edits.
 
+### Source-image profile ingestion
+
+The Preference profile modal accepts one private PNG, JPEG, or WebP source image up to 20 MB and 4096 by 4096 pixels. The server fully decodes it, strips metadata by normalizing it to a content-addressed local PNG, and sends a durable source-profile job to a fresh analysis worker. The worker returns transferable subject, setting, composition, medium, style, palette, content-range, and avoidance guidance without identifying a depicted person or requesting identity, likeness, or exact reproduction. Analysis animates in the modal, preserves the selected Static/Adaptive mode, clears stale adaptation provenance, and populates an editable draft that is never saved automatically. Source uploads remain private and are not copied into candidate assets or exports.
+
+### Leaderboard-driven preference adaptation (next)
+
+Use reusable-pool leaderboard performance as the durable basis for automatic preference steering. Recent decisions may provide short-term context, but must not outweigh the aggregate ranking, win/loss record, and repeated performance of established candidates. Keep the evidence display-safe and bounded when adding it to generation jobs.
+
 ## 2026-07-19
 
 ### Comparison-loop follow-ups
@@ -107,10 +115,6 @@ Add **Skip / neither** outcomes so the learning model does not have to treat eve
 ### Preference presets and weighting
 
 Allow named profiles for different creative moods, with lightweight importance controls for fields that should act as firm constraints versus loose inspiration. A profile could be duplicated and adjusted without losing the original.
-
-### Source-image profile ingestion
-
-Let the player ingest a source image and derive an editable Preference profile aimed at generating variations on its depicted themes and content. The populated fields should describe transferable subject matter, composition, medium, style, palette, and constraints rather than asking future generations to reproduce a specific person's identity or exact likeness.
 
 ### History, lineage, and favorites
 

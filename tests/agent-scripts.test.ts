@@ -109,7 +109,7 @@ async function runScript(
 async function putJob(
   root: string,
   directory: "pending" | "active",
-  value: { id: string },
+  value: { id: string; [key: string]: unknown },
 ): Promise<void> {
   const target = join(root, "agent-mailbox", directory);
   await mkdir(target, { recursive: true });
@@ -532,6 +532,76 @@ describe("agent mailbox scripts", () => {
         height: 32,
         byteLength: image.bytes.byteLength,
       },
+    });
+  });
+
+  it("publishes a source-image analysis without generating or exporting an image", async () => {
+    const root = await createDataDirectory();
+    const id = "source-profile-1";
+    const sourceDirectory = join(root, "profile-sources");
+    await mkdir(sourceDirectory, { recursive: true });
+    const source = await sharp({
+      create: { width: 48, height: 32, channels: 3, background: "#713c89" },
+    })
+      .png()
+      .toBuffer();
+    const filename = `${createHash("sha256").update(source).digest("hex")}.png`;
+    const sourcePath = join(sourceDirectory, filename);
+    await writeFile(sourcePath, source);
+    await putJob(root, "active", {
+      id,
+      kind: "source-profile",
+      createdAt: "2026-07-20T20:00:00.000Z",
+      sourceImage: {
+        filename,
+        path: `profile-sources/${filename}`,
+        contentType: "image/png",
+        width: 48,
+        height: 32,
+        byteLength: source.byteLength,
+      },
+    });
+    const analysis = {
+      profile: {
+        themes: "violet architectural portrait variations",
+        inspiration: "low-angle framing and diagonal window light",
+        mediaTypes: "editorial photography",
+        visualStyle: "dramatic, geometric, and tactile",
+        colorPalette: "violet, charcoal, and pale gold",
+        contentLevel: "family-friendly",
+        avoid: "exact identity, logos, and readable text",
+      },
+      reasoningSummary:
+        "Transfers composition and palette without copying identity.",
+    };
+    const profilePath = await writeWorkFile(
+      root,
+      id,
+      "profile.json",
+      `${JSON.stringify(analysis)}\n`,
+    );
+
+    const completed = JSON.parse(
+      (
+        await runScript(
+          "complete-source-profile.mjs",
+          ["--job", id, "--profile-file", profilePath],
+          root,
+        )
+      ).stdout,
+    );
+
+    expect(completed).toMatchObject({
+      jobId: id,
+      kind: "source-profile",
+      status: "completed",
+      ...analysis,
+    });
+    await expect(readdir(join(root, "assets"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readdir(join(root, "exports"))).rejects.toMatchObject({
+      code: "ENOENT",
     });
   });
 

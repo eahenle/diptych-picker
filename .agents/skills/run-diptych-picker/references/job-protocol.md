@@ -20,6 +20,8 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `agent-work/<jobId>/proposal.json`: structured proposal passed by file
 - `agent-work/<jobId>/failure.txt`: failure reason passed by file
 - `agent-work/<jobId>/image.png`: worker-generated standalone image
+- `agent-work/<jobId>/profile.json`: source-profile analysis passed by file
+- `profile-sources/<sha256-of-normalized-png-bytes>.png`: private, metadata-stripped source upload
 - `assets/<sha256-of-png-bytes>.png`: immutable content-addressed generated candidate asset
 - `output/artifacts/<sha256-of-png-bytes>.png`: discoverable immutable export of every completed candidate
 
@@ -71,7 +73,7 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
 }
 ```
 
-`kind` is `challenger`, `initial`, or `refill`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+`kind` is `challenger`, `initial`, `refill`, or `source-profile`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
 
 ```json
 {
@@ -83,6 +85,26 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
 ```
 
 The remaining request fields carry the same preference context. A missing `kind` is tolerated as a legacy challenger.
+
+An interactive source-image analysis has no comparison or preference context. The server fully decodes the PNG, JPEG, or WebP upload, strips metadata by normalizing it to PNG, stores it privately under the data root, and enqueues:
+
+```json
+{
+  "id": "source-profile-job-1",
+  "kind": "source-profile",
+  "createdAt": "ISO-8601 timestamp",
+  "sourceImage": {
+    "filename": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+    "path": "profile-sources/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+    "contentType": "image/png",
+    "width": 1200,
+    "height": 900,
+    "byteLength": 123456
+  }
+}
+```
+
+The source remains private: it is not copied to generated assets or exports. A fresh source-profile worker inspects the existing file without calling image generation. It describes transferable subject matter, setting, composition, medium, lighting, mood, palette, and constraints without identifying a depicted person or requesting identity, likeness, or exact reproduction.
 
 The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the image proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
 
@@ -108,7 +130,7 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
-`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger or initial request. When neither is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes challenger/initial work into a refill batch and emits strict JSON:
+`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or source-profile request. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
 
 ```json
 {
@@ -181,10 +203,48 @@ The four base proposal fields are always required. `preferenceRevision` must be 
 }
 ```
 
+For a source-profile job, write this strict object to `<data-root>/agent-work/<jobId>/profile.json`:
+
+```json
+{
+  "profile": {
+    "themes": "transferable depicted themes of at least 20 characters",
+    "inspiration": "composition, lighting, and mood cues",
+    "mediaTypes": "depicted or analogous media",
+    "visualStyle": "transferable style guidance",
+    "colorPalette": "transferable palette guidance",
+    "contentLevel": "family-friendly",
+    "avoid": "exact identity, likeness, logos, readable text, and exact copying"
+  },
+  "reasoningSummary": "How the profile supports variations without reproducing identity or exact likeness."
+}
+```
+
+`npm run agent:complete-profile -- --job <id> --profile-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/profile.json"` requires the matching active source-profile job, verifies that its private source still exists, reserves the outcome, and publishes the editable draft without saving it to the game:
+
+```json
+{
+  "jobId": "source-profile-job-1",
+  "kind": "source-profile",
+  "status": "completed",
+  "completedAt": "ISO-8601 timestamp",
+  "profile": {
+    "themes": "transferable depicted themes of at least 20 characters",
+    "inspiration": "composition, lighting, and mood cues",
+    "mediaTypes": "depicted or analogous media",
+    "visualStyle": "transferable style guidance",
+    "colorPalette": "transferable palette guidance",
+    "contentLevel": "family-friendly",
+    "avoid": "exact identity, likeness, logos, readable text, and exact copying"
+  },
+  "reasoningSummary": "Transferable analysis only."
+}
+```
+
 ## Failed result and heartbeat
 
 Write the reason to `<data-root>/agent-work/<id>/failure.txt`. `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt" --category <category>` requires the matching active job, reserves the `failed` outcome, and atomically publishes a result with `status: "failed"`, an ISO timestamp, the non-empty `message`, `retryable: true`, and its category. Use `moderation` only for a provider safety or moderation block, `invalid-output` for an unusable worker handoff, and `operational` for interruptions or infrastructure failures. The UI surfaces moderation failures so the player can adjust their profile.
 
 Only one outcome reservation can exist for a job. A retry matching that outcome resumes safely and returns an already-published result unchanged. The opposite outcome is rejected. Completion also resumes when its deterministic asset already exists only if the existing bytes exactly equal the validated source; differing bytes are never overwritten.
 
-`npm run agent:heartbeat -- --status <status> [--job <id>]` atomically replaces `heartbeat.json` with the status, optional job ID, and update timestamp. Use `waiting`, `generating`, and `stopped` coordinator states. The heartbeat does not record the short-lived helper process PID.
+`npm run agent:heartbeat -- --status <status> [--job <id>]` atomically replaces `heartbeat.json` with the status, optional job ID, and update timestamp. Use `waiting`, `generating`, `analyzing`, and `stopped` coordinator states. The heartbeat does not record the short-lived helper process PID.

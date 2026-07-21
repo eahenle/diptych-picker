@@ -165,6 +165,40 @@ const refillGenerationJobSchema = z
     path: ["pinnedWinnerId"],
   });
 
+const sourceProfileJobSchema = z
+  .object({
+    id: jobIdSchema,
+    kind: z.literal("source-profile"),
+    createdAt: timestampSchema,
+    sourceImage: z
+      .object({
+        filename: z.string().regex(/^[a-f0-9]{64}\.png$/),
+        path: z.string().regex(/^profile-sources\/[a-f0-9]{64}\.png$/),
+        contentType: z.literal("image/png"),
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        byteLength: z.number().int().positive(),
+      })
+      .strict()
+      .superRefine((image, context) => {
+        if (image.width > 4096 || image.height > 4096) {
+          context.addIssue({
+            code: "custom",
+            message: "Source image dimensions must not exceed 4096 pixels",
+          });
+        }
+        if (image.path !== `profile-sources/${image.filename}`) {
+          context.addIssue({
+            code: "custom",
+            path: ["path"],
+            message:
+              "Source image path must match its content-addressed filename",
+          });
+        }
+      }),
+  })
+  .strict();
+
 const discriminatedGenerationJobSchema = z.discriminatedUnion("kind", [
   challengerGenerationJobSchema,
   initialGenerationJobSchema,
@@ -177,6 +211,21 @@ export const generationJobSchema = z.preprocess((value) => {
   }
   return value;
 }, discriminatedGenerationJobSchema);
+
+const mailboxJobSchema = z.preprocess(
+  (value) => {
+    if (value !== null && typeof value === "object" && !("kind" in value)) {
+      return { ...value, kind: "challenger" };
+    }
+    return value;
+  },
+  z.discriminatedUnion("kind", [
+    challengerGenerationJobSchema,
+    initialGenerationJobSchema,
+    refillGenerationJobSchema,
+    sourceProfileJobSchema,
+  ]),
+);
 
 const proposedChallengerSchema = z
   .object({
@@ -239,6 +288,17 @@ const completedGenerationResultSchema = z
     path: ["asset", "height"],
   });
 
+const completedSourceProfileResultSchema = z
+  .object({
+    jobId: jobIdSchema,
+    kind: z.literal("source-profile"),
+    status: z.literal("completed"),
+    completedAt: timestampSchema,
+    profile: preferenceRevisionSchema,
+    reasoningSummary: nonBlankStringSchema.max(2_000),
+  })
+  .strict();
+
 const failedGenerationResultSchema = z
   .object({
     jobId: jobIdSchema,
@@ -257,13 +317,28 @@ export const generationResultSchema = z.union([
   failedGenerationResultSchema,
 ]);
 
+const sourceProfileResultSchema = z.union([
+  completedSourceProfileResultSchema,
+  failedGenerationResultSchema,
+]);
+
+const mailboxResultSchema = z.union([
+  completedGenerationResultSchema,
+  completedSourceProfileResultSchema,
+  failedGenerationResultSchema,
+]);
+
 export type GenerationJob = z.infer<typeof generationJobSchema>;
 export type GenerationResult = z.infer<typeof generationResultSchema>;
+export type SourceProfileJob = z.infer<typeof sourceProfileJobSchema>;
+export type SourceProfileResult = z.infer<typeof sourceProfileResultSchema>;
+export type AgentJob = GenerationJob | SourceProfileJob;
+export type AgentResult = GenerationResult | SourceProfileResult;
 
 const reservedJobRecordSchema = z
   .object({
     state: z.literal("reserved"),
-    job: generationJobSchema,
+    job: mailboxJobSchema,
     reservedBy: z
       .object({
         pid: z.number().int().positive(),
@@ -278,7 +353,7 @@ const archivedJobRecordSchema = z
   .object({
     state: z.literal("archived"),
     jobId: jobIdSchema,
-    job: generationJobSchema.optional(),
+    job: mailboxJobSchema.optional(),
     archivedAt: timestampSchema,
   })
   .strict();
@@ -298,9 +373,18 @@ export interface GenerationMailbox {
   archive(jobId: string): Promise<void>;
 }
 
+export interface SourceProfileMailbox {
+  enqueueSourceProfile(job: SourceProfileJob): Promise<void>;
+  readSourceProfileWork(jobId: string): Promise<SourceProfileJob | null>;
+  readSourceProfileResult(jobId: string): Promise<SourceProfileResult | null>;
+  archiveSourceProfile(jobId: string): Promise<void>;
+}
+
 export class DuplicateGenerationJobError extends Error {}
 
-export class FileGenerationMailbox implements GenerationMailbox {
+export class FileGenerationMailbox
+  implements GenerationMailbox, SourceProfileMailbox
+{
   private static readonly inFlightEnqueues = new Map<string, string>();
 
   constructor(
@@ -313,6 +397,15 @@ export class FileGenerationMailbox implements GenerationMailbox {
 
   async enqueue(job: GenerationJob): Promise<void> {
     const validated = generationJobSchema.parse(job);
+    await this.enqueueValidated(validated);
+  }
+
+  async enqueueSourceProfile(job: SourceProfileJob): Promise<void> {
+    const validated = sourceProfileJobSchema.parse(job);
+    await this.enqueueValidated(validated);
+  }
+
+  private async enqueueValidated(validated: AgentJob): Promise<void> {
     const operationKey = `${resolve(this.rootDirectory)}\0${validated.id}`;
     const operationToken = crypto.randomUUID();
     if (FileGenerationMailbox.inFlightEnqueues.has(operationKey)) {
@@ -394,10 +487,12 @@ export class FileGenerationMailbox implements GenerationMailbox {
 
   async readPending(jobId: string): Promise<GenerationJob | null> {
     const validatedJobId = jobIdSchema.parse(jobId);
-    return this.readJobAt(
+    const job = await this.readJobAt(
       join(this.rootDirectory, "pending", `${validatedJobId}.json`),
       validatedJobId,
     );
+    if (!job) return null;
+    return generationJobSchema.parse(job);
   }
 
   async readWork(jobId: string): Promise<GenerationJob | null> {
@@ -409,25 +504,60 @@ export class FileGenerationMailbox implements GenerationMailbox {
       join(this.rootDirectory, "active", `${validatedJobId}.json`),
       validatedJobId,
     );
-    if (active) return active;
+    if (active) return generationJobSchema.parse(active);
 
     const record = await this.readValidated(
       join(this.rootDirectory, "ids", `${validatedJobId}.json`),
       generationJobRecordSchema,
     );
-    return record?.state === "reserved" ? record.job : null;
+    return record?.state === "reserved"
+      ? generationJobSchema.parse(record.job)
+      : null;
   }
 
   async readResult(jobId: string): Promise<GenerationResult | null> {
+    const result = await this.readMailboxResult(jobId);
+    return result ? generationResultSchema.parse(result) : null;
+  }
+
+  async readSourceProfileWork(jobId: string): Promise<SourceProfileJob | null> {
+    const validatedJobId = jobIdSchema.parse(jobId);
+    const pending = await this.readJobAt(
+      join(this.rootDirectory, "pending", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (pending) return sourceProfileJobSchema.parse(pending);
+    const active = await this.readJobAt(
+      join(this.rootDirectory, "active", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (active) return sourceProfileJobSchema.parse(active);
+    const record = await this.readValidated(
+      join(this.rootDirectory, "ids", `${validatedJobId}.json`),
+      generationJobRecordSchema,
+    );
+    return record?.state === "reserved"
+      ? sourceProfileJobSchema.parse(record.job)
+      : null;
+  }
+
+  async readSourceProfileResult(
+    jobId: string,
+  ): Promise<SourceProfileResult | null> {
+    const result = await this.readMailboxResult(jobId);
+    return result ? sourceProfileResultSchema.parse(result) : null;
+  }
+
+  private async readMailboxResult(jobId: string): Promise<AgentResult | null> {
     const validatedJobId = jobIdSchema.parse(jobId);
     const [completed, failed] = await Promise.all([
       this.readValidated(
         join(this.rootDirectory, "completed", `${validatedJobId}.json`),
-        generationResultSchema,
+        mailboxResultSchema,
       ),
       this.readValidated(
         join(this.rootDirectory, "failed", `${validatedJobId}.json`),
-        generationResultSchema,
+        mailboxResultSchema,
       ),
     ]);
 
@@ -481,11 +611,15 @@ export class FileGenerationMailbox implements GenerationMailbox {
     );
   }
 
+  archiveSourceProfile(jobId: string): Promise<void> {
+    return this.archive(jobId);
+  }
+
   private async readJobAt(
     path: string,
     jobId: string,
-  ): Promise<GenerationJob | null> {
-    const job = await this.readValidated(path, generationJobSchema);
+  ): Promise<AgentJob | null> {
+    const job = await this.readValidated(path, mailboxJobSchema);
     if (job && job.id !== jobId) {
       throw new Error(`Work for ${jobId} contains another job ID`);
     }
@@ -574,7 +708,7 @@ export class FileGenerationMailbox implements GenerationMailbox {
     }
   }
 
-  private sameJob(left: GenerationJob, right: GenerationJob): boolean {
+  private sameJob(left: AgentJob, right: AgentJob): boolean {
     return JSON.stringify(left) === JSON.stringify(right);
   }
 }

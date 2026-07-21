@@ -53,6 +53,22 @@ function initial(id, batchId, initialSide, createdAt) {
   };
 }
 
+function sourceProfile(id, createdAt) {
+  return {
+    id,
+    kind: "source-profile",
+    createdAt,
+    sourceImage: {
+      filename: `${"a".repeat(64)}.png`,
+      path: `profile-sources/${"a".repeat(64)}.png`,
+      contentType: "image/png",
+      width: 100,
+      height: 80,
+      byteLength: 1024,
+    },
+  };
+}
+
 async function dataRoot() {
   return mkdtemp(join(tmpdir(), "diptych-next-job-"));
 }
@@ -140,6 +156,33 @@ test("returns one ordinary challenger before any refill batch", async () => {
   const { stdout } = await run(root, ["--max-refills", "3"]);
 
   assert.equal(JSON.parse(stdout).id, "selection");
+  await assert.doesNotReject(() =>
+    readFile(
+      join(root, "agent-mailbox", "pending", "older-refill.json"),
+      "utf8",
+    ),
+  );
+});
+
+test("prioritizes an interactive source-profile analysis before refills", async () => {
+  const root = await dataRoot();
+  await put(
+    root,
+    "pending",
+    refill("older-refill", "2026-07-16T01:00:00.000Z"),
+  );
+  await put(
+    root,
+    "pending",
+    sourceProfile("source-profile-1", "2026-07-16T01:00:10.000Z"),
+  );
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.deepEqual(
+    JSON.parse(stdout),
+    sourceProfile("source-profile-1", "2026-07-16T01:00:10.000Z"),
+  );
   await assert.doesNotReject(() =>
     readFile(
       join(root, "agent-mailbox", "pending", "older-refill.json"),
