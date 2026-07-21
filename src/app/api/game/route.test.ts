@@ -14,6 +14,8 @@ const bothLose = vi.fn();
 const updatePreferenceSeed = vi.fn();
 const savePreferencePreset = vi.fn();
 const deletePreferencePreset = vi.fn();
+const createPromptCard = vi.fn();
+const updatePromptDeck = vi.fn();
 const dismissGenerationNotice = vi.fn();
 const requestSourceProfile = vi.fn();
 const getSourceProfileStatus = vi.fn();
@@ -33,6 +35,8 @@ vi.mock("@/server/runtime", () => ({
   updatePreferenceSeed,
   savePreferencePreset,
   deletePreferencePreset,
+  createPromptCard,
+  updatePromptDeck,
   dismissGenerationNotice,
   requestSourceProfile,
   getSourceProfileStatus,
@@ -383,6 +387,51 @@ describe("preference presets", () => {
     expect(deletePreferencePreset).toHaveBeenCalledWith("preset-1");
     expect(malformed.status).toBe(400);
     expect(savePreferencePreset).not.toHaveBeenCalled();
+  });
+});
+
+describe("prompt deck", () => {
+  beforeEach(() => {
+    createPromptCard.mockReset();
+    updatePromptDeck.mockReset();
+    createPromptCard.mockResolvedValue({ promptDeck: { cards: [] } });
+    updatePromptDeck.mockResolvedValue({ promptDeck: { cards: [] } });
+  });
+
+  it("creates a validated prompt card", async () => {
+    const { POST } = await import("./preferences/deck/route");
+    const input = {
+      title: "Copper nocturne",
+      prompt: "A severe copper-lit industrial editorial portrait.",
+      negativePrompt: "readable text",
+      weight: 1,
+      tags: ["portrait", "copper"],
+    };
+    const response = await POST(
+      new Request("http://localhost/api/game/preferences/deck", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createPromptCard).toHaveBeenCalledWith(input);
+  });
+
+  it("updates deck and card controls", async () => {
+    const { PATCH } = await import("./preferences/deck/route");
+    const response = await PATCH(
+      new Request("http://localhost/api/game/preferences/deck", {
+        method: "PATCH",
+        body: JSON.stringify({ kind: "deck", enabled: true }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(updatePromptDeck).toHaveBeenCalledWith({
+      kind: "deck",
+      enabled: true,
+    });
   });
 });
 

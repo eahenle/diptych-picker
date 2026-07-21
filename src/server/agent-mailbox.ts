@@ -50,6 +50,7 @@ const candidateSchema = z
     winCount: z.number().int().nonnegative(),
     reasoningSummary: nonBlankStringSchema.optional(),
     preferenceRevision: preferenceRevisionSchema.optional(),
+    promptCardId: nonBlankStringSchema.optional(),
     lineage: candidateLineageSchema.optional(),
   })
   .strict();
@@ -147,6 +148,16 @@ const generationJobFields = {
   leaderboardVisualProfile: leaderboardVisualProfileSchema.optional(),
   preferenceSeed: nonBlankStringSchema,
   preferenceProfile: preferenceProfileSchema.optional(),
+  promptCard: z
+    .object({
+      id: nonBlankStringSchema,
+      title: nonBlankStringSchema.max(80),
+      prompt: nonBlankStringSchema.min(20).max(1_000),
+      negativePrompt: z.string().max(500),
+      tags: z.array(nonBlankStringSchema.max(40)).max(8),
+    })
+    .strict()
+    .optional(),
   variationSource: variationSourceSchema.optional(),
 };
 

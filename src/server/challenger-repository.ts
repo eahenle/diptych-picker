@@ -62,6 +62,7 @@ const candidateSchema = z
     winCount: z.number().int().nonnegative(),
     reasoningSummary: z.string().optional(),
     preferenceRevision: preferenceRevisionSchema.optional(),
+    promptCardId: z.string().trim().min(1).optional(),
     lineage: candidateLineageSchema.optional(),
   })
   .strict();
@@ -169,6 +170,16 @@ const leaderboardVisualProfileSchema = z
   })
   .strict();
 
+const generationPromptCardSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    title: z.string().trim().min(1).max(80),
+    prompt: z.string().trim().min(20).max(1_000),
+    negativePrompt: z.string().max(500),
+    tags: z.array(z.string().trim().min(1).max(40)).max(8),
+  })
+  .strict();
+
 const profileSourceImageSchema = z
   .object({
     filename: z.string().regex(/^[a-f0-9]{64}\.png$/),
@@ -223,6 +234,7 @@ const refillGenerationJobSnapshotSchema = z
     leaderboardVisualProfile: leaderboardVisualProfileSchema.optional(),
     preferenceSeed: z.string().min(1),
     preferenceProfile: preferenceProfileSchema.optional(),
+    promptCard: generationPromptCardSchema.optional(),
     variationSource: variationSourceSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
     pinnedWinnerId: z.string().min(1),

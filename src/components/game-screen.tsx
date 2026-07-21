@@ -285,6 +285,8 @@ export function GameScreen() {
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [presetSaving, setPresetSaving] = useState(false);
   const [presetError, setPresetError] = useState<string | null>(null);
+  const [promptDeckSaving, setPromptDeckSaving] = useState(false);
+  const [promptDeckError, setPromptDeckError] = useState<string | null>(null);
   const [preferenceSaveQueued, setPreferenceSaveQueued] = useState(false);
   const [sourceProfileAnalyzing, setSourceProfileAnalyzing] = useState(false);
   const [sourceProfileError, setSourceProfileError] = useState<string | null>(
@@ -356,11 +358,22 @@ export function GameScreen() {
       candidates: readonly InspectableCandidate[],
       returnTarget: ImageInspectorState["returnTarget"] = null,
     ) => {
-      const uniqueCandidates = candidates.filter(
+      const titledCandidates = candidates.map((item) => ({
+        ...item,
+        ...(item.promptCardId
+          ? {
+              promptCardTitle: gameRef.current?.promptDeck?.cards.find(
+                (card) => card.id === item.promptCardId,
+              )?.title,
+            }
+          : {}),
+      }));
+      const uniqueCandidates = titledCandidates.filter(
         (item, index) =>
           item.imageUrl &&
-          candidates.findIndex((candidate) => candidate.id === item.id) ===
-            index,
+          titledCandidates.findIndex(
+            (candidate) => candidate.id === item.id,
+          ) === index,
       );
       const index = uniqueCandidates.findIndex(
         (item) => item.id === candidate.id,
@@ -1421,6 +1434,60 @@ export function GameScreen() {
     }
   };
 
+  const createPromptCard = async (input: {
+    title: string;
+    prompt: string;
+    negativePrompt: string;
+    weight: number;
+    tags: string[];
+  }): Promise<boolean> => {
+    setPromptDeckSaving(true);
+    setPromptDeckError(null);
+    try {
+      const state = await readJson<GameState>(
+        await fetch("/api/game/preferences/deck", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+      );
+      commitGame(state);
+      return true;
+    } catch (error) {
+      setPromptDeckError(
+        error instanceof Error ? error.message : "Could not create prompt card",
+      );
+      return false;
+    } finally {
+      setPromptDeckSaving(false);
+    }
+  };
+
+  const updatePromptDeck = async (
+    update:
+      | { kind: "deck"; enabled: boolean }
+      | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+  ) => {
+    setPromptDeckSaving(true);
+    setPromptDeckError(null);
+    try {
+      const state = await readJson<GameState>(
+        await fetch("/api/game/preferences/deck", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(update),
+        }),
+      );
+      commitGame(state);
+    } catch (error) {
+      setPromptDeckError(
+        error instanceof Error ? error.message : "Could not update prompt deck",
+      );
+    } finally {
+      setPromptDeckSaving(false);
+    }
+  };
+
   const analyzeSourceImage = async (
     image: File,
     variationSource: VariationSource | null = null,
@@ -1491,7 +1558,13 @@ export function GameScreen() {
   };
 
   const closePreferences = () => {
-    if (preferencesSaving || sourceProfileAnalyzing || presetSaving) return;
+    if (
+      preferencesSaving ||
+      sourceProfileAnalyzing ||
+      presetSaving ||
+      promptDeckSaving
+    )
+      return;
     setPreferencesOpen(false);
   };
 
@@ -1507,6 +1580,7 @@ export function GameScreen() {
     setSourceProfileError(null);
     setSourceProfileSummary(null);
     setPresetError(null);
+    setPromptDeckError(null);
     setPreferenceDraft(currentProfile);
     setPreferenceDraftBaseProfile(currentProfile);
     setPreferenceVariationSource(game.variationSource ?? null);
@@ -2034,6 +2108,9 @@ export function GameScreen() {
           presets={game.preferencePresets ?? []}
           presetSaving={presetSaving}
           presetError={presetError}
+          promptDeck={game.promptDeck}
+          promptDeckSaving={promptDeckSaving}
+          promptDeckError={promptDeckError}
           selectionBoundWait={selectionBoundWait}
           onClose={closePreferences}
           onSave={() => void savePreferences()}
@@ -2042,6 +2119,8 @@ export function GameScreen() {
           onSavePreset={savePreferencePreset}
           onApplyPreset={applyPreferencePreset}
           onDeletePreset={deletePreferencePreset}
+          onCreatePromptCard={createPromptCard}
+          onUpdatePromptDeck={updatePromptDeck}
           onFieldChange={setPreferenceField}
           onFreedomChange={setAdaptationFreedom}
         />

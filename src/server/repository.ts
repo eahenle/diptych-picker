@@ -48,6 +48,7 @@ const candidateSchema = z
     winCount: z.number().int().nonnegative(),
     reasoningSummary: z.string().optional(),
     preferenceRevision: preferenceRevisionSchema.optional(),
+    promptCardId: z.string().trim().min(1).optional(),
     lineage: candidateLineageSchema.optional(),
   })
   .strict();
@@ -166,6 +167,79 @@ const gameStateSchema: z.ZodType<GameState> = z
           .strict(),
       )
       .max(20)
+      .optional(),
+    promptDeck: z
+      .object({
+        enabled: z.boolean(),
+        cards: z
+          .array(
+            z
+              .object({
+                id: z.string().trim().min(1),
+                title: z.string().trim().min(1).max(80),
+                prompt: z.string().trim().min(20).max(1_000),
+                negativePrompt: z.string().max(500),
+                weight: z.number().positive().max(100),
+                tags: z.array(z.string().trim().min(1).max(40)).max(8),
+                parents: z.array(z.string().trim().min(1)).max(5),
+                active: z.boolean(),
+                createdAt: z.string().trim().min(1),
+                stats: z
+                  .object({
+                    wins: z.number().int().nonnegative(),
+                    rejects: z.number().int().nonnegative(),
+                  })
+                  .strict(),
+              })
+              .strict(),
+          )
+          .max(50),
+        verdicts: z
+          .array(
+            z
+              .object({
+                cardId: z.string().trim().min(1),
+                resultId: z.string().trim().min(1),
+                verdict: z.enum(["win", "reject"]),
+                reason: z.string().trim().min(1).max(240),
+                recordedAt: z.string().trim().min(1),
+              })
+              .strict(),
+          )
+          .max(200),
+      })
+      .strict()
+      .superRefine((deck, context) => {
+        const ids = new Set<string>();
+        for (const [index, card] of deck.cards.entries()) {
+          if (ids.has(card.id)) {
+            context.addIssue({
+              code: "custom",
+              path: ["cards", index, "id"],
+              message: "Prompt card IDs must be unique",
+            });
+          }
+          ids.add(card.id);
+        }
+        for (const [index, card] of deck.cards.entries()) {
+          if (card.parents.some((parentId) => !ids.has(parentId))) {
+            context.addIssue({
+              code: "custom",
+              path: ["cards", index, "parents"],
+              message: "Prompt card parents must exist in the deck",
+            });
+          }
+        }
+        for (const [index, verdict] of deck.verdicts.entries()) {
+          if (!ids.has(verdict.cardId)) {
+            context.addIssue({
+              code: "custom",
+              path: ["verdicts", index, "cardId"],
+              message: "Prompt card verdicts must reference the deck",
+            });
+          }
+        }
+      })
       .optional(),
     variationSource: z
       .object({

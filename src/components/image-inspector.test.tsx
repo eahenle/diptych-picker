@@ -140,4 +140,27 @@ describe("ImageInspector", () => {
 
     expect(screen.getByText("Variation of Copper parent")).toBeVisible();
   });
+
+  it("shows the resolved prompt-card title", () => {
+    render(
+      <ImageInspector
+        state={{
+          candidates: [
+            {
+              ...candidates[0],
+              promptCardId: "card-1",
+              promptCardTitle: "Copper nocturne",
+            },
+          ],
+          index: 0,
+          returnTarget: null,
+        }}
+        onClose={() => undefined}
+        onNavigate={() => undefined}
+        onExplore={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("Prompt card: Copper nocturne")).toBeVisible();
+  });
 });

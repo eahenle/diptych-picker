@@ -21,6 +21,7 @@ import { LocalAssetStore } from "./asset-store";
 import { publishExportArtifact } from "./artifact-store";
 import { JsonChallengerRepository } from "./challenger-repository";
 import { GameService } from "./game-service";
+import type { CreatePromptCardInput } from "@/domain/prompt-deck";
 import { GameSnapshotService, type GameSnapshot } from "./game-snapshot";
 import { JsonInitialBootstrapRepository } from "./initial-bootstrap";
 import { InitialGameService } from "./initial-game";
@@ -380,6 +381,20 @@ export async function deletePreferencePreset(
   presetId: string,
 ): Promise<GameState> {
   return gameService.deletePreferencePreset(presetId);
+}
+
+export async function createPromptCard(
+  input: CreatePromptCardInput,
+): Promise<GameState> {
+  return gameService.createPromptCard(input);
+}
+
+export async function updatePromptDeck(
+  update:
+    | { kind: "deck"; enabled: boolean }
+    | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+): Promise<GameState> {
+  return gameService.updatePromptDeck(update);
 }
 
 export async function dismissGenerationNotice(): Promise<GameState> {

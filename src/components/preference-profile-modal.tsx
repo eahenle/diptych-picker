@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
   type ChangeEvent,
+  type ComponentProps,
   type FormEvent,
 } from "react";
 import {
@@ -13,9 +14,11 @@ import {
   type PreferenceProfile,
   type PreferencePreset,
   type PreferenceProfileSnapshot,
+  type PromptDeck,
   type VariationSource,
 } from "@/domain/game";
 import { ModalShell } from "./modal-shell";
+import { PromptDeckEditor } from "./prompt-deck-editor";
 import modalStyles from "./game-modal.module.css";
 import styles from "./preference-profile-modal.module.css";
 
@@ -87,6 +90,9 @@ interface PreferenceProfileModalProps {
   presets: readonly PreferencePreset[];
   presetSaving: boolean;
   presetError: string | null;
+  promptDeck: PromptDeck | undefined;
+  promptDeckSaving: boolean;
+  promptDeckError: string | null;
   selectionBoundWait: boolean;
   onClose: () => void;
   onSave: () => void;
@@ -98,6 +104,8 @@ interface PreferenceProfileModalProps {
   onSavePreset: (name: string) => Promise<boolean>;
   onApplyPreset: (preset: PreferencePreset) => void;
   onDeletePreset: (presetId: string) => Promise<void>;
+  onCreatePromptCard: ComponentProps<typeof PromptDeckEditor>["onCreate"];
+  onUpdatePromptDeck: ComponentProps<typeof PromptDeckEditor>["onUpdate"];
   onFieldChange: <Key extends PreferenceField>(
     key: Key,
     value: PreferenceProfile[Key],
@@ -118,6 +126,9 @@ export function PreferenceProfileModal({
   presets,
   presetSaving,
   presetError,
+  promptDeck,
+  promptDeckSaving,
+  promptDeckError,
   selectionBoundWait,
   onClose,
   onSave,
@@ -126,12 +137,14 @@ export function PreferenceProfileModal({
   onSavePreset,
   onApplyPreset,
   onDeletePreset,
+  onCreatePromptCard,
+  onUpdatePromptDeck,
   onFieldChange,
   onFreedomChange,
 }: PreferenceProfileModalProps) {
   const sourceInputRef = useRef<HTMLInputElement | null>(null);
   const [presetName, setPresetName] = useState("");
-  const busy = saving || sourceAnalyzing || presetSaving;
+  const busy = saving || sourceAnalyzing || presetSaving || promptDeckSaving;
   const adaptationFreedom = preferenceAdaptationFreedom(profile);
   const adaptationFreedomValue = {
     frozen: 0,
@@ -235,6 +248,13 @@ export function PreferenceProfileModal({
             candidates.
           </p>
         ) : null}
+        <PromptDeckEditor
+          deck={promptDeck}
+          busy={busy}
+          error={promptDeckError}
+          onCreate={onCreatePromptCard}
+          onUpdate={onUpdatePromptDeck}
+        />
         <details className={styles.presets}>
           <summary>
             Saved presets <strong>{presets.length}</strong>

@@ -1,0 +1,234 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import type { PromptCard, PromptDeck } from "@/domain/game";
+import styles from "./prompt-deck-editor.module.css";
+
+interface PromptDeckEditorProps {
+  deck: PromptDeck | undefined;
+  busy: boolean;
+  error: string | null;
+  onCreate: (input: {
+    title: string;
+    prompt: string;
+    negativePrompt: string;
+    weight: number;
+    tags: string[];
+  }) => Promise<boolean>;
+  onUpdate: (
+    update:
+      | { kind: "deck"; enabled: boolean }
+      | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+  ) => Promise<void>;
+}
+
+export function PromptDeckEditor({
+  deck,
+  busy,
+  error,
+  onCreate,
+  onUpdate,
+}: PromptDeckEditorProps) {
+  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
+  const [tags, setTags] = useState("");
+  const cards = deck?.cards ?? [];
+  const activeCards = cards.filter((card) => card.active);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const saved = await onCreate({
+      title,
+      prompt,
+      negativePrompt,
+      weight: 1,
+      tags: tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+        .slice(0, 8),
+    });
+    if (saved) {
+      setTitle("");
+      setPrompt("");
+      setNegativePrompt("");
+      setTags("");
+    }
+  };
+
+  return (
+    <details className={styles.editor}>
+      <summary>
+        Prompt deck
+        <strong>
+          {activeCards.length}/{cards.length}
+        </strong>
+      </summary>
+      <div className={styles.body}>
+        <label className={styles.deckToggle}>
+          <input
+            type="checkbox"
+            checked={deck?.enabled ?? false}
+            disabled={busy || activeCards.length === 0}
+            onChange={(event) =>
+              void onUpdate({ kind: "deck", enabled: event.target.checked })
+            }
+          />
+          <span>
+            <strong>Use weighted prompt cards</strong>
+            <small>
+              Future jobs draw one active card; the explicit preference profile
+              remains authoritative.
+            </small>
+          </span>
+        </label>
+
+        {error ? (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        {cards.length > 0 ? (
+          <ul className={styles.cards}>
+            {cards.map((card) => (
+              <PromptCardRow
+                key={card.id}
+                card={card}
+                busy={busy}
+                onUpdate={onUpdate}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className={styles.empty}>
+            Add concise archetype or style cards, then enable weighted draws.
+          </p>
+        )}
+
+        <form className={styles.form} onSubmit={(event) => void submit(event)}>
+          <strong>Add immutable card</strong>
+          <label>
+            Title
+            <input
+              value={title}
+              maxLength={80}
+              disabled={busy}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Industrial nocturne"
+            />
+          </label>
+          <label>
+            Prompt direction
+            <textarea
+              value={prompt}
+              minLength={20}
+              maxLength={1_000}
+              rows={3}
+              disabled={busy}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="A concise subject, composition, medium, or style direction"
+            />
+          </label>
+          <div className={styles.formPair}>
+            <label>
+              Avoid for this card
+              <input
+                value={negativePrompt}
+                maxLength={500}
+                disabled={busy}
+                onChange={(event) => setNegativePrompt(event.target.value)}
+                placeholder="Optional card-specific negatives"
+              />
+            </label>
+            <label>
+              Tags
+              <input
+                value={tags}
+                disabled={busy}
+                onChange={(event) => setTags(event.target.value)}
+                placeholder="portrait, copper, nocturne"
+              />
+            </label>
+          </div>
+          <button
+            type="submit"
+            disabled={
+              busy || title.trim().length === 0 || prompt.trim().length < 20
+            }
+          >
+            {busy ? "Saving…" : "Add card"}
+          </button>
+        </form>
+      </div>
+    </details>
+  );
+}
+
+function PromptCardRow({
+  card,
+  busy,
+  onUpdate,
+}: {
+  card: PromptCard;
+  busy: boolean;
+  onUpdate: PromptDeckEditorProps["onUpdate"];
+}) {
+  const adjustWeight = (factor: number) =>
+    onUpdate({
+      kind: "card",
+      cardId: card.id,
+      weight: Math.min(100, Math.max(0.1, card.weight * factor)),
+    });
+
+  return (
+    <li className={!card.active ? styles.inactive : undefined}>
+      <span className={styles.cardHeading}>
+        <strong>{card.title}</strong>
+        <small>
+          {card.stats.wins}W · {card.stats.rejects}R
+        </small>
+      </span>
+      <p>{card.prompt}</p>
+      {card.negativePrompt ? <small>Avoid: {card.negativePrompt}</small> : null}
+      {card.tags.length > 0 ? (
+        <span className={styles.tags}>{card.tags.join(" · ")}</span>
+      ) : null}
+      <div className={styles.cardActions}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void adjustWeight(1 / 1.1)}
+          aria-label={`Decrease ${card.title} weight`}
+        >
+          −
+        </button>
+        <output aria-label={`${card.title} weight`}>
+          {card.weight.toFixed(2)}×
+        </output>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void adjustWeight(1.1)}
+          aria-label={`Increase ${card.title} weight`}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            void onUpdate({
+              kind: "card",
+              cardId: card.id,
+              active: !card.active,
+            })
+          }
+        >
+          {card.active ? "Archive" : "Reactivate"}
+        </button>
+      </div>
+    </li>
+  );
+}

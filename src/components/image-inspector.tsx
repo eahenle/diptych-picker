@@ -9,8 +9,8 @@ import styles from "./image-inspector.module.css";
 
 export type InspectableCandidate = Pick<
   Candidate,
-  "id" | "imageUrl" | "concept" | "lineage"
->;
+  "id" | "imageUrl" | "concept" | "lineage" | "promptCardId"
+> & { promptCardTitle?: string };
 
 export interface ImageInspectorState {
   candidates: InspectableCandidate[];
@@ -94,6 +94,12 @@ export function ImageInspector({
             ) : null}
             {candidate.lineage ? (
               <small>Variation of {candidate.lineage.parentConcept}</small>
+            ) : null}
+            {candidate.promptCardId ? (
+              <small>
+                Prompt card:{" "}
+                {candidate.promptCardTitle ?? candidate.promptCardId}
+              </small>
             ) : null}
           </figcaption>
           <button
