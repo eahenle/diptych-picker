@@ -5,6 +5,7 @@ import {
   preferenceAdaptationFreedom,
   preferenceAdaptationProgress,
   type PreferenceProfile,
+  type VariationSource,
 } from "@/domain/game";
 import { ModalShell } from "./modal-shell";
 import modalStyles from "./game-modal.module.css";
@@ -27,6 +28,7 @@ interface PreferenceProfileModalProps {
   sourceAnalyzing: boolean;
   sourceError: string | null;
   sourceSummary: string | null;
+  variationSource: VariationSource | null;
   selectionBoundWait: boolean;
   onClose: () => void;
   onSave: () => void;
@@ -46,6 +48,7 @@ export function PreferenceProfileModal({
   sourceAnalyzing,
   sourceError,
   sourceSummary,
+  variationSource,
   selectionBoundWait,
   onClose,
   onSave,
@@ -146,6 +149,13 @@ export function PreferenceProfileModal({
             : null}
           Novelty rules still take priority.
         </p>
+        {variationSource ? (
+          <p className={styles.variationSource} role="status">
+            Exploring variations of <strong>{variationSource.concept}</strong>.
+            Saving this draft preserves the source as parent lineage for new
+            candidates.
+          </p>
+        ) : null}
         {adaptationProgress ? (
           <div
             className={styles.adaptationCadence}

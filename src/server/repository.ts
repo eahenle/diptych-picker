@@ -39,6 +39,15 @@ const preferenceRevisionSchema = z
   })
   .strict();
 
+const candidateLineageSchema = z
+  .object({
+    kind: z.literal("variation"),
+    parentCandidateId: z.string().trim().min(1),
+    parentConcept: z.string().trim().min(1),
+    preferenceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+
 const candidateSchema = z
   .object({
     id: z.string().trim().min(1),
@@ -50,6 +59,7 @@ const candidateSchema = z
     winCount: z.number().int().nonnegative(),
     reasoningSummary: z.string().optional(),
     preferenceRevision: preferenceRevisionSchema.optional(),
+    lineage: candidateLineageSchema.optional(),
   })
   .strict();
 
@@ -226,6 +236,13 @@ const gameStateSchema: z.ZodType<GameState> = z
     history: z.array(selectionHistorySchema),
     preferenceSeed: z.string().trim().min(1),
     preferenceProfile: preferenceProfileSchema.optional(),
+    variationSource: z
+      .object({
+        candidateId: z.string().trim().min(1),
+        concept: z.string().trim().min(1),
+      })
+      .strict()
+      .optional(),
     pendingSelection: pendingSelectionSchema.optional(),
     mailboxCleanupJobId: z.string().trim().min(1).optional(),
     errorMessage: z.string().trim().min(1).optional(),

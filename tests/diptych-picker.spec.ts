@@ -109,7 +109,7 @@ test("starts with five durable challengers and adapts two independent images to 
 
   expect(stored.ready).toHaveLength(5);
   await expect(
-    page.getByLabel("Ready queue 5 of 5; 0 generating"),
+    page.getByLabel("View queue details; 5 ready, 0 generating, 0 waiting"),
   ).toBeVisible();
   await expect(
     page.getByLabel("View pool leaderboard; 7 of 50 reusable images"),
@@ -324,6 +324,10 @@ test("opens either active image in a larger inspection view", async ({
   await page.keyboard.press("Tab");
   await expect(
     leftDialog.getByRole("button", { name: "Next expanded image" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    leftDialog.getByRole("button", { name: "Explore variations" }),
   ).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(closeInspector).toBeFocused();

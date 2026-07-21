@@ -3,7 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageInspector, type ImageInspectorState } from "./image-inspector";
 
 afterEach(cleanup);
@@ -32,6 +32,7 @@ function Harness() {
     <ImageInspector
       state={state}
       onClose={() => setState(null)}
+      onExplore={() => undefined}
       onNavigate={(direction) =>
         setState((current) =>
           current
@@ -86,6 +87,7 @@ describe("ImageInspector", () => {
         state={{ candidates: [candidates[0]], index: 0, returnTarget: null }}
         onClose={() => undefined}
         onNavigate={() => undefined}
+        onExplore={() => undefined}
       />,
     );
 
@@ -95,5 +97,47 @@ describe("ImageInspector", () => {
     expect(
       screen.queryByRole("button", { name: "Next expanded image" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("offers the inspected candidate as a variation source", () => {
+    const onExplore = vi.fn();
+    render(
+      <ImageInspector
+        state={{ candidates: [candidates[0]], index: 0, returnTarget: null }}
+        onClose={() => undefined}
+        onNavigate={() => undefined}
+        onExplore={onExplore}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore variations" }));
+    expect(onExplore).toHaveBeenCalledWith(candidates[0]);
+  });
+
+  it("shows preserved parent lineage", () => {
+    render(
+      <ImageInspector
+        state={{
+          candidates: [
+            {
+              ...candidates[0],
+              lineage: {
+                kind: "variation",
+                parentCandidateId: "parent-1",
+                parentConcept: "Copper parent",
+                preferenceFingerprint: "a".repeat(64),
+              },
+            },
+          ],
+          index: 0,
+          returnTarget: null,
+        }}
+        onClose={() => undefined}
+        onNavigate={() => undefined}
+        onExplore={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("Variation of Copper parent")).toBeVisible();
   });
 });

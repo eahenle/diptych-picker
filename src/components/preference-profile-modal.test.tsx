@@ -40,6 +40,7 @@ function renderPreferences(
     sourceAnalyzing: false,
     sourceError: null,
     sourceSummary: null,
+    variationSource: null,
     selectionBoundWait: false,
     onClose: vi.fn(),
     onSave: vi.fn(),
@@ -53,6 +54,20 @@ function renderPreferences(
 }
 
 describe("PreferenceProfileModal", () => {
+  it("identifies a candidate-derived variation profile", () => {
+    renderPreferences({
+      variationSource: {
+        candidateId: "parent-1",
+        concept: "Copper parent",
+      },
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Exploring variations of Copper parent",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("parent lineage");
+  });
+
   it("delegates profile fields, freedom, source analysis, and actions", async () => {
     const props = renderPreferences();
     const slider = screen.getByRole("slider", {

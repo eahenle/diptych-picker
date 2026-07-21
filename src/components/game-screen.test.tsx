@@ -764,6 +764,107 @@ describe("GameScreen challenger reconciliation", () => {
     ).toBe(false);
   });
 
+  it("explores variations by analyzing an inspected candidate into an editable profile", async () => {
+    const game = cloneGame();
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === game.round.leftCandidate.imageUrl) {
+          return new Response(new Uint8Array([1, 2, 3]), {
+            headers: { "Content-Type": "image/png" },
+          });
+        }
+        if (url === "/api/game/preferences/source" && init?.method === "POST") {
+          return json({ status: "analyzing", jobId: "variation-job-1" }, 202);
+        }
+        if (
+          url === "/api/game/preferences/source?jobId=variation-job-1" &&
+          init?.method === "DELETE"
+        ) {
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/game/preferences/source?jobId=variation-job-1") {
+          return json({
+            status: "completed",
+            jobId: "variation-job-1",
+            profile: {
+              themes: "variations on the inspected architectural portrait",
+              inspiration: "preserve diagonal light and low-angle framing",
+              mediaTypes: "editorial photography",
+              visualStyle: "geometric and tactile",
+              colorPalette: "violet, charcoal, and pale gold",
+              contentLevel: "family-friendly",
+              avoid: "exact identity and readable text",
+            },
+            reasoningSummary:
+              "Transfers the candidate's themes without reproducing identity.",
+          });
+        }
+        if (init?.method === "PATCH") {
+          return json({
+            ...game,
+            variationSource: {
+              candidateId: game.round.leftCandidate.id,
+              concept: game.round.leftCandidate.concept,
+            },
+          });
+        }
+        return json({ status: "ready", game });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GameScreen />);
+
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(
+      screen.getByRole("button", { name: "View image A larger" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Explore variations" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Preference profile" }),
+    ).toBeVisible();
+    expect(await screen.findByText("Analyzing source image")).toBeVisible();
+    expect(
+      await screen.findByDisplayValue(
+        "variations on the inspected architectural portrait",
+      ),
+    ).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(game.round.leftCandidate.imageUrl, {
+      cache: "force-cache",
+    });
+    const sourceRequest = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url) === "/api/game/preferences/source" &&
+        init?.method === "POST",
+    );
+    expect(sourceRequest?.[1]?.body).toBeInstanceOf(FormData);
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
+
+    expect(
+      screen.getByText(game.round.leftCandidate.concept, {
+        selector: "strong",
+      }).parentElement,
+    ).toHaveTextContent("Exploring variations of");
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+      ).toBe(true),
+    );
+    const preferenceRequest = fetchMock.mock.calls.find(
+      ([, init]) => init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(preferenceRequest?.[1]?.body))).toMatchObject({
+      variationSourceCandidateId: game.round.leftCandidate.id,
+      preferenceProfile: {
+        themes: "variations on the inspected architectural portrait",
+      },
+    });
+  });
+
   it("opens the reusable-pool leaderboard from the Pool metric", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
       String(input).endsWith("/api/game/leaderboard")
@@ -1429,6 +1530,7 @@ describe("GameScreen challenger reconciliation", () => {
         adaptationSourceWinnerIds: [],
         adaptationSourceRejectedIds: [],
       },
+      variationSourceCandidateId: null,
     });
   });
 
@@ -1659,6 +1761,7 @@ describe("GameScreen challenger reconciliation", () => {
         contentLevel: "adult-allowed",
         avoid: "readable text",
       },
+      variationSourceCandidateId: null,
     });
   });
 

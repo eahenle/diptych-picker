@@ -158,6 +158,16 @@
   background: rgba(167, 107, 239, 0.06);
 }
 
+.dialog p.variationSource {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  color: #d8c6f5;
+  font-size: 11px;
+  line-height: 1.45;
+  border: 1px solid rgba(167, 107, 239, 0.38);
+  background: rgba(167, 107, 239, 0.08);
+}
+
 .sourceImport > span {
   min-width: 0;
   display: grid;
