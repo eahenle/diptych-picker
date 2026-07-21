@@ -37,6 +37,7 @@ import type {
 } from "@/domain/challenger-state";
 import { CandidateCard } from "./candidate-card";
 import { ModalShell } from "./modal-shell";
+import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
 import styles from "./game-screen.module.css";
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -71,6 +72,7 @@ type InspectableCandidate = Pick<Candidate, "id" | "imageUrl" | "concept">;
 interface ImageInspectorState {
   candidates: InspectableCandidate[];
   index: number;
+  returnTarget: "leaderboard" | null;
 }
 type SourceProfileResponse =
   | { status: "analyzing"; jobId: string }
@@ -352,6 +354,7 @@ export function GameScreen() {
     (
       candidate: InspectableCandidate,
       candidates: readonly InspectableCandidate[],
+      returnTarget: ImageInspectorState["returnTarget"] = null,
     ) => {
       const uniqueCandidates = candidates.filter(
         (item, index) =>
@@ -366,6 +369,7 @@ export function GameScreen() {
         candidates:
           uniqueCandidates.length > 0 ? uniqueCandidates : [candidate],
         index: index >= 0 ? index : 0,
+        returnTarget,
       });
     },
     [],
@@ -1003,41 +1007,18 @@ export function GameScreen() {
     submitSelection,
   ]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        preferencesOpen ||
-        newGameOpen ||
-        loadGameOpen ||
-        leaderboardOpen ||
-        historyOpen ||
-        inspectedCandidate
-      ) {
-        return;
-      }
-      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat)
-        return;
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("textarea, input, select")) return;
-      const key = event.key.toLowerCase();
-      if (key === "a" || key === "1") void select("left");
-      if (key === "b" || key === "2") void select("right");
-      if (key === "c" || key === "3") void tie();
-      if (key === "d" || key === "4") void bothLose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    bothLose,
-    historyOpen,
-    inspectedCandidate,
-    leaderboardOpen,
-    loadGameOpen,
-    newGameOpen,
-    preferencesOpen,
-    select,
-    tie,
-  ]);
+  useGameplayShortcuts({
+    suspended:
+      preferencesOpen ||
+      newGameOpen ||
+      loadGameOpen ||
+      leaderboardOpen ||
+      historyOpen ||
+      Boolean(inspectedCandidate),
+    onSelect: select,
+    onTie: tie,
+    onBothLose: bothLose,
+  });
 
   useEffect(() => {
     if (!imageInspector) return;
@@ -1092,7 +1073,14 @@ export function GameScreen() {
     openImageInspector(
       candidate,
       leaderboardEntries.map((entry) => entry.candidate),
+      "leaderboard",
     );
+  };
+
+  const closeImageInspector = () => {
+    const returnTarget = imageInspector?.returnTarget ?? null;
+    setImageInspector(null);
+    if (returnTarget === "leaderboard") setLeaderboardOpen(true);
   };
 
   const inspectHistoryCandidate = (candidate: ComparisonHistoryCandidate) => {
@@ -1847,14 +1835,14 @@ export function GameScreen() {
         <ModalShell
           className={styles.imageInspector}
           ariaLabel={`Expanded image: ${inspectedCandidate.concept}`}
-          onClose={() => setImageInspector(null)}
+          onClose={closeImageInspector}
         >
           <>
             <button
               type="button"
               className={styles.leaderboardClose}
               aria-label="Close expanded image"
-              onClick={() => setImageInspector(null)}
+              onClick={closeImageInspector}
             >
               ×
             </button>
