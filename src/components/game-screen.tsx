@@ -32,11 +32,14 @@ import type {
 import { CandidateCard } from "./candidate-card";
 import { ComparisonHistory } from "./comparison-history";
 import {
+  GameTransferModal,
+  type GameTransferAction,
+} from "./game-transfer-modal";
+import {
   ImageInspector,
   type ImageInspectorState,
   type InspectableCandidate,
 } from "./image-inspector";
-import { ModalShell } from "./modal-shell";
 import { PoolLeaderboard } from "./pool-leaderboard";
 import {
   PreferenceProfileModal,
@@ -72,7 +75,6 @@ interface ActiveSelection {
 }
 
 type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
-type GameTransferAction = "exporting" | "importing" | "resetting";
 type SourceProfileResponse =
   | { status: "analyzing"; jobId: string }
   | {
@@ -333,7 +335,6 @@ export function GameScreen() {
     null,
   );
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
   const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
   const queuedPreferenceSaveStartedRef = useRef(false);
@@ -1248,7 +1249,6 @@ export function GameScreen() {
     } finally {
       selectionLocked.current = false;
       setGameTransferAction(null);
-      if (importInputRef.current) importInputRef.current.value = "";
     }
   };
 
@@ -1836,206 +1836,28 @@ export function GameScreen() {
       ) : null}
 
       {loadGameOpen && game ? (
-        <ModalShell
-          className={`${styles.preferencesModal} ${styles.gameStateModal}`}
-          onClose={() => {
-            if (!gameTransferAction) setLoadGameOpen(false);
-          }}
-          ariaLabelledBy="load-game-title"
-          ariaDescribedBy="load-game-description load-game-save-note"
-          ariaBusy={gameTransferAction !== null}
-        >
-          <>
-            <h2 id="load-game-title">Load saved game</h2>
-            <p id="load-game-description">
-              Loading replaces the current round and learned state after the
-              save and its local images pass validation.
-            </p>
-            <div className={styles.transferOptions}>
-              <div className={styles.transferOption}>
-                <span>
-                  <strong>Keep this game first</strong>
-                  <small>
-                    Download the current round, history, preferences, queue,
-                    ratings, and pool membership before loading another save.
-                  </small>
-                </span>
-                <button
-                  type="button"
-                  className={styles.utilityButton}
-                  disabled={gameTransferAction !== null}
-                  onClick={() => void exportCurrentGame()}
-                >
-                  {gameTransferAction === "exporting"
-                    ? "Exporting…"
-                    : "Export current game first"}
-                </button>
-              </div>
-              <div className={styles.transferOption}>
-                <span>
-                  <strong>Choose a saved game</strong>
-                  <small>
-                    The current game stays unchanged if the save cannot be
-                    restored safely.
-                  </small>
-                </span>
-                <button
-                  type="button"
-                  className={styles.utilityButton}
-                  disabled={gameTransferAction !== null}
-                  onClick={() => importInputRef.current?.click()}
-                >
-                  {gameTransferAction === "importing"
-                    ? "Loading…"
-                    : "Choose saved game"}
-                </button>
-                <input
-                  ref={importInputRef}
-                  className={styles.fileInput}
-                  type="file"
-                  accept="application/json,.json"
-                  aria-label="Choose saved game file"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void importSavedGame(file);
-                  }}
-                />
-              </div>
-            </div>
-            <p id="load-game-save-note" className={styles.gameSaveNote}>
-              Save files use this installation&apos;s immutable image library;
-              missing local images are rejected without changing the current
-              game.
-            </p>
-            {gameTransferError ? (
-              <p className={styles.transferError} role="alert">
-                {gameTransferError}
-              </p>
-            ) : null}
-            <div className={styles.modalActions}>
-              <button
-                type="button"
-                className={styles.utilityButton}
-                disabled={gameTransferAction !== null}
-                onClick={() => setLoadGameOpen(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </>
-        </ModalShell>
+        <GameTransferModal
+          mode="load"
+          action={gameTransferAction}
+          error={gameTransferError}
+          onClose={() => setLoadGameOpen(false)}
+          onExport={() => void exportCurrentGame()}
+          onImport={importSavedGame}
+          onStartFresh={() => void startFreshGame()}
+        />
       ) : null}
 
       {newGameOpen && game ? (
-        <ModalShell
-          className={`${styles.preferencesModal} ${styles.gameStateModal}`}
-          onClose={() => {
-            if (!gameTransferAction) setNewGameOpen(false);
-          }}
-          ariaLabelledBy="new-game-title"
-          ariaDescribedBy="new-game-description game-save-note"
-          ariaBusy={gameTransferAction !== null}
-        >
-          <>
-            <h2 id="new-game-title">New game</h2>
-            <p id="new-game-description">
-              Save this exact game before starting over, or restore a game you
-              saved earlier.
-            </p>
-            <div className={styles.transferOptions}>
-              <div className={styles.transferOption}>
-                <span>
-                  <strong>Keep this game</strong>
-                  <small>
-                    Export the round, history, preferences, queue, ratings, and
-                    pool membership.
-                  </small>
-                </span>
-                <button
-                  type="button"
-                  className={styles.utilityButton}
-                  disabled={gameTransferAction !== null}
-                  onClick={() => void exportCurrentGame()}
-                >
-                  {gameTransferAction === "exporting"
-                    ? "Exporting…"
-                    : "Export current game"}
-                </button>
-              </div>
-              <div className={styles.transferOption}>
-                <span>
-                  <strong>Return to a saved game</strong>
-                  <small>
-                    Loading a save replaces the current round and learned state
-                    after validation.
-                  </small>
-                </span>
-                <button
-                  type="button"
-                  className={styles.utilityButton}
-                  disabled={gameTransferAction !== null}
-                  onClick={() => importInputRef.current?.click()}
-                >
-                  {gameTransferAction === "importing"
-                    ? "Loading…"
-                    : "Load saved game"}
-                </button>
-                <input
-                  ref={importInputRef}
-                  className={styles.fileInput}
-                  type="file"
-                  accept="application/json,.json"
-                  aria-label="Choose saved game file"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void importSavedGame(file);
-                  }}
-                />
-              </div>
-            </div>
-            <p id="game-save-note" className={styles.gameSaveNote}>
-              Save files use this installation&apos;s immutable image library;
-              missing local images are rejected without changing the current
-              game.
-            </p>
-            {gameTransferError ? (
-              <p className={styles.transferError} role="alert">
-                {gameTransferError}
-              </p>
-            ) : null}
-            <div className={styles.freshGameSection}>
-              <span>
-                <strong>Start fresh</strong>
-                <small>
-                  Clears the current round, history, and preference profile.
-                  Learned pool ratings and image files stay available.
-                </small>
-              </span>
-              <button
-                type="button"
-                className={styles.newGameButton}
-                disabled={gameTransferAction !== null}
-                onClick={() => void startFreshGame()}
-              >
-                {gameTransferAction === "resetting"
-                  ? "Starting…"
-                  : "Start new game"}
-              </button>
-            </div>
-            <div className={styles.modalActions}>
-              <button
-                type="button"
-                className={styles.utilityButton}
-                disabled={gameTransferAction !== null}
-                onClick={() => setNewGameOpen(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </>
-        </ModalShell>
+        <GameTransferModal
+          mode="new"
+          action={gameTransferAction}
+          error={gameTransferError}
+          onClose={() => setNewGameOpen(false)}
+          onExport={() => void exportCurrentGame()}
+          onImport={importSavedGame}
+          onStartFresh={() => void startFreshGame()}
+        />
       ) : null}
-
       {preferencesOpen && game ? (
         <PreferenceProfileModal
           profile={preferenceDraft}

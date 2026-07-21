@@ -1,0 +1,66 @@
+.dialog {
+  width: min(680px, 100%);
+}
+
+.options {
+  display: grid;
+  gap: 10px;
+}
+
+.option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid #383337;
+  background: #090b0d;
+}
+
+.option > span {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.option strong {
+  color: #e4ddd5;
+  font-size: 13px;
+}
+
+.option small {
+  color: #8f8984;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.fileInput {
+  display: none;
+}
+
+.dialog p.saveNote {
+  margin: 12px 2px 0;
+  color: #817b77;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.freshSection {
+  margin-top: 22px;
+  border-color: rgba(180, 104, 73, 0.45);
+}
+
+.primaryAction {
+  color: var(--copper-bright);
+  border-color: rgba(180, 104, 73, 0.8);
+}
+
+@media (max-width: 700px) {
+  .option {
+    grid-template-columns: 1fr;
+  }
+
+  .option button {
+    width: 100%;
+  }
+}
