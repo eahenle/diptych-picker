@@ -62,6 +62,7 @@ interface ActiveSelection {
 
 type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
 type GameTransferAction = "exporting" | "importing" | "resetting";
+type InspectableCandidate = Pick<Candidate, "imageUrl" | "concept">;
 type SourceProfileResponse =
   | { status: "analyzing"; jobId: string }
   | {
@@ -287,7 +288,7 @@ export function GameScreen() {
   const [loadGameOpen, setLoadGameOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [inspectedCandidate, setInspectedCandidate] =
-    useState<Candidate | null>(null);
+    useState<InspectableCandidate | null>(null);
   const [historyEntries, setHistoryEntries] = useState<
     ComparisonHistoryEntry[]
   >([]);
@@ -1036,6 +1037,13 @@ export function GameScreen() {
     } finally {
       setHistoryLoading(false);
     }
+  };
+
+  const inspectLeaderboardCandidate = (
+    candidate: PoolLeaderboardEntry["candidate"],
+  ) => {
+    setLeaderboardOpen(false);
+    setInspectedCandidate(candidate);
   };
 
   const openPoolLeaderboard = async () => {
@@ -2014,31 +2022,42 @@ export function GameScreen() {
               <ol className={styles.leaderboardList}>
                 {leaderboardEntries.map((entry) => (
                   <li key={entry.candidate.id}>
-                    <span className={styles.leaderboardRank}>{entry.rank}</span>
-                    <img
-                      src={entry.candidate.imageUrl}
-                      alt=""
-                      width={72}
-                      height={72}
-                    />
-                    <span className={styles.leaderboardIdentity}>
-                      <strong>{entry.candidate.concept}</strong>
-                      <small>
-                        {entry.candidate.style.slice(0, 3).join(" · ")}
-                      </small>
-                      <em>
-                        {entry.source === "curated" ? "Curated" : "Generated"}
-                      </em>
-                    </span>
-                    <span
-                      className={styles.leaderboardScore}
-                      aria-label={`Elo ${entry.rating}; ${entry.wins} wins and ${entry.losses} losses`}
+                    <button
+                      type="button"
+                      className={styles.leaderboardEntryButton}
+                      aria-label={`View ${entry.candidate.concept} larger`}
+                      onClick={() =>
+                        inspectLeaderboardCandidate(entry.candidate)
+                      }
                     >
-                      <strong>{entry.rating}</strong>
-                      <small>
-                        {entry.wins}W–{entry.losses}L
-                      </small>
-                    </span>
+                      <span className={styles.leaderboardRank}>
+                        {entry.rank}
+                      </span>
+                      <img
+                        src={entry.candidate.imageUrl}
+                        alt=""
+                        width={72}
+                        height={72}
+                      />
+                      <span className={styles.leaderboardIdentity}>
+                        <strong>{entry.candidate.concept}</strong>
+                        <small>
+                          {entry.candidate.style.slice(0, 3).join(" · ")}
+                        </small>
+                        <em>
+                          {entry.source === "curated" ? "Curated" : "Generated"}
+                        </em>
+                      </span>
+                      <span
+                        className={styles.leaderboardScore}
+                        aria-label={`Elo ${entry.rating}; ${entry.wins} wins and ${entry.losses} losses`}
+                      >
+                        <strong>{entry.rating}</strong>
+                        <small>
+                          {entry.wins}W–{entry.losses}L
+                        </small>
+                      </span>
+                    </button>
                     <button
                       type="button"
                       className={styles.favoriteButton}

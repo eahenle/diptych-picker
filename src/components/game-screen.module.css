@@ -631,12 +631,31 @@
 }
 .leaderboardList li {
   display: grid;
-  grid-template-columns: 36px 72px minmax(0, 1fr) auto 34px;
+  grid-template-columns: minmax(0, 1fr) 34px;
   align-items: center;
-  gap: 14px;
-  padding: 10px 14px 10px 8px;
+  gap: 8px;
+  padding: 0 14px 0 0;
   border: 1px solid #383337;
   background: #090b0d;
+}
+.leaderboardEntryButton {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 36px 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 6px 10px 8px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: zoom-in;
+}
+.leaderboardEntryButton:hover,
+.leaderboardEntryButton:focus-visible {
+  background: rgba(193, 112, 78, 0.09);
+  outline: 1px solid var(--copper-bright);
+  outline-offset: -1px;
 }
 .leaderboardList img {
   width: 72px;
@@ -1214,9 +1233,14 @@
     grid-column: 1;
   }
   .leaderboardList li {
-    grid-template-columns: 28px 56px minmax(0, 1fr) auto 30px;
+    grid-template-columns: minmax(0, 1fr) 30px;
+    gap: 6px;
+    padding-right: 10px;
+  }
+  .leaderboardEntryButton {
+    grid-template-columns: 28px 56px minmax(0, 1fr) auto;
     gap: 10px;
-    padding-inline: 6px 10px;
+    padding-inline: 6px;
   }
   .leaderboardList img {
     width: 56px;
