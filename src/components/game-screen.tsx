@@ -1639,30 +1639,32 @@ export function GameScreen() {
             </section>
           </div>
 
-          <div className={styles.roundActions}>
-            <button
-              type="button"
-              className={styles.tieButton}
-              disabled={status === "generating" || reconcilingRetry}
-              onClick={tie}
-            >
-              Declare tie{" "}
-              <span>
-                <kbd>C</kbd> / <kbd>3</kbd>
-              </span>
-            </button>
-            <button
-              type="button"
-              className={`${styles.tieButton} ${styles.bothLoseButton}`}
-              disabled={status === "generating" || reconcilingRetry}
-              onClick={bothLose}
-            >
-              Both lose{" "}
-              <span>
-                <kbd>D</kbd> / <kbd>4</kbd>
-              </span>
-            </button>
-          </div>
+          {status !== "generating" ? (
+            <div className={styles.roundActions}>
+              <button
+                type="button"
+                className={styles.tieButton}
+                disabled={reconcilingRetry}
+                onClick={tie}
+              >
+                Declare tie{" "}
+                <span>
+                  <kbd>C</kbd> / <kbd>3</kbd>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`${styles.tieButton} ${styles.bothLoseButton}`}
+                disabled={reconcilingRetry}
+                onClick={bothLose}
+              >
+                Both lose{" "}
+                <span>
+                  <kbd>D</kbd> / <kbd>4</kbd>
+                </span>
+              </button>
+            </div>
+          ) : null}
 
           <p className={styles.shortcuts}>
             {bothCandidatesLoading ? (
