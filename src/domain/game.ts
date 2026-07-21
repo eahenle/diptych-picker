@@ -224,15 +224,36 @@ export function preferenceAdaptationInterval(
   return preferenceAdaptationStrength(profile) === "unfettered" ? 5 : 15;
 }
 
+export interface PreferenceAdaptationProgress {
+  interval: 5 | 15;
+  completed: number;
+  remaining: number;
+  due: boolean;
+}
+
+export function preferenceAdaptationProgress(
+  profile: PreferenceProfile,
+  completedDecisionCount: number,
+): PreferenceAdaptationProgress | null {
+  const interval = preferenceAdaptationInterval(profile);
+  if (interval === null) return null;
+  const completed =
+    profile.adaptationLastDecision === undefined
+      ? interval
+      : Math.min(
+          interval,
+          Math.max(0, completedDecisionCount - profile.adaptationLastDecision),
+        );
+  const remaining = interval - completed;
+  return { interval, completed, remaining, due: remaining === 0 };
+}
+
 export function isPreferenceAdaptationDue(
   profile: PreferenceProfile,
   completedDecisionCount: number,
 ): boolean {
-  const interval = preferenceAdaptationInterval(profile);
-  if (interval === null) return false;
   return (
-    profile.adaptationLastDecision === undefined ||
-    completedDecisionCount - profile.adaptationLastDecision >= interval
+    preferenceAdaptationProgress(profile, completedDecisionCount)?.due ?? false
   );
 }
 

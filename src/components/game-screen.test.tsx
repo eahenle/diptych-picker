@@ -1304,6 +1304,64 @@ describe("GameScreen challenger reconciliation", () => {
     ).toBeVisible();
   });
 
+  it("shows rewrite cadence progress and resets it when freedom changes", async () => {
+    const cadenceGame = cloneGame();
+    cadenceGame.history = Array.from({ length: 5 }, (_, index) => ({
+      winnerId: `winner-${index}`,
+      loserId: `loser-${index}`,
+      winnerPrompt: `winner prompt ${index}`,
+      loserPrompt: `loser prompt ${index}`,
+      winnerConcept: `winner concept ${index}`,
+      loserConcept: `loser concept ${index}`,
+      selectedAt: `2026-07-1${index + 1}T12:00:00.000Z`,
+    }));
+    cadenceGame.round.roundNumber = 6;
+    cadenceGame.preferenceProfile = {
+      ...preferenceProfileFromSeed(cadenceGame.preferenceSeed),
+      adaptationMode: "adaptive",
+      adaptationStrength: "unfettered",
+      adaptationLastDecision: 0,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: cadenceGame })),
+    );
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+
+    const cadence = screen.getByRole("status", {
+      name: "Preference rewrite cadence",
+    });
+    expect(cadence).toHaveTextContent("Rewrite checkpoint ready");
+    expect(cadence).toHaveTextContent(
+      "The next winning generated candidate may update this profile.",
+    );
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Rounds toward next preference rewrite",
+      }),
+    ).toHaveAttribute("value", "5");
+
+    fireEvent.change(
+      screen.getByRole("slider", { name: "Model rewrite freedom" }),
+      { target: { value: "1" } },
+    );
+    expect(cadence).toHaveTextContent("Next rewrite checkpoint in 15 rounds");
+    expect(cadence).toHaveTextContent(
+      "0 of 15 rounds completed since the last rewrite checkpoint.",
+    );
+
+    fireEvent.change(
+      screen.getByRole("slider", { name: "Model rewrite freedom" }),
+      { target: { value: "0" } },
+    );
+    expect(
+      screen.queryByRole("status", { name: "Preference rewrite cadence" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("surfaces a moderation notice and opens Preferences to adjust it", async () => {
     const blocked = cloneGame();
     blocked.generationNotice = {
