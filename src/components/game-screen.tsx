@@ -1,7 +1,5 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element -- History and leaderboard thumbnails use immutable local candidate URLs. */
-
 import {
   useCallback,
   useEffect,
@@ -35,6 +33,7 @@ import type {
   PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
 import { CandidateCard } from "./candidate-card";
+import { ComparisonHistory } from "./comparison-history";
 import {
   ImageInspector,
   type ImageInspectorState,
@@ -218,15 +217,6 @@ function matchingCompletedSelection(
     history?.winnerId === winner.id &&
     history.loserId === loser.id
   );
-}
-
-function formatSelectionTime(selectedAt: string): string {
-  const date = new Date(selectedAt);
-  if (Number.isNaN(date.valueOf())) return selectedAt;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }
 
 type HeaderPictographName = "export" | "load" | "preferences" | "new";
@@ -1828,209 +1818,19 @@ export function GameScreen() {
       ) : null}
 
       {historyOpen && game ? (
-        <ModalShell
-          className={`${styles.preferencesModal} ${styles.historyModal}`}
+        <ComparisonHistory
+          entries={historyEntries}
+          total={historyTotal}
+          loading={historyLoading}
+          error={historyError}
+          favoriteError={favoriteError}
+          favoriteSaving={favoriteSaving}
           onClose={() => setHistoryOpen(false)}
-          ariaLabelledBy="comparison-history-title"
-          ariaDescribedBy="comparison-history-description"
-        >
-          <>
-            <button
-              type="button"
-              className={styles.leaderboardClose}
-              aria-label="Close history"
-              onClick={() => setHistoryOpen(false)}
-            >
-              ×
-            </button>
-            <h2 id="comparison-history-title">Comparison history</h2>
-            <p id="comparison-history-description">
-              Newest choices first. Each row shows the two candidates and the
-              decision without exposing their generation prompts.
-            </p>
-            {favoriteError ? (
-              <p className={styles.transferError} role="alert">
-                {favoriteError}
-              </p>
-            ) : null}
-            {historyLoading ? (
-              <p className={styles.leaderboardState} role="status">
-                Rebuilding the timeline…
-              </p>
-            ) : historyError ? (
-              <p className={styles.transferError} role="alert">
-                {historyError}
-              </p>
-            ) : historyEntries.length === 0 ? (
-              <p className={styles.leaderboardState}>
-                No comparisons have been decided yet.
-              </p>
-            ) : (
-              <>
-                <p className={styles.historyCount}>
-                  Showing {historyEntries.length} of {historyTotal} decisions
-                </p>
-                <ol className={styles.historyList}>
-                  {historyEntries.map((entry) => {
-                    const pairDecision =
-                      entry.outcome === "tie" || entry.outcome === "both-lose";
-                    const primary = pairDecision ? entry.left : entry.winner;
-                    const secondary = pairDecision ? entry.right : entry.loser;
-                    return (
-                      <li key={`${entry.decisionNumber}-${entry.selectedAt}`}>
-                        <span className={styles.historyDecision}>
-                          #{entry.decisionNumber}
-                        </span>
-                        <span className={styles.historyCandidate}>
-                          {primary.imageUrl ? (
-                            <button
-                              type="button"
-                              className={styles.historyImageButton}
-                              aria-label={`View ${primary.concept} larger`}
-                              title="View larger"
-                              onClick={() => inspectHistoryCandidate(primary)}
-                            >
-                              <img
-                                src={primary.imageUrl}
-                                alt=""
-                                width={64}
-                                height={64}
-                              />
-                            </button>
-                          ) : (
-                            <span
-                              className={styles.historyImagePlaceholder}
-                              aria-hidden="true"
-                            >
-                              —
-                            </span>
-                          )}
-                          <span>
-                            <strong>{primary.concept}</strong>
-                            <small>
-                              {primary.style.slice(0, 2).join(" · ")}
-                            </small>
-                            <span className={styles.candidateFooter}>
-                              <em>
-                                {entry.outcome === "tie"
-                                  ? "Tied"
-                                  : entry.outcome === "both-lose"
-                                    ? "Rejected"
-                                    : "Winner"}
-                              </em>
-                              {primary.favorite !== null ? (
-                                <button
-                                  type="button"
-                                  className={styles.favoriteButton}
-                                  aria-label={`${primary.favorite ? "Remove" : "Add"} ${primary.concept} ${primary.favorite ? "from" : "to"} favorites`}
-                                  title={
-                                    primary.favorite
-                                      ? "Remove from favorites"
-                                      : "Add to favorites"
-                                  }
-                                  aria-pressed={primary.favorite}
-                                  disabled={favoriteSaving === primary.id}
-                                  onClick={() =>
-                                    void updateFavorite(
-                                      primary.id,
-                                      !primary.favorite,
-                                    )
-                                  }
-                                >
-                                  {primary.favorite ? "★" : "☆"}
-                                </button>
-                              ) : null}
-                            </span>
-                          </span>
-                        </span>
-                        <span
-                          className={styles.historyVersus}
-                          aria-hidden="true"
-                        >
-                          {entry.outcome === "tie"
-                            ? "with"
-                            : entry.outcome === "both-lose"
-                              ? "and"
-                              : "over"}
-                        </span>
-                        <span className={styles.historyCandidate}>
-                          {secondary.imageUrl ? (
-                            <button
-                              type="button"
-                              className={styles.historyImageButton}
-                              aria-label={`View ${secondary.concept} larger`}
-                              title="View larger"
-                              onClick={() => inspectHistoryCandidate(secondary)}
-                            >
-                              <img
-                                src={secondary.imageUrl}
-                                alt=""
-                                width={64}
-                                height={64}
-                              />
-                            </button>
-                          ) : (
-                            <span
-                              className={styles.historyImagePlaceholder}
-                              aria-hidden="true"
-                            >
-                              —
-                            </span>
-                          )}
-                          <span>
-                            <strong>{secondary.concept}</strong>
-                            <small>
-                              {secondary.style.slice(0, 2).join(" · ")}
-                            </small>
-                            <span className={styles.candidateFooter}>
-                              <em>
-                                {entry.outcome === "tie" ? "Tied" : "Rejected"}
-                              </em>
-                              {secondary.favorite !== null ? (
-                                <button
-                                  type="button"
-                                  className={styles.favoriteButton}
-                                  aria-label={`${secondary.favorite ? "Remove" : "Add"} ${secondary.concept} ${secondary.favorite ? "from" : "to"} favorites`}
-                                  title={
-                                    secondary.favorite
-                                      ? "Remove from favorites"
-                                      : "Add to favorites"
-                                  }
-                                  aria-pressed={secondary.favorite}
-                                  disabled={favoriteSaving === secondary.id}
-                                  onClick={() =>
-                                    void updateFavorite(
-                                      secondary.id,
-                                      !secondary.favorite,
-                                    )
-                                  }
-                                >
-                                  {secondary.favorite ? "★" : "☆"}
-                                </button>
-                              ) : null}
-                            </span>
-                          </span>
-                        </span>
-                        <time dateTime={entry.selectedAt}>
-                          {formatSelectionTime(entry.selectedAt)}
-                        </time>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </>
-            )}
-            <div className={styles.modalActions}>
-              <button
-                type="button"
-                className={styles.utilityButton}
-                onClick={() => setHistoryOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-          </>
-        </ModalShell>
+          onInspect={inspectHistoryCandidate}
+          onToggleFavorite={(candidateId, favorite) =>
+            void updateFavorite(candidateId, favorite)
+          }
+        />
       ) : null}
 
       {leaderboardOpen && game ? (
