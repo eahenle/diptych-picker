@@ -540,92 +540,8 @@
 .gameStateModal {
   width: min(680px, 100%);
 }
-.leaderboardModal {
-  width: min(820px, 100%);
-}
 .historyModal {
   width: min(920px, 100%);
-}
-.imageInspector {
-  position: relative;
-  width: min(1120px, 100%);
-  max-height: calc(100vh - 48px);
-  padding: 46px 18px 18px;
-  overflow: hidden;
-  background: #080a0c;
-  border: 1px solid #383337;
-  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.75);
-}
-.imageInspector .leaderboardClose {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  margin: 0;
-}
-.imageInspector figure {
-  margin: 0;
-  display: grid;
-  justify-items: center;
-  gap: 12px;
-}
-.imageInspector img {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  max-height: calc(100vh - 140px);
-  object-fit: contain;
-  background: #050607;
-}
-.imageInspector figcaption {
-  max-width: 100%;
-  overflow: hidden;
-  color: #d9d2cb;
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.055em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-  text-align: center;
-}
-.imageInspector figcaption small {
-  display: block;
-  margin-top: 5px;
-  color: var(--muted);
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 500;
-  letter-spacing: 0.035em;
-  text-transform: none;
-}
-.inspectorNavigation {
-  position: absolute;
-  top: 50%;
-  z-index: 2;
-  width: 44px;
-  height: 64px;
-  color: var(--text);
-  font-size: 40px;
-  line-height: 1;
-  background: rgba(7, 8, 10, 0.78);
-  border: 1px solid #484247;
-  cursor: pointer;
-  transform: translateY(-50%);
-}
-.inspectorNavigation:hover,
-.inspectorNavigation:focus-visible {
-  color: #fff;
-  border-color: var(--copper-bright);
-  outline: 2px solid rgba(216, 139, 104, 0.32);
-  outline-offset: 2px;
-}
-.inspectorPrevious {
-  left: 18px;
-}
-.inspectorNext {
-  right: 18px;
 }
 .leaderboardClose {
   position: sticky;
@@ -651,95 +567,6 @@
 .leaderboardState {
   padding: 24px 0;
   text-align: center;
-}
-.leaderboardList {
-  display: grid;
-  gap: 8px;
-  margin: 20px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.leaderboardList li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px 0 0;
-  border: 1px solid #383337;
-  background: #090b0d;
-}
-.leaderboardEntryButton {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 36px 72px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 6px 10px 8px;
-  color: inherit;
-  text-align: left;
-  background: transparent;
-  border: 0;
-  cursor: zoom-in;
-}
-.leaderboardEntryButton:hover,
-.leaderboardEntryButton:focus-visible {
-  background: rgba(193, 112, 78, 0.09);
-  outline: 1px solid var(--copper-bright);
-  outline-offset: -1px;
-}
-.leaderboardList img {
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-.leaderboardRank {
-  color: var(--copper-bright);
-  font-family: Georgia, serif;
-  font-size: 24px;
-  text-align: center;
-}
-.leaderboardIdentity {
-  min-width: 0;
-  display: grid;
-  gap: 5px;
-}
-.leaderboardIdentity strong {
-  overflow: hidden;
-  color: #e4ddd5;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.leaderboardIdentity small {
-  overflow: hidden;
-  color: #8f8984;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.leaderboardIdentity em {
-  color: #9d7868;
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 750;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.leaderboardScore {
-  min-width: 58px;
-  display: grid;
-  gap: 3px;
-  text-align: right;
-}
-.leaderboardScore strong {
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 18px;
-}
-.leaderboardScore small {
-  color: #8f8984;
-  font-size: 10px;
 }
 .preferencesModal p.historyCount {
   margin: 20px 0 8px;
@@ -1363,23 +1190,6 @@
   }
   .fieldWide {
     grid-column: 1;
-  }
-  .leaderboardList li {
-    grid-template-columns: minmax(0, 1fr) 30px;
-    gap: 6px;
-    padding-right: 10px;
-  }
-  .leaderboardEntryButton {
-    grid-template-columns: 28px 56px minmax(0, 1fr) auto;
-    gap: 10px;
-    padding-inline: 6px;
-  }
-  .leaderboardList img {
-    width: 56px;
-    height: 56px;
-  }
-  .leaderboardIdentity small {
-    display: none;
   }
 }
 
