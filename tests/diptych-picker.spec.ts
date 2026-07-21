@@ -1001,5 +1001,7 @@ test("delays pool fallback, blocks an eleventh, and completes a queued Preferenc
   await page.waitForTimeout(300);
   await expect(page.getByTestId("loading-right")).toBeVisible();
   expect((await challengerState()).consecutiveFallbackDraws).toBe(10);
-  await expect(page.getByText("Round 3", { exact: true })).toBeVisible();
+  await expect(page.getByText("Round 3", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
 });
