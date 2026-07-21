@@ -50,6 +50,7 @@ export interface RefillGenerationJobSnapshot {
   rejectedCandidate: Candidate;
   selectionHistory: SelectionHistory[];
   recentConcepts: string[];
+  leaderboardEvidence?: LeaderboardPreferenceEvidence;
   preferenceSeed: string;
   preferenceProfile?: PreferenceProfile;
   sessionId: string;
@@ -129,6 +130,23 @@ export interface PoolLeaderboardEntry {
   losses: number;
   source: CandidateRating["source"];
   favorite: boolean;
+}
+
+export interface PreferenceLeaderboardEntry {
+  rank: number;
+  candidateId: string;
+  concept: string;
+  style: string[];
+  rating: number;
+  wins: number;
+  losses: number;
+  source: CandidateRating["source"];
+  favorite: boolean;
+}
+
+export interface LeaderboardPreferenceEvidence {
+  poolSize: number;
+  entries: PreferenceLeaderboardEntry[];
 }
 
 export interface ComparisonHistoryCandidate {
@@ -313,6 +331,40 @@ export function summarizePoolLeaderboard(
       source,
       favorite: Boolean(favorite),
     }));
+}
+
+export function summarizeLeaderboardPreferenceEvidence(
+  state: ChallengerState | null,
+  limit = 12,
+): LeaderboardPreferenceEvidence {
+  const leaderboard = summarizePoolLeaderboard(state);
+  const boundedLimit = Math.max(1, Math.min(12, Math.floor(limit)));
+  const topCount = Math.ceil(boundedLimit / 2);
+  const bottomCount = boundedLimit - topCount;
+  const sampled =
+    leaderboard.length <= boundedLimit
+      ? leaderboard
+      : [...leaderboard.slice(0, topCount), ...leaderboard.slice(-bottomCount)];
+
+  return {
+    poolSize: leaderboard.length,
+    entries: sampled.map(
+      ({ rank, candidate, rating, wins, losses, source, favorite }) => ({
+        rank,
+        candidateId: candidate.id.slice(0, 200),
+        concept: candidate.concept.trim().slice(0, 240),
+        style: candidate.style
+          .slice(0, 4)
+          .map((tag) => tag.trim().slice(0, 80))
+          .filter(Boolean),
+        rating,
+        wins,
+        losses,
+        source,
+        favorite,
+      }),
+    ),
+  };
 }
 
 export function summarizeComparisonHistory(

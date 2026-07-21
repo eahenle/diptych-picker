@@ -40,9 +40,9 @@ Mailbox failures carry an explicit operational, moderation, or invalid-output ca
 
 The Preference profile modal accepts one private PNG, JPEG, or WebP source image up to 20 MB and 4096 by 4096 pixels. The server fully decodes it, strips metadata by normalizing it to a content-addressed local PNG, and sends a durable source-profile job to a fresh analysis worker. The worker returns transferable subject, setting, composition, medium, style, palette, content-range, and avoidance guidance without identifying a depicted person or requesting identity, likeness, or exact reproduction. Analysis animates in the modal, preserves the selected Static/Adaptive mode, clears stale adaptation provenance, and populates an editable draft that is never saved automatically. Source uploads remain private and are not copied into candidate assets or exports.
 
-### Leaderboard-driven preference adaptation (next)
+### Leaderboard-driven preference adaptation
 
-Use reusable-pool leaderboard performance as the durable basis for automatic preference steering. Recent decisions may provide short-term context, but must not outweigh the aggregate ranking, win/loss record, and repeated performance of established candidates. Keep the evidence display-safe and bounded when adding it to generation jobs.
+Reusable-pool leaderboard performance is the durable basis for automatic preference steering. Every refill job carries a display-safe sample of at most 12 leaders and trailers with rank, Elo, win/loss record, provenance, favorite status, concept, and concise style tags; prompts, image paths, reasoning, and mailbox state remain private. Aggregate rank and repeated performance outweigh recent decisions. Recent comparisons remain short-term novelty context or a tie-breaker only when leaderboard evidence is sparse, and omitted middle ranks are neutral rather than negative.
 
 ## 2026-07-19
 

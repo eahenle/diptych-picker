@@ -12,6 +12,7 @@ import {
   summarizeComparisonHistory,
   summarizeDisplayedEloRatings,
   summarizeDisplayedScores,
+  summarizeLeaderboardPreferenceEvidence,
   summarizePoolLeaderboard,
   updateElo,
   type BufferedCandidate,
@@ -681,6 +682,41 @@ describe("challenger state", () => {
     ]);
     expect(JSON.stringify(entries)).not.toContain("prompt");
     expect(JSON.stringify(entries)).not.toContain("excluded");
+  });
+
+  it("bounds adaptive evidence to leaderboard leaders and trailers", () => {
+    const ratings = Array.from({ length: 16 }, (_, index) =>
+      rating(`candidate-${index + 1}`, 1200 - index * 20, {
+        wins: 16 - index,
+        losses: index,
+        favorite: index === 0,
+      }),
+    );
+    ratings[0].candidate = {
+      ...ratings[0].candidate,
+      prompt: "private winning prompt",
+      style: ["one", "two", "three", "four", "not included"],
+    };
+
+    const evidence = summarizeLeaderboardPreferenceEvidence(
+      state({ ratings }),
+      6,
+    );
+
+    expect(evidence).toMatchObject({
+      poolSize: 16,
+      entries: [
+        { rank: 1, candidateId: "candidate-1", favorite: true },
+        { rank: 2, candidateId: "candidate-2" },
+        { rank: 3, candidateId: "candidate-3" },
+        { rank: 14, candidateId: "candidate-14" },
+        { rank: 15, candidateId: "candidate-15" },
+        { rank: 16, candidateId: "candidate-16" },
+      ],
+    });
+    expect(evidence.entries[0].style).toEqual(["one", "two", "three", "four"]);
+    expect(JSON.stringify(evidence)).not.toContain("private winning prompt");
+    expect(evidence.entries).toHaveLength(6);
   });
 
   it("builds newest-first display-safe comparison history", () => {

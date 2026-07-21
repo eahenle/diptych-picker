@@ -4,12 +4,14 @@ import type {
   PreferenceRevision,
   SelectionHistory,
 } from "@/domain/game";
+import type { LeaderboardPreferenceEvidence } from "@/domain/challenger-state";
 
 export interface ChallengerPromptInput {
   retainedWinner: Candidate;
   rejectedCandidate: Candidate;
   selectionHistory: SelectionHistory[];
   recentConcepts: string[];
+  leaderboardEvidence?: LeaderboardPreferenceEvidence;
   preferenceSeed: string;
   preferenceProfile: PreferenceProfile;
 }

@@ -58,4 +58,71 @@ describe("mock providers", () => {
     );
     expect(repeated.bytes).toEqual(image.bytes);
   }, 15_000);
+
+  it("bases adaptive revisions on durable leaderboard performance", async () => {
+    const provider = new MockChallengerPromptProvider();
+    const profile = {
+      ...preferenceProfileFromSeed("novel engineered environments"),
+      adaptationMode: "adaptive" as const,
+      visualStyle: "detailed",
+    };
+    const proposal = await provider.propose({
+      retainedWinner: {
+        id: "recent",
+        imageUrl: "/recent",
+        prompt: "private",
+        concept: "One-off recent winner",
+        style: ["flat graphic"],
+        createdAt: "now",
+        winCount: 1,
+      },
+      rejectedCandidate: {
+        id: "rejected",
+        imageUrl: "/rejected",
+        prompt: "private",
+        concept: "Recent loser",
+        style: [],
+        createdAt: "now",
+        winCount: 0,
+      },
+      selectionHistory: [
+        {
+          winnerId: "recent",
+          loserId: "rejected",
+          winnerPrompt: "private",
+          loserPrompt: "private",
+          winnerConcept: "One-off recent winner",
+          loserConcept: "Recent loser",
+          selectedAt: "now",
+        },
+      ],
+      recentConcepts: [],
+      leaderboardEvidence: {
+        poolSize: 9,
+        entries: [
+          {
+            rank: 1,
+            candidateId: "durable-leader",
+            concept: "Durable ceramic observatory",
+            style: ["ceramic", "architectural"],
+            rating: 1142,
+            wins: 11,
+            losses: 3,
+            source: "generated",
+            favorite: false,
+          },
+        ],
+      },
+      preferenceSeed: "novel engineered environments",
+      preferenceProfile: profile,
+    });
+
+    expect(proposal.preferenceRevision).toMatchObject({
+      inspiration: expect.stringContaining("Durable ceramic observatory"),
+      visualStyle: "detailed, ceramic, architectural",
+    });
+    expect(proposal.preferenceRevision?.inspiration).not.toContain(
+      "One-off recent winner",
+    );
+  });
 });

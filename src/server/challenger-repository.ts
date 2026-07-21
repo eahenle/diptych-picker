@@ -158,6 +158,49 @@ const selectionHistorySchema = z.union([
     .strict(),
 ]);
 
+const leaderboardPreferenceEvidenceSchema = z
+  .object({
+    poolSize: z.number().int().nonnegative(),
+    entries: z
+      .array(
+        z
+          .object({
+            rank: z.number().int().positive(),
+            candidateId: z.string().trim().min(1).max(200),
+            concept: z.string().trim().min(1).max(240),
+            style: z.array(z.string().trim().min(1).max(80)).max(4),
+            rating: z.number().int(),
+            wins: z.number().int().nonnegative(),
+            losses: z.number().int().nonnegative(),
+            source: z.enum(["curated", "generated"]),
+            favorite: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(12),
+  })
+  .strict()
+  .superRefine((evidence, context) => {
+    const ranks = new Set<number>();
+    for (const [index, entry] of evidence.entries.entries()) {
+      if (entry.rank > evidence.poolSize || ranks.has(entry.rank)) {
+        context.addIssue({
+          code: "custom",
+          path: ["entries", index, "rank"],
+          message: "Leaderboard ranks must be unique and within poolSize",
+        });
+      }
+      ranks.add(entry.rank);
+    }
+    if (evidence.poolSize === 0 && evidence.entries.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["entries"],
+        message: "An empty pool cannot include leaderboard entries",
+      });
+    }
+  });
+
 const refillGenerationJobSnapshotSchema = z
   .object({
     id: z.string().regex(GENERATION_JOB_ID_PATTERN),
@@ -169,6 +212,7 @@ const refillGenerationJobSnapshotSchema = z
     rejectedCandidate: candidateSchema,
     selectionHistory: z.array(selectionHistorySchema),
     recentConcepts: z.array(z.string().min(1)),
+    leaderboardEvidence: leaderboardPreferenceEvidenceSchema.optional(),
     preferenceSeed: z.string().min(1),
     preferenceProfile: preferenceProfileSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
