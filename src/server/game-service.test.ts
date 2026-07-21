@@ -741,6 +741,18 @@ describe("GameService challenger buffer", () => {
         kind: "refill",
         comparisonOutcome: "tie",
         pinnedWinnerId: "left",
+        leaderboardEvidence: expect.objectContaining({
+          poolSize: 7,
+          entries: expect.arrayContaining([
+            expect.objectContaining({
+              rank: 1,
+              candidateId: "right",
+              rating: 1100,
+              wins: 0,
+              losses: 0,
+            }),
+          ]),
+        }),
       }),
     );
   });

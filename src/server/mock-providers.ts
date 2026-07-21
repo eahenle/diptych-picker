@@ -79,13 +79,9 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
     input: ChallengerPromptInput,
   ): ProposedChallenger {
     if (input.preferenceProfile.adaptationMode !== "adaptive") return proposal;
-    const latestDecision = input.selectionHistory.at(-1);
-    const priorWinner =
-      latestDecision &&
-      (latestDecision.outcome === undefined ||
-        latestDecision.outcome === "selection")
-        ? latestDecision.winnerConcept
-        : undefined;
+    const leader = input.leaderboardEvidence?.entries.find(
+      ({ rank }) => rank === 1,
+    );
     const fields = {
       themes: input.preferenceProfile.themes,
       inspiration: input.preferenceProfile.inspiration,
@@ -99,12 +95,13 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
       ...proposal,
       preferenceRevision: {
         ...fields,
-        inspiration: `Favor ${proposal.styleTags.join(", ")} treatments${
-          priorWinner
-            ? ` that evolve the winning direction of ${priorWinner}`
-            : ""
-        } while continuing to explore distinct compositions.`,
-        visualStyle: [fields.visualStyle, ...proposal.styleTags]
+        inspiration: leader
+          ? `Favor transferable qualities from pool leader ${leader.concept} (${leader.wins} wins, ${leader.losses} losses, Elo ${leader.rating}) while continuing to explore distinct compositions.`
+          : `Continue exploring distinct ${proposal.styleTags.join(", ")} treatments until the pool establishes a durable leader.`,
+        visualStyle: [
+          fields.visualStyle,
+          ...(leader?.style ?? proposal.styleTags),
+        ]
           .filter(Boolean)
           .join(", "),
       },

@@ -97,6 +97,7 @@ export class MockAgentWorker {
       rejectedCandidate: job.rejectedCandidate,
       selectionHistory: job.selectionHistory,
       recentConcepts,
+      leaderboardEvidence: job.leaderboardEvidence,
       preferenceSeed: job.preferenceSeed,
       preferenceProfile:
         job.preferenceProfile ?? preferenceProfileFromSeed(job.preferenceSeed),

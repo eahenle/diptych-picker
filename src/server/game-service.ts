@@ -6,6 +6,7 @@ import {
   admitGeneratedCandidate,
   backfillGeneratedPool,
   recordGenerationTurnaround,
+  summarizeLeaderboardPreferenceEvidence,
   updateElo,
   type BufferedCandidate,
   type CandidateRating,
@@ -747,6 +748,7 @@ export class GameService {
         rejectedCandidate: context.rejectedCandidate,
         selectionHistory: context.game.history.slice(-12),
         recentConcepts: recentConcepts(context.game, 10),
+        leaderboardEvidence: summarizeLeaderboardPreferenceEvidence(state),
         preferenceSeed: context.game.preferenceSeed,
         preferenceProfile:
           context.game.preferenceProfile ??

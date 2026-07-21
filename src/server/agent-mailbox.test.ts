@@ -73,6 +73,41 @@ describe("generationJobSchema", () => {
     expect(generationJobSchema.parse(legacy)).toEqual(job());
   });
 
+  it("accepts bounded display-safe leaderboard evidence", () => {
+    const withEvidence: GenerationJob = {
+      ...job(),
+      leaderboardEvidence: {
+        poolSize: 2,
+        entries: [
+          {
+            rank: 1,
+            candidateId: "leader",
+            concept: "Established pool leader",
+            style: ["cinematic"],
+            rating: 1088,
+            wins: 7,
+            losses: 2,
+            source: "generated",
+            favorite: true,
+          },
+        ],
+      },
+    };
+
+    expect(generationJobSchema.parse(withEvidence)).toEqual(withEvidence);
+    expect(() =>
+      generationJobSchema.parse({
+        ...withEvidence,
+        leaderboardEvidence: {
+          ...withEvidence.leaderboardEvidence,
+          entries: [
+            { ...withEvidence.leaderboardEvidence!.entries[0], rank: 3 },
+          ],
+        },
+      }),
+    ).toThrow(/ranks/i);
+  });
+
   it("parses strict refill jobs with matching pinned winner metadata", () => {
     const baseJob = job("refill-1");
     const refill = {

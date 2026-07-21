@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { GENERATION_JOB_ID_PATTERN } from "@/domain/game";
+import type { LeaderboardPreferenceEvidence } from "@/domain/challenger-state";
 import { z } from "zod";
 
 const timestampSchema = z.string().datetime({ offset: true });
@@ -122,6 +123,49 @@ const selectionHistorySchema = z.union([
     .strict(),
 ]);
 
+const leaderboardPreferenceEvidenceSchema = z
+  .object({
+    poolSize: z.number().int().nonnegative(),
+    entries: z
+      .array(
+        z
+          .object({
+            rank: z.number().int().positive(),
+            candidateId: nonBlankStringSchema.max(200),
+            concept: nonBlankStringSchema.max(240),
+            style: z.array(nonBlankStringSchema.max(80)).max(4),
+            rating: z.number().int(),
+            wins: z.number().int().nonnegative(),
+            losses: z.number().int().nonnegative(),
+            source: z.enum(["curated", "generated"]),
+            favorite: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(12),
+  })
+  .strict()
+  .superRefine((evidence, context) => {
+    const ranks = new Set<number>();
+    for (const [index, entry] of evidence.entries.entries()) {
+      if (entry.rank > evidence.poolSize || ranks.has(entry.rank)) {
+        context.addIssue({
+          code: "custom",
+          path: ["entries", index, "rank"],
+          message: "Leaderboard ranks must be unique and within poolSize",
+        });
+      }
+      ranks.add(entry.rank);
+    }
+    if (evidence.poolSize === 0 && evidence.entries.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["entries"],
+        message: "An empty pool cannot include leaderboard entries",
+      });
+    }
+  });
+
 const generationJobFields = {
   id: jobIdSchema,
   createdAt: timestampSchema,
@@ -131,6 +175,7 @@ const generationJobFields = {
   rejectedCandidate: candidateSchema,
   selectionHistory: z.array(selectionHistorySchema),
   recentConcepts: z.array(nonBlankStringSchema),
+  leaderboardEvidence: leaderboardPreferenceEvidenceSchema.optional(),
   preferenceSeed: nonBlankStringSchema,
   preferenceProfile: preferenceProfileSchema.optional(),
 };
@@ -329,6 +374,7 @@ const mailboxResultSchema = z.union([
 ]);
 
 export type GenerationJob = z.infer<typeof generationJobSchema>;
+export type { LeaderboardPreferenceEvidence };
 export type GenerationResult = z.infer<typeof generationResultSchema>;
 export type SourceProfileJob = z.infer<typeof sourceProfileJobSchema>;
 export type SourceProfileResult = z.infer<typeof sourceProfileResultSchema>;
