@@ -22,7 +22,6 @@ import {
   preferenceProfileFromSeed,
   willRetireChampion,
   type BufferHealth,
-  type Candidate,
   type DisplayedEloRatings,
   type GameStartState,
   type GameState,
@@ -36,7 +35,13 @@ import type {
   PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
 import { CandidateCard } from "./candidate-card";
+import {
+  ImageInspector,
+  type ImageInspectorState,
+  type InspectableCandidate,
+} from "./image-inspector";
 import { ModalShell } from "./modal-shell";
+import { PoolLeaderboard } from "./pool-leaderboard";
 import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
 import styles from "./game-screen.module.css";
 
@@ -68,12 +73,6 @@ interface ActiveSelection {
 
 type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
 type GameTransferAction = "exporting" | "importing" | "resetting";
-type InspectableCandidate = Pick<Candidate, "id" | "imageUrl" | "concept">;
-interface ImageInspectorState {
-  candidates: InspectableCandidate[];
-  index: number;
-  returnTarget: "leaderboard" | null;
-}
 type SourceProfileResponse =
   | { status: "analyzing"; jobId: string }
   | {
@@ -348,8 +347,6 @@ export function GameScreen() {
   const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
   const queuedPreferenceSaveStartedRef = useRef(false);
-  const inspectedCandidate = imageInspector?.candidates[imageInspector.index];
-
   const openImageInspector = useCallback(
     (
       candidate: InspectableCandidate,
@@ -1014,33 +1011,11 @@ export function GameScreen() {
       loadGameOpen ||
       leaderboardOpen ||
       historyOpen ||
-      Boolean(inspectedCandidate),
+      Boolean(imageInspector),
     onSelect: select,
     onTie: tie,
     onBothLose: bothLose,
   });
-
-  useEffect(() => {
-    if (!imageInspector) return;
-    const navigateInspector = (event: KeyboardEvent) => {
-      const direction =
-        event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
-      if (direction === 0 || imageInspector.candidates.length < 2) return;
-      event.preventDefault();
-      setImageInspector((current) =>
-        current
-          ? {
-              ...current,
-              index:
-                (current.index + direction + current.candidates.length) %
-                current.candidates.length,
-            }
-          : current,
-      );
-    };
-    window.addEventListener("keydown", navigateInspector);
-    return () => window.removeEventListener("keydown", navigateInspector);
-  }, [imageInspector]);
 
   const openComparisonHistory = async () => {
     setHistoryOpen(true);
@@ -1082,6 +1057,19 @@ export function GameScreen() {
     setImageInspector(null);
     if (returnTarget === "leaderboard") setLeaderboardOpen(true);
   };
+
+  const navigateImageInspector = useCallback((direction: -1 | 1) => {
+    setImageInspector((current) =>
+      current
+        ? {
+            ...current,
+            index:
+              (current.index + direction + current.candidates.length) %
+              current.candidates.length,
+          }
+        : current,
+    );
+  }, []);
 
   const inspectHistoryCandidate = (candidate: ComparisonHistoryCandidate) => {
     if (!candidate.imageUrl) return;
@@ -1831,80 +1819,12 @@ export function GameScreen() {
         </>
       ) : null}
 
-      {inspectedCandidate ? (
-        <ModalShell
-          className={styles.imageInspector}
-          ariaLabel={`Expanded image: ${inspectedCandidate.concept}`}
+      {imageInspector ? (
+        <ImageInspector
+          state={imageInspector}
           onClose={closeImageInspector}
-        >
-          <>
-            <button
-              type="button"
-              className={styles.leaderboardClose}
-              aria-label="Close expanded image"
-              onClick={closeImageInspector}
-            >
-              ×
-            </button>
-            {imageInspector.candidates.length > 1 ? (
-              <>
-                <button
-                  type="button"
-                  className={`${styles.inspectorNavigation} ${styles.inspectorPrevious}`}
-                  aria-label="Previous expanded image"
-                  onClick={() =>
-                    setImageInspector((current) =>
-                      current
-                        ? {
-                            ...current,
-                            index:
-                              (current.index - 1 + current.candidates.length) %
-                              current.candidates.length,
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  ‹
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.inspectorNavigation} ${styles.inspectorNext}`}
-                  aria-label="Next expanded image"
-                  onClick={() =>
-                    setImageInspector((current) =>
-                      current
-                        ? {
-                            ...current,
-                            index:
-                              (current.index + 1) % current.candidates.length,
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  ›
-                </button>
-              </>
-            ) : null}
-            <figure>
-              <img
-                src={inspectedCandidate.imageUrl}
-                alt={inspectedCandidate.concept}
-              />
-              <figcaption>
-                {inspectedCandidate.concept}
-                {imageInspector.candidates.length > 1 ? (
-                  <small>
-                    {imageInspector.index + 1} of{" "}
-                    {imageInspector.candidates.length}
-                    {" · Use Left and Right arrow keys"}
-                  </small>
-                ) : null}
-              </figcaption>
-            </figure>
-          </>
-        </ModalShell>
+          onNavigate={navigateImageInspector}
+        />
       ) : null}
 
       {historyOpen && game ? (
@@ -2114,114 +2034,18 @@ export function GameScreen() {
       ) : null}
 
       {leaderboardOpen && game ? (
-        <ModalShell
-          className={`${styles.preferencesModal} ${styles.leaderboardModal}`}
+        <PoolLeaderboard
+          entries={leaderboardEntries}
+          loading={leaderboardLoading}
+          error={leaderboardError}
+          favoriteError={favoriteError}
+          favoriteSaving={favoriteSaving}
           onClose={() => setLeaderboardOpen(false)}
-          ariaLabelledBy="pool-leaderboard-title"
-          ariaDescribedBy="pool-leaderboard-description"
-        >
-          <>
-            <button
-              type="button"
-              className={styles.leaderboardClose}
-              aria-label="Close leaderboard"
-              onClick={() => setLeaderboardOpen(false)}
-            >
-              ×
-            </button>
-            <h2 id="pool-leaderboard-title">Pool leaderboard</h2>
-            <p id="pool-leaderboard-description">
-              Reusable images ranked by Elo. Compared generated challengers can
-              enter the pool; the strongest entries remain available for paced
-              fallback comparisons.
-            </p>
-            {favoriteError ? (
-              <p className={styles.transferError} role="alert">
-                {favoriteError}
-              </p>
-            ) : null}
-            {leaderboardLoading ? (
-              <p className={styles.leaderboardState} role="status">
-                Ranking the pool…
-              </p>
-            ) : leaderboardError ? (
-              <p className={styles.transferError} role="alert">
-                {leaderboardError}
-              </p>
-            ) : leaderboardEntries.length === 0 ? (
-              <p className={styles.leaderboardState}>The pool is empty.</p>
-            ) : (
-              <ol className={styles.leaderboardList}>
-                {leaderboardEntries.map((entry) => (
-                  <li key={entry.candidate.id}>
-                    <button
-                      type="button"
-                      className={styles.leaderboardEntryButton}
-                      aria-label={`View ${entry.candidate.concept} larger`}
-                      onClick={() =>
-                        inspectLeaderboardCandidate(entry.candidate)
-                      }
-                    >
-                      <span className={styles.leaderboardRank}>
-                        {entry.rank}
-                      </span>
-                      <img
-                        src={entry.candidate.imageUrl}
-                        alt=""
-                        width={72}
-                        height={72}
-                      />
-                      <span className={styles.leaderboardIdentity}>
-                        <strong>{entry.candidate.concept}</strong>
-                        <small>
-                          {entry.candidate.style.slice(0, 3).join(" · ")}
-                        </small>
-                        <em>
-                          {entry.source === "curated" ? "Curated" : "Generated"}
-                        </em>
-                      </span>
-                      <span
-                        className={styles.leaderboardScore}
-                        aria-label={`Elo ${entry.rating}; ${entry.wins} wins and ${entry.losses} losses`}
-                      >
-                        <strong>{entry.rating}</strong>
-                        <small>
-                          {entry.wins}W–{entry.losses}L
-                        </small>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.favoriteButton}
-                      aria-label={`${entry.favorite ? "Remove" : "Add"} ${entry.candidate.concept} ${entry.favorite ? "from" : "to"} favorites`}
-                      title={
-                        entry.favorite
-                          ? "Remove from favorites"
-                          : "Add to favorites"
-                      }
-                      aria-pressed={entry.favorite}
-                      disabled={favoriteSaving === entry.candidate.id}
-                      onClick={() =>
-                        void updateFavorite(entry.candidate.id, !entry.favorite)
-                      }
-                    >
-                      {entry.favorite ? "★" : "☆"}
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            )}
-            <div className={styles.modalActions}>
-              <button
-                type="button"
-                className={styles.utilityButton}
-                onClick={() => setLeaderboardOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-          </>
-        </ModalShell>
+          onInspect={inspectLeaderboardCandidate}
+          onToggleFavorite={(candidateId, favorite) =>
+            void updateFavorite(candidateId, favorite)
+          }
+        />
       ) : null}
 
       {loadGameOpen && game ? (

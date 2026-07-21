@@ -1,0 +1,124 @@
+.list {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 0;
+  border: 1px solid #383337;
+  background: #090b0d;
+}
+
+.entryButton {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 36px 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 6px 10px 8px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: zoom-in;
+}
+
+.entryButton:hover,
+.entryButton:focus-visible {
+  background: rgba(193, 112, 78, 0.09);
+  outline: 1px solid var(--copper-bright);
+  outline-offset: -1px;
+}
+
+.list img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rank {
+  color: var(--copper-bright);
+  font-family: Georgia, serif;
+  font-size: 24px;
+  text-align: center;
+}
+
+.identity {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.identity strong {
+  overflow: hidden;
+  color: #e4ddd5;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity small {
+  overflow: hidden;
+  color: #8f8984;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity em {
+  color: #9d7868;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.score {
+  min-width: 58px;
+  display: grid;
+  gap: 3px;
+  text-align: right;
+}
+
+.score strong {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 18px;
+}
+
+.score small {
+  color: #8f8984;
+  font-size: 10px;
+}
+
+@media (max-width: 700px) {
+  .list li {
+    grid-template-columns: minmax(0, 1fr) 30px;
+    gap: 6px;
+    padding-right: 10px;
+  }
+
+  .entryButton {
+    grid-template-columns: 28px 56px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding-inline: 6px;
+  }
+
+  .list img {
+    width: 56px;
+    height: 56px;
+  }
+
+  .identity small {
+    display: none;
+  }
+}
