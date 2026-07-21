@@ -877,7 +877,9 @@ describe("agent mailbox scripts", () => {
       "utf8",
     );
 
-    expect(skill).toContain("GENERATION_PROVIDER=agent npm run dev");
+    expect(skill).toContain("start `./run-only`");
+    expect(skill).toContain("GENERATION_PROVIDER=agent");
+    expect(skill).toContain("never start the normal runner in mock");
     expect(skill).toContain("X-Diptych-Generation-Provider");
     expect(skill).toContain("Refuse to reuse a server reporting `mock`");
     expect(playwrightConfig).toContain('GENERATION_PROVIDER: "mock"');

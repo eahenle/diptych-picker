@@ -26,7 +26,16 @@ DIPTYCH_CODEX_THREADS=12 npm run codex:play
 
 The script starts the `codex/personal` profile through `multi-cli`, applies per-launch `features.multi_agent_v2.max_concurrent_threads_per_session` and `agents.max_depth=2` overrides, and sends the initial `$run-diptych-picker` prompt. It reserves one thread for the root, one for the monitor, and up to three for fresh image workers, so the launcher requires at least five total threads. The v2 thread setting is a ceiling rather than a request to create idle agents; all three workers are active only while at least three independent mailbox jobs are pending. The script does not modify global Codex configuration. Open <http://localhost:3000> after the skill reports readiness.
 
+Normal play runs the app as an optimized production server, not through Next's development server. To build and start only the agent-backed app without launching Codex, run:
+
+```bash
+npm run run:production
+```
+
+The root-level `run-only` launcher builds into the gitignored `.next-run` directory, preserves the tracked Next TypeScript configuration, forces `GENERATION_PROVIDER=agent`, and then starts the production server. `dev-and-play` instructs the runner skill to use this same launcher so both entrypoints share one startup path.
+
 To inspect the exact command without launching Codex, run `./dev-and-play --print-command [thread-count]`.
+Inspect the production app command with `./run-only --print-command`.
 
 The web server never launches `codex`, calls an OpenAI API, or receives an API key. Model choice, authentication, permissions, and subagent execution belong to the interactive CLI session.
 

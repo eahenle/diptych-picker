@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+print_only=false
+if [[ "${1:-}" == "--print-command" ]]; then
+  print_only=true
+  shift
+fi
+if (( $# > 0 )); then
+  printf '%s\n' "Usage: ./run-only [--print-command]" >&2
+  exit 2
+fi
+
+repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+production_dist_dir=".next-run"
+build_command=(
+  env
+  GENERATION_PROVIDER=agent
+  NEXT_DIST_DIR="$production_dist_dir"
+  npm
+  run
+  build
+)
+start_command=(
+  env
+  GENERATION_PROVIDER=agent
+  NEXT_DIST_DIR="$production_dist_dir"
+  npm
+  run
+  start
+)
+
+if [[ "$print_only" == true ]]; then
+  printf '%q ' "${build_command[@]}"
+  printf '&& '
+  printf '%q ' "${start_command[@]}"
+  printf '\n'
+  exit 0
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  printf '%s\n' "npm is not installed or is not on PATH." >&2
+  exit 127
+fi
+
+cd "$repository_root"
+next_env_path="$repository_root/next-env.d.ts"
+next_env_backup="$(mktemp "${TMPDIR:-/tmp}/diptych-next-env.XXXXXX")"
+next_env_existed=false
+if [[ -f "$next_env_path" ]]; then
+  cp "$next_env_path" "$next_env_backup"
+  next_env_existed=true
+fi
+tsconfig_path="$repository_root/tsconfig.json"
+tsconfig_backup="$(mktemp "${TMPDIR:-/tmp}/diptych-tsconfig.XXXXXX")"
+tsconfig_existed=false
+if [[ -f "$tsconfig_path" ]]; then
+  cp "$tsconfig_path" "$tsconfig_backup"
+  tsconfig_existed=true
+fi
+
+restore_generated_config() {
+  if [[ -z "$next_env_backup" ]]; then
+    return
+  fi
+  if [[ "$next_env_existed" == true ]]; then
+    cp "$next_env_backup" "$next_env_path"
+  else
+    rm -f "$next_env_path"
+  fi
+  if [[ "$tsconfig_existed" == true ]]; then
+    cp "$tsconfig_backup" "$tsconfig_path"
+  else
+    rm -f "$tsconfig_path"
+  fi
+  rm -f "$next_env_backup"
+  rm -f "$tsconfig_backup"
+  next_env_backup=""
+  tsconfig_backup=""
+}
+
+trap restore_generated_config EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+
+"${build_command[@]}"
+restore_generated_config
+trap - EXIT HUP INT TERM
+
+exec "${start_command[@]}"
