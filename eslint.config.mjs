@@ -9,6 +9,7 @@ export default defineConfig([
     ".next/**",
     ".next-build/**",
     ".next-e2e/**",
+    ".next-run/**",
     ".local-data/**",
     ".playwright-cli/**",
     "coverage/**",

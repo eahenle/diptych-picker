@@ -22,7 +22,7 @@ if (( $# > 1 )); then
   exit 2
 fi
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-initial_prompt="Use \$run-diptych-picker to start or resume the local app and continuously run the dev-and-play loop. Keep the root session responsive while one persistent mailbox-monitor subagent owns polling and delegates fresh native-image workers. This session has $requested_threads total agent threads: reserve one for the root and one for the monitor, set workerLimit=3, and use all three worker slots whenever at least three independent jobs are pending."
+initial_prompt="Use \$run-diptych-picker to start or resume the local app through ./run-only and continuously run the dev-and-play loop. Keep the root session responsive while one persistent mailbox-monitor subagent owns polling and delegates fresh native-image workers. This session has $requested_threads total agent threads: reserve one for the root and one for the monitor, set workerLimit=3, and use all three worker slots whenever at least three independent jobs are pending."
 command=(
   multi-cli
   codex/personal

@@ -15,6 +15,7 @@
     "check": "npm run format:check && npm run lint && npm test",
     "hooks:install": "git config core.hooksPath .githooks",
     "codex:play": "./dev-and-play",
+    "run:production": "./run-only",
     "agent:next": "node .agents/skills/run-diptych-picker/scripts/next-job.mjs",
     "agent:complete": "node .agents/skills/run-diptych-picker/scripts/complete-job.mjs",
     "agent:complete-profile": "node .agents/skills/run-diptych-picker/scripts/complete-source-profile.mjs",
