@@ -34,4 +34,18 @@ describe("content-addressed export artifacts", () => {
       publishExportArtifact(contents, "png", directory),
     ).rejects.toThrow(/differs from source/i);
   });
+
+  it("publishes concurrent identical artifacts without exposing partial bytes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-exports-"));
+    const contents = Buffer.alloc(1024 * 1024, 0x5a);
+
+    const artifacts = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        publishExportArtifact(contents, "png", directory),
+      ),
+    );
+
+    expect(new Set(artifacts.map(({ path }) => path))).toHaveLength(1);
+    expect(await readFile(artifacts[0].path)).toEqual(contents);
+  });
 });

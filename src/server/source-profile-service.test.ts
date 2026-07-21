@@ -8,6 +8,7 @@ import {
   SourceProfileInputError,
   SourceProfileNotFoundError,
   SourceProfileService,
+  normalizeProfileSource,
 } from "./source-profile-service";
 
 const roots: string[] = [];
@@ -116,5 +117,31 @@ describe("source profile service", () => {
     await expect(
       service.request(new Uint8Array([1, 2, 3]), "image/png"),
     ).rejects.toThrow(/could not be decoded/i);
+  });
+
+  it("deduplicates concurrently normalized copies without a partial-read race", async () => {
+    const { root } = await context();
+    const png = await sharp({
+      create: {
+        width: 1024,
+        height: 1024,
+        channels: 3,
+        background: "#713c89",
+      },
+    })
+      .png()
+      .toBuffer();
+    const sourceDirectory = join(root, "concurrent-profile-sources");
+
+    const sources = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        normalizeProfileSource(png, "image/png", sourceDirectory),
+      ),
+    );
+
+    expect(new Set(sources.map(({ filename }) => filename))).toHaveLength(1);
+    await expect(
+      readFile(join(sourceDirectory, sources[0].filename)),
+    ).resolves.not.toHaveLength(0);
   });
 });

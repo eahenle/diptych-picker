@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
 import type { PreferenceRevision } from "@/domain/game";
 import type { SourceProfileMailbox } from "./agent-mailbox";
+import { publishImmutableFile } from "./artifact-store";
 
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 const MAX_SOURCE_DIMENSION = 4096;
@@ -87,17 +87,7 @@ export async function normalizeProfileSource(
 
   const filename = `${createHash("sha256").update(normalized).digest("hex")}.png`;
   const sourcePath = resolve(sourceDirectory, filename);
-  await mkdir(sourceDirectory, { recursive: true });
-  try {
-    await writeFile(sourcePath, normalized, { flag: "wx" });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    if (!(await readFile(sourcePath)).equals(normalized)) {
-      throw new Error(
-        `Existing private source ${sourcePath} differs from input`,
-      );
-    }
-  }
+  await publishImmutableFile(sourcePath, normalized);
 
   return {
     filename,

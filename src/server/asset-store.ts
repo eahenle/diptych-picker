@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type {
@@ -10,6 +10,7 @@ import {
   contentAddressedFilename,
   contentDigest,
   publishExportArtifact,
+  publishImmutableFile,
 } from "./artifact-store";
 
 export class LocalAssetStore implements AssetStore {
@@ -19,20 +20,9 @@ export class LocalAssetStore implements AssetStore {
   ) {}
 
   async save(image: GeneratedImage & { id: string }) {
-    await mkdir(this.directory, { recursive: true });
     const filename = contentAddressedFilename(image.bytes, image.extension);
     const path = join(/* turbopackIgnore: true */ this.directory, filename);
-    try {
-      await writeFile(path, image.bytes, { flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const existing = await readFile(path);
-      if (!existing.equals(image.bytes)) {
-        throw new Error(
-          `Existing immutable asset ${filename} differs from source`,
-        );
-      }
-    }
+    await publishImmutableFile(path, image.bytes);
     if (this.exportDirectory) {
       await publishExportArtifact(
         image.bytes,
