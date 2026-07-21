@@ -15,6 +15,9 @@ import type {
   GenerationResult,
   LeaderboardProfileJob,
   LeaderboardProfileResult,
+  PromptCardBlenderJob,
+  PromptCardBlenderMailbox,
+  PromptCardBlenderResult,
   PromptCardEditorJob,
   PromptCardEditorMailbox,
   PromptCardEditorResult,
@@ -258,6 +261,32 @@ function promptCardEditor() {
   };
 }
 
+function promptCardBlender() {
+  const work = new Map<string, PromptCardBlenderJob>();
+  const results = new Map<string, PromptCardBlenderResult>();
+  const enqueuePromptCardBlender = vi.fn<
+    PromptCardBlenderMailbox["enqueuePromptCardBlender"]
+  >(async (job) => {
+    work.set(job.id, job);
+  });
+  const mailbox: PromptCardBlenderMailbox = {
+    enqueuePromptCardBlender,
+    readPromptCardBlenderWork: async (jobId) => work.get(jobId) ?? null,
+    readPromptCardBlenderResult: async (jobId) => results.get(jobId) ?? null,
+    archivePromptCardBlender: async (jobId) => {
+      work.delete(jobId);
+      results.delete(jobId);
+    },
+  };
+  return {
+    mailbox,
+    enqueuePromptCardBlender,
+    setResult(result: PromptCardBlenderResult) {
+      results.set(result.jobId, result);
+    },
+  };
+}
+
 function completedResult(
   jobId: string,
   completedAt = "2026-07-16T01:01:40.000Z",
@@ -307,6 +336,7 @@ function serviceFor(options: {
   bufferTarget?: number;
   leaderboardProfiles?: ReturnType<typeof leaderboardProfiles>;
   promptCardEditor?: ReturnType<typeof promptCardEditor>;
+  promptCardBlender?: ReturnType<typeof promptCardBlender>;
 }) {
   const game = options.game ?? gameState();
   const gameRepository =
@@ -334,6 +364,7 @@ function serviceFor(options: {
     options.random ?? (() => 0),
     options.leaderboardProfiles?.coordinator,
     options.promptCardEditor?.mailbox,
+    options.promptCardBlender?.mailbox,
   );
   return {
     service,
@@ -345,6 +376,90 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("blends two immutable cards into one approval-gated child", async () => {
+    const cards = [
+      {
+        id: "card-1",
+        title: "Copper nocturne",
+        prompt: "A severe copper-lit industrial editorial portrait.",
+        negativePrompt: "readable text",
+        weight: 1,
+        tags: ["portrait", "copper"],
+        parents: [] as string[],
+        active: true,
+        createdAt: NOW,
+        stats: { wins: 0, rejects: 0 },
+      },
+      {
+        id: "card-2",
+        title: "Glass botany",
+        prompt: "Translucent botanical structures in soft green daylight.",
+        negativePrompt: "hard shadows",
+        weight: 1,
+        tags: ["botanical", "glass"],
+        parents: [] as string[],
+        active: true,
+        createdAt: NOW,
+        stats: { wins: 0, rejects: 0 },
+      },
+    ];
+    const blender = promptCardBlender();
+    const context = serviceFor({
+      game: gameState({
+        promptDeck: { enabled: true, cards, verdicts: [], suggestions: [] },
+      }),
+      promptCardBlender: blender,
+      createId: ids("blend-1", "suggestion-1", "child-1"),
+    });
+
+    const requested = await context.service.requestPromptCardBlend(
+      ["card-1", "card-2"],
+      0.5,
+    );
+    expect(blender.enqueuePromptCardBlender).toHaveBeenCalledOnce();
+    expect(requested.promptDeck?.blendJob).toMatchObject({
+      jobId: "blend-1",
+      cardIds: ["card-1", "card-2"],
+      expectedJob: { kind: "prompt-card-blender", ratio: 0.5 },
+    });
+    expect(requested.promptDeck?.cards).toEqual(cards);
+
+    blender.setResult({
+      jobId: "blend-1",
+      kind: "prompt-card-blender",
+      status: "completed",
+      completedAt: NOW,
+      cardIds: ["card-1", "card-2"],
+      proposal: {
+        title: "Copper glasshouse",
+        prompt:
+          "A copper-lit editorial portrait inside a translucent botanical glasshouse.",
+        negativePrompt: "readable text, hard shadows",
+        tags: ["portrait", "copper", "botanical", "glass"],
+        reasoningSummary: "Balances the two source directions.",
+      },
+    });
+    const suggested = await context.service.reconcile();
+    expect(suggested?.promptDeck?.blendJob).toBeNull();
+    expect(suggested?.promptDeck?.suggestions?.[0]).toMatchObject({
+      id: "suggestion-1",
+      parentCardId: "card-1",
+      parentCardIds: ["card-1", "card-2"],
+    });
+
+    const accepted = await context.service.updatePromptDeck({
+      kind: "suggestion",
+      suggestionId: "suggestion-1",
+      action: "accept",
+    });
+    expect(accepted.promptDeck?.cards).toHaveLength(3);
+    expect(accepted.promptDeck?.cards[2]).toMatchObject({
+      id: "child-1",
+      title: "Copper glasshouse",
+      parents: ["card-1", "card-2"],
+    });
+  });
+
   it("queues two approval-gated editor suggestions after four recent card rejections", async () => {
     const card = {
       id: "card-1",

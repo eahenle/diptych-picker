@@ -99,7 +99,7 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
 }
 ```
 
-`kind` is `challenger`, `initial`, `refill`, `source-profile`, `leaderboard-profile`, or `prompt-card-editor`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+`kind` is `challenger`, `initial`, `refill`, `source-profile`, `leaderboard-profile`, `prompt-card-editor`, or `prompt-card-blender`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
 
 ```json
 {
@@ -226,6 +226,35 @@ When an active card accumulates four new rejects and at least four of them remai
 
 The actual request contains four through twelve rejection entries. One fresh editor worker returns exactly two alternatives; it never mutates the source card or generates an image. Suggestions remain approval-gated until the player accepts one as a new immutable child card or discards it.
 
+An explicit two-card blend enqueues both immutable card snapshots and the requested first-card influence ratio:
+
+```json
+{
+  "id": "prompt-card-blender-job-1",
+  "kind": "prompt-card-blender",
+  "createdAt": "ISO-8601 timestamp",
+  "cards": [
+    {
+      "id": "card-1",
+      "title": "Industrial nocturne",
+      "prompt": "A severe industrial nocturne with tactile materials and off-axis cinematic light.",
+      "negativePrompt": "readable text, logos",
+      "tags": ["industrial", "nocturne"]
+    },
+    {
+      "id": "card-2",
+      "title": "Glass botany",
+      "prompt": "Translucent botanical structures in soft green daylight.",
+      "negativePrompt": "hard shadows",
+      "tags": ["botanical", "glass"]
+    }
+  ],
+  "ratio": 0.5
+}
+```
+
+The ratio ranges from 0.1 through 0.9 and assigns that share of influence to the first card. One fresh blender worker returns exactly one coherent child proposal; it never mutates either parent or generates an image. The proposal remains approval-gated until accepted or discarded.
+
 The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the image proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
 
 New refill jobs include `leaderboardEvidence`, a display-safe sample of at most 12 current reusable candidates. It contains the highest and lowest ranks when the pool is larger than the bound, plus the full pool size; it never contains prompts, image paths, reasoning, or mailbox state. When the cached fingerprint still matches the current leaders, the refill also includes `leaderboardVisualProfile` with the shared visual synthesis, source candidate IDs, reasoning, and analysis timestamp. Rank, Elo, win/loss record, repeated performance, favorites, and the matching visual synthesis are the primary basis for Adaptive steering. High-ranked candidates with repeated success are positive aggregate evidence; repeatedly losing low-ranked candidates are negative aggregate evidence. Omitted middle ranks are neutral, not negative. Recent selections, retained/rejected compatibility fields, and recent concepts are secondary novelty context and may break a tie only when aggregate evidence is sparse.
@@ -252,7 +281,7 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
-`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or interactive source-profile request, then prompt-card editor work, then cached leaderboard-profile analysis. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
+`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or interactive source-profile request, then prompt-card editor or blender work, then cached leaderboard-profile analysis. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
 
 ```json
 {
@@ -410,6 +439,25 @@ For a prompt-card editor job, write exactly two proposals to `<data-root>/agent-
       "reasoningSummary": "Changes composition while retaining the original card's intent."
     }
   ]
+}
+```
+
+For a prompt-card blender job, write exactly one proposal to `<data-root>/agent-work/<jobId>/suggestion.json`, then run `npm run agent:complete-card-blender -- --job <id> --suggestion-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/suggestion.json"`. The helper validates the matching active request and publishes:
+
+```json
+{
+  "jobId": "prompt-card-blender-job-1",
+  "kind": "prompt-card-blender",
+  "status": "completed",
+  "completedAt": "ISO-8601 timestamp",
+  "cardIds": ["card-1", "card-2"],
+  "proposal": {
+    "title": "Copper glasshouse",
+    "prompt": "A copper-lit editorial portrait inside a translucent botanical glasshouse.",
+    "negativePrompt": "readable text, logos, hard shadows",
+    "tags": ["industrial", "nocturne", "botanical", "glass"],
+    "reasoningSummary": "Balances the two immutable source directions at the requested ratio."
+  }
 }
 ```
 

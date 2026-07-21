@@ -15,10 +15,14 @@ normal implementation and play-testing loop.
        for every resulting branch.
 3. [x] Add an attributable preference-revision timeline with field-level diffs,
        rollback, freeze, and save-as-preset controls.
-4. [ ] Continue the staged weighted prompt-deck and persistent `co-proc` transport
-       design in [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md),
-       keeping durable mailbox operation as the fallback during migration.
-5. [ ] After those foundations, consider one-step undo, tournament play, and a
+4. [x] Ship the staged weighted prompt deck with attributable verdicts,
+       immutable lineage, and approval-gated repair suggestions.
+5. [x] Add model-assisted two-card blending that reuses the deck's durable,
+       approval-gated suggestion machinery and records both immutable parents.
+6. [ ] Continue the persistent `co-proc` transport design in
+       [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md), keeping
+       durable mailbox operation as the fallback during migration.
+7. [ ] After those foundations, consider one-step undo, tournament play, and a
        dedicated favorites gallery. Broad refactoring should follow feature
        boundaries instead of preceding them.
 
@@ -99,7 +103,10 @@ freeform path unchanged. When an active card accumulates four new rejects and
 at least four remain in the latest twelve deck verdicts, the app automatically
 requests two editor alternatives. The original card stays immutable; each
 proposal remains approval-gated until the player accepts it as a new child card
-or discards it.
+or discards it. The player can also select any two active cards and request a
+balanced model-assisted blend. That durable non-image job receives only the two
+immutable card snapshots and their influence ratio, returns one reviewable
+proposal, and creates a child carrying both parent IDs only after acceptance.
 
 ## 2026-07-20
 

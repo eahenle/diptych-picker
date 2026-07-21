@@ -47,6 +47,43 @@ const deck: PromptDeck = {
 };
 
 describe("PromptDeckEditor", () => {
+  it("selects two active cards for a balanced blend", async () => {
+    const onBlend = vi.fn(async () => true);
+    const second = {
+      ...deck.cards[0],
+      id: "card-2",
+      title: "Glass botany",
+      prompt: "Translucent botanical structures in soft green daylight.",
+    };
+    render(
+      <PromptDeckEditor
+        deck={{ ...deck, cards: [...deck.cards, second] }}
+        busy={false}
+        error={null}
+        onCreate={vi.fn(async () => true)}
+        onUpdate={vi.fn(async () => undefined)}
+        onBlend={onBlend}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Prompt deck"));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Select Copper nocturne for blend",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select Glass botany for blend" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Blend selected 50/50" }),
+    );
+
+    await waitFor(() =>
+      expect(onBlend).toHaveBeenCalledWith(["card-1", "card-2"]),
+    );
+  });
+
   it("creates immutable cards and delegates deck controls", async () => {
     const onCreate = vi.fn(async () => true);
     const onUpdate = vi.fn(async () => undefined);
@@ -57,6 +94,7 @@ describe("PromptDeckEditor", () => {
         error={null}
         onCreate={onCreate}
         onUpdate={onUpdate}
+        onBlend={vi.fn(async () => true)}
       />,
     );
 

@@ -10,6 +10,9 @@ import type {
   LeaderboardProfileJob,
   LeaderboardProfileMailbox,
   LeaderboardProfileResult,
+  PromptCardBlenderJob,
+  PromptCardBlenderMailbox,
+  PromptCardBlenderResult,
   PromptCardEditorJob,
   PromptCardEditorMailbox,
   PromptCardEditorResult,
@@ -86,6 +89,10 @@ export class MockAgentWorker {
     }
     if (job.kind === "prompt-card-editor") {
       await this.completePromptCardEditor(job);
+      return;
+    }
+    if (job.kind === "prompt-card-blender") {
+      await this.completePromptCardBlender(job);
       return;
     }
 
@@ -237,6 +244,36 @@ export class MockAgentWorker {
             "Introduces controlled visual variation in response to repeated rejection evidence.",
         },
       ],
+    };
+    await this.publish("completed", job.id, result);
+  }
+
+  private async completePromptCardBlender(
+    job: PromptCardBlenderJob,
+  ): Promise<void> {
+    const [first, second] = job.cards;
+    const firstPercent = Math.round(job.ratio * 100);
+    const result: PromptCardBlenderResult = {
+      jobId: job.id,
+      kind: "prompt-card-blender",
+      status: "completed",
+      completedAt: this.now(),
+      cardIds: [first.id, second.id],
+      proposal: {
+        title: `${first.title} + ${second.title}`.slice(0, 80),
+        prompt:
+          `${first.prompt} Blend this at roughly ${firstPercent}% influence with these complementary qualities: ${second.prompt}`.slice(
+            0,
+            1_000,
+          ),
+        negativePrompt: [first.negativePrompt, second.negativePrompt]
+          .filter(Boolean)
+          .join(", ")
+          .slice(0, 500),
+        tags: [...new Set([...first.tags, ...second.tags])].slice(0, 8),
+        reasoningSummary:
+          "Combines the strongest compatible qualities of both immutable source cards into one reviewable child.",
+      },
     };
     await this.publish("completed", job.id, result);
   }
@@ -409,6 +446,38 @@ export class MockPromptCardEditorMailbox implements PromptCardEditorMailbox {
 
   private async resume(job: PromptCardEditorJob | null): Promise<void> {
     if (job && !(await this.mailbox.readPromptCardEditorResult(job.id))) {
+      this.worker.schedule(job);
+    }
+  }
+}
+
+export class MockPromptCardBlenderMailbox implements PromptCardBlenderMailbox {
+  constructor(
+    private readonly mailbox: PromptCardBlenderMailbox,
+    private readonly worker: MockAgentWorker,
+  ) {}
+
+  async enqueuePromptCardBlender(job: PromptCardBlenderJob): Promise<void> {
+    await this.mailbox.enqueuePromptCardBlender(job);
+    this.worker.schedule(job);
+  }
+
+  async readPromptCardBlenderWork(jobId: string) {
+    const job = await this.mailbox.readPromptCardBlenderWork(jobId);
+    await this.resume(job);
+    return job;
+  }
+
+  readPromptCardBlenderResult(jobId: string) {
+    return this.mailbox.readPromptCardBlenderResult(jobId);
+  }
+
+  archivePromptCardBlender(jobId: string) {
+    return this.mailbox.archivePromptCardBlender(jobId);
+  }
+
+  private async resume(job: PromptCardBlenderJob | null): Promise<void> {
+    if (job && !(await this.mailbox.readPromptCardBlenderResult(job.id))) {
       this.worker.schedule(job);
     }
   }

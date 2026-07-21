@@ -16,6 +16,7 @@ const savePreferencePreset = vi.fn();
 const deletePreferencePreset = vi.fn();
 const createPromptCard = vi.fn();
 const updatePromptDeck = vi.fn();
+const requestPromptCardBlend = vi.fn();
 const dismissGenerationNotice = vi.fn();
 const requestSourceProfile = vi.fn();
 const getSourceProfileStatus = vi.fn();
@@ -37,6 +38,7 @@ vi.mock("@/server/runtime", () => ({
   deletePreferencePreset,
   createPromptCard,
   updatePromptDeck,
+  requestPromptCardBlend,
   dismissGenerationNotice,
   requestSourceProfile,
   getSourceProfileStatus,
@@ -394,8 +396,10 @@ describe("prompt deck", () => {
   beforeEach(() => {
     createPromptCard.mockReset();
     updatePromptDeck.mockReset();
+    requestPromptCardBlend.mockReset();
     createPromptCard.mockResolvedValue({ promptDeck: { cards: [] } });
     updatePromptDeck.mockResolvedValue({ promptDeck: { cards: [] } });
+    requestPromptCardBlend.mockResolvedValue({ promptDeck: { cards: [] } });
   });
 
   it("creates a validated prompt card", async () => {
@@ -416,6 +420,22 @@ describe("prompt deck", () => {
 
     expect(response.status).toBe(200);
     expect(createPromptCard).toHaveBeenCalledWith(input);
+  });
+
+  it("requests a validated prompt-card blend", async () => {
+    const { POST } = await import("./preferences/deck/blend/route");
+    const response = await POST(
+      new Request("http://localhost/api/game/preferences/deck/blend", {
+        method: "POST",
+        body: JSON.stringify({ cardIds: ["card-1", "card-2"], ratio: 0.5 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(requestPromptCardBlend).toHaveBeenCalledWith(
+      ["card-1", "card-2"],
+      0.5,
+    );
   });
 
   it("updates deck and card controls", async () => {

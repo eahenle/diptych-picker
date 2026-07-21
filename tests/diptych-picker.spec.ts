@@ -727,6 +727,58 @@ test("uses an enabled weighted prompt card for future generation jobs", async ({
   ).toBe(true);
 });
 
+test("blends two prompt cards into an approval-gated child", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByText("Prompt deck").click();
+  for (const card of [
+    {
+      title: "Copper nocturne",
+      prompt: "A severe copper-lit industrial editorial portrait.",
+      tags: "portrait, copper",
+    },
+    {
+      title: "Glass botany",
+      prompt: "Translucent botanical structures in soft green daylight.",
+      tags: "botanical, glass",
+    },
+  ]) {
+    await page.getByLabel("Title").fill(card.title);
+    await page.getByLabel("Prompt direction").fill(card.prompt);
+    await page.getByLabel("Tags").fill(card.tags);
+    await page.getByRole("button", { name: "Add card" }).click();
+    await expect(page.getByText(card.title, { exact: true })).toBeVisible();
+  }
+
+  await page
+    .getByRole("button", { name: "Select Copper nocturne for blend" })
+    .click();
+  await page
+    .getByRole("button", { name: "Select Glass botany for blend" })
+    .click();
+  const blendResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck/blend") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Blend selected 50/50" }).click();
+  expect((await blendResponse).status()).toBe(200);
+  await expect(page.getByText(/Blender is drafting a child/)).toBeVisible();
+  await expect(page.getByText("Copper nocturne + Glass botany")).toBeVisible({
+    timeout: 10_000,
+  });
+
+  await page.getByRole("button", { name: "Accept as new card" }).click();
+  const state = await (await request.get("/api/game")).json();
+  const child = state.game.promptDeck.cards.at(-1);
+  expect(child.title).toBe("Copper nocturne + Glass botany");
+  expect(child.parents).toEqual(
+    state.game.promptDeck.cards.slice(0, 2).map(({ id }: { id: string }) => id),
+  );
+});
+
 test("derives an editable preference profile from a private source image", async ({
   page,
   request,

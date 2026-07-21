@@ -5,6 +5,7 @@ import {
   preferenceProfileFromSeed,
   type Candidate,
   type GameState,
+  type GenerationPromptCard,
 } from "@/domain/game";
 import { MemoryChallengerRepository } from "./challenger-repository";
 import {
@@ -192,6 +193,66 @@ function withPromptCardEditorJob(game: GameState): GameState {
   };
 }
 
+function withPromptCardBlendJob(game: GameState): GameState {
+  const first = game.promptDeck?.cards[0] ?? {
+    id: "card-1",
+    title: "Copper nocturne",
+    prompt: "A severe copper-lit industrial editorial portrait.",
+    negativePrompt: "readable text",
+    weight: 1,
+    tags: ["portrait", "copper"],
+    parents: [],
+    active: true,
+    createdAt: NOW,
+    stats: { wins: 0, rejects: 0 },
+  };
+  const second = {
+    ...first,
+    id: "card-2",
+    title: "Glass botany",
+    prompt: "Translucent botanical structures in soft green daylight.",
+    tags: ["botanical", "glass"],
+  };
+  const expectedJob = {
+    id: "blend-1",
+    kind: "prompt-card-blender" as const,
+    createdAt: NOW,
+    cards: [
+      {
+        id: first.id,
+        title: first.title,
+        prompt: first.prompt,
+        negativePrompt: first.negativePrompt,
+        tags: first.tags,
+      },
+      {
+        id: second.id,
+        title: second.title,
+        prompt: second.prompt,
+        negativePrompt: second.negativePrompt,
+        tags: second.tags,
+      },
+    ] as [GenerationPromptCard, GenerationPromptCard],
+    ratio: 0.5,
+  };
+  return {
+    ...game,
+    promptDeck: {
+      enabled: game.promptDeck?.enabled ?? true,
+      cards: [first, second],
+      verdicts: game.promptDeck?.verdicts ?? [],
+      editorJob: game.promptDeck?.editorJob ?? null,
+      blendJob: {
+        jobId: expectedJob.id,
+        cardIds: [first.id, second.id],
+        enqueuedAt: NOW,
+        expectedJob,
+      },
+      suggestions: game.promptDeck?.suggestions ?? [],
+    },
+  };
+}
+
 function service(options: {
   game?: GameState | null;
   challengers?: ChallengerState | null;
@@ -280,15 +341,16 @@ describe("GameSnapshotService", () => {
     });
   });
 
-  it("exports an editor request as replayable rejection evidence", async () => {
+  it("exports without session-bound prompt-card jobs", async () => {
     const context = service({
-      game: withPromptCardEditorJob(gameState()),
+      game: withPromptCardBlendJob(withPromptCardEditorJob(gameState())),
       challengers: challengerState(),
     });
 
     const snapshot = await context.snapshotService.export();
 
     expect(snapshot.game.promptDeck?.editorJob).toBeNull();
+    expect(snapshot.game.promptDeck?.blendJob).toBeNull();
     expect(snapshot.game.promptDeck?.cards[0].editorRejectCheckpoint).toBe(0);
     expect(snapshot.game.promptDeck?.verdicts).toHaveLength(4);
   });
@@ -383,7 +445,9 @@ describe("GameSnapshotService", () => {
     });
     const snapshot = await source.snapshotService.export();
     const target = service({
-      game: withPromptCardEditorJob({ ...gameState(), history: [] }),
+      game: withPromptCardBlendJob(
+        withPromptCardEditorJob({ ...gameState(), history: [] }),
+      ),
       challengers: withRefillJob(challengerState()),
       createId: () => "new-session",
     });
@@ -402,6 +466,7 @@ describe("GameSnapshotService", () => {
     expect(target.verifyCandidateAsset).toHaveBeenCalledTimes(3);
     expect(target.archive).toHaveBeenCalledWith("old-refill");
     expect(target.archive).toHaveBeenCalledWith("editor-1");
+    expect(target.archive).toHaveBeenCalledWith("blend-1");
   });
 
   it("rejects unavailable assets before changing the current game", async () => {

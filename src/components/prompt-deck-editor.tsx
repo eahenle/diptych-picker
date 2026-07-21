@@ -25,6 +25,7 @@ interface PromptDeckEditorProps {
           action: "accept" | "discard";
         },
   ) => Promise<void>;
+  onBlend: (cardIds: [string, string]) => Promise<boolean>;
 }
 
 export function PromptDeckEditor({
@@ -33,13 +34,37 @@ export function PromptDeckEditor({
   error,
   onCreate,
   onUpdate,
+  onBlend,
 }: PromptDeckEditorProps) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [tags, setTags] = useState("");
+  const [blendSelection, setBlendSelection] = useState<string[]>([]);
   const cards = deck?.cards ?? [];
   const activeCards = cards.filter((card) => card.active);
+  const availableBlendIds = new Set(activeCards.map(({ id }) => id));
+  const effectiveBlendSelection = blendSelection.filter((id) =>
+    availableBlendIds.has(id),
+  );
+
+  const toggleBlendCard = (cardId: string) => {
+    setBlendSelection((current) => {
+      const available = current.filter((id) => availableBlendIds.has(id));
+      if (available.includes(cardId)) {
+        return available.filter((id) => id !== cardId);
+      }
+      return available.length < 2
+        ? [...available, cardId]
+        : [available[1], cardId];
+    });
+  };
+
+  const blendSelected = async () => {
+    if (effectiveBlendSelection.length !== 2) return;
+    const cardIds = effectiveBlendSelection as [string, string];
+    if (await onBlend(cardIds)) setBlendSelection([]);
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -102,6 +127,9 @@ export function PromptDeckEditor({
                 key={card.id}
                 card={card}
                 busy={busy}
+                blendSelected={effectiveBlendSelection.includes(card.id)}
+                blendDisabled={Boolean(deck?.blendJob) || !card.active}
+                onToggleBlend={() => toggleBlendCard(card.id)}
                 onUpdate={onUpdate}
               />
             ))}
@@ -112,12 +140,47 @@ export function PromptDeckEditor({
           </p>
         )}
 
+        {cards.length >= 2 ? (
+          <div className={styles.blendControls}>
+            <span>
+              Select two active cards to draft a balanced, reviewable child.
+            </span>
+            <button
+              type="button"
+              disabled={
+                busy ||
+                Boolean(deck?.blendJob) ||
+                effectiveBlendSelection.length !== 2
+              }
+              onClick={() => void blendSelected()}
+            >
+              Blend selected 50/50
+            </button>
+          </div>
+        ) : null}
+
         {deck?.editorJob ? (
           <p className={styles.editorStatus} role="status">
             Editor is drafting two alternatives for{" "}
             <strong>
               {cards.find((card) => card.id === deck.editorJob?.cardId)
                 ?.title ?? "a repeatedly rejected card"}
+            </strong>
+            …
+          </p>
+        ) : null}
+
+        {deck?.blendJob ? (
+          <p className={styles.editorStatus} role="status">
+            Blender is drafting a child from{" "}
+            <strong>
+              {deck.blendJob.cardIds
+                .map(
+                  (cardId) =>
+                    cards.find((card) => card.id === cardId)?.title ??
+                    "a selected card",
+                )
+                .join(" + ")}
             </strong>
             …
           </p>
@@ -137,6 +200,18 @@ export function PromptDeckEditor({
               {(deck?.suggestions ?? []).map((suggestion) => (
                 <li key={suggestion.id}>
                   <strong>{suggestion.title}</strong>
+                  {suggestion.parentCardIds ? (
+                    <small>
+                      Blend of{" "}
+                      {suggestion.parentCardIds
+                        .map(
+                          (cardId) =>
+                            cards.find((card) => card.id === cardId)?.title ??
+                            "source card",
+                        )
+                        .join(" + ")}
+                    </small>
+                  ) : null}
                   <p>{suggestion.prompt}</p>
                   {suggestion.negativePrompt ? (
                     <small>Avoid: {suggestion.negativePrompt}</small>
@@ -238,10 +313,16 @@ export function PromptDeckEditor({
 function PromptCardRow({
   card,
   busy,
+  blendSelected,
+  blendDisabled,
+  onToggleBlend,
   onUpdate,
 }: {
   card: PromptCard;
   busy: boolean;
+  blendSelected: boolean;
+  blendDisabled: boolean;
+  onToggleBlend: () => void;
   onUpdate: PromptDeckEditorProps["onUpdate"];
 }) {
   const adjustWeight = (factor: number) =>
@@ -265,6 +346,15 @@ function PromptCardRow({
         <span className={styles.tags}>{card.tags.join(" · ")}</span>
       ) : null}
       <div className={styles.cardActions}>
+        <button
+          type="button"
+          disabled={busy || blendDisabled}
+          aria-pressed={blendSelected}
+          aria-label={`${blendSelected ? "Remove" : "Select"} ${card.title} ${blendSelected ? "from" : "for"} blend`}
+          onClick={onToggleBlend}
+        >
+          {blendSelected ? "Selected" : "Blend"}
+        </button>
         <button
           type="button"
           disabled={busy}

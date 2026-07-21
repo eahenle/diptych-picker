@@ -117,6 +117,25 @@ function promptCardEditor(id, createdAt) {
   };
 }
 
+function promptCardBlender(id, createdAt) {
+  return {
+    id,
+    kind: "prompt-card-blender",
+    createdAt,
+    cards: [
+      promptCardEditor("unused", createdAt).card,
+      {
+        id: "card-2",
+        title: "Glass botany",
+        prompt: "Translucent botanical structures in soft green daylight.",
+        negativePrompt: "hard shadows",
+        tags: ["botanical", "glass"],
+      },
+    ],
+    ratio: 0.5,
+  };
+}
+
 async function dataRoot() {
   return mkdtemp(join(tmpdir(), "diptych-next-job-"));
 }
@@ -261,6 +280,24 @@ test("prioritizes prompt-card editor work before cached analysis and refills", a
     JSON.parse(stdout),
     promptCardEditor("editor-1", "2026-07-16T01:00:02.000Z"),
   );
+});
+
+test("prioritizes prompt-card blender work before cached analysis and refills", async () => {
+  const root = await dataRoot();
+  const blend = promptCardBlender("blender-1", "2026-07-16T01:00:02.000Z");
+  await Promise.all([
+    put(root, "pending", refill("older-refill", "2026-07-16T01:00:00.000Z")),
+    put(
+      root,
+      "pending",
+      leaderboardProfile("leaderboard-1", "2026-07-16T01:00:01.000Z"),
+    ),
+    put(root, "pending", blend),
+  ]);
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.deepEqual(JSON.parse(stdout), blend);
 });
 
 test("prioritizes interactive source analysis before cached leaderboard analysis", async () => {

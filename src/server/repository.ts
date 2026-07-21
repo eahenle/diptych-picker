@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { migrateGameState, type GameState } from "@/domain/game";
 import { z } from "zod";
 import {
@@ -250,12 +251,57 @@ const gameStateSchema: z.ZodType<GameState> = z
           .strict()
           .nullable()
           .optional(),
+        blendJob: z
+          .object({
+            jobId: z.string().trim().min(1),
+            cardIds: z.tuple([
+              z.string().trim().min(1),
+              z.string().trim().min(1),
+            ]),
+            enqueuedAt: z.string().trim().min(1),
+            expectedJob: z
+              .object({
+                id: z.string().trim().min(1),
+                kind: z.literal("prompt-card-blender"),
+                createdAt: z.string().trim().min(1),
+                cards: z.tuple([
+                  z
+                    .object({
+                      id: z.string().trim().min(1),
+                      title: z.string().trim().min(1).max(80),
+                      prompt: z.string().trim().min(20).max(1_000),
+                      negativePrompt: z.string().max(500),
+                      tags: z.array(z.string().trim().min(1).max(40)).max(8),
+                    })
+                    .strict(),
+                  z
+                    .object({
+                      id: z.string().trim().min(1),
+                      title: z.string().trim().min(1).max(80),
+                      prompt: z.string().trim().min(20).max(1_000),
+                      negativePrompt: z.string().max(500),
+                      tags: z.array(z.string().trim().min(1).max(40)).max(8),
+                    })
+                    .strict(),
+                ]),
+                ratio: z.number().min(0.1).max(0.9),
+              })
+              .strict(),
+          })
+          .strict()
+          .nullable()
+          .optional(),
         suggestions: z
           .array(
             z
               .object({
                 id: z.string().trim().min(1),
                 parentCardId: z.string().trim().min(1),
+                parentCardIds: z
+                  .array(z.string().trim().min(1))
+                  .min(2)
+                  .max(2)
+                  .optional(),
                 title: z.string().trim().min(1).max(80),
                 prompt: z.string().trim().min(20).max(1_000),
                 negativePrompt: z.string().max(500),
@@ -321,6 +367,22 @@ const gameStateSchema: z.ZodType<GameState> = z
             message: "Prompt card editor job must reference its deck card",
           });
         }
+        if (
+          deck.blendJob &&
+          (new Set(deck.blendJob.cardIds).size !== 2 ||
+            deck.blendJob.cardIds.some((cardId) => !ids.has(cardId)) ||
+            deck.blendJob.expectedJob.id !== deck.blendJob.jobId ||
+            !isDeepStrictEqual(
+              deck.blendJob.expectedJob.cards.map(({ id }) => id),
+              deck.blendJob.cardIds,
+            ))
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["blendJob"],
+            message: "Prompt card blend job must reference two deck cards",
+          });
+        }
         const suggestionIds = new Set<string>();
         for (const [index, suggestion] of (deck.suggestions ?? []).entries()) {
           if (suggestionIds.has(suggestion.id)) {
@@ -331,7 +393,15 @@ const gameStateSchema: z.ZodType<GameState> = z
             });
           }
           suggestionIds.add(suggestion.id);
-          if (!ids.has(suggestion.parentCardId)) {
+          const parentIds = suggestion.parentCardIds ?? [
+            suggestion.parentCardId,
+          ];
+          if (
+            !ids.has(suggestion.parentCardId) ||
+            parentIds.some((parentId) => !ids.has(parentId)) ||
+            new Set(parentIds).size !== parentIds.length ||
+            parentIds[0] !== suggestion.parentCardId
+          ) {
             context.addIssue({
               code: "custom",
               path: ["suggestions", index, "parentCardId"],

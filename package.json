@@ -23,6 +23,7 @@
     "agent:complete": "node .agents/skills/run-diptych-picker/scripts/complete-job.mjs",
     "agent:complete-profile": "node .agents/skills/run-diptych-picker/scripts/complete-source-profile.mjs",
     "agent:complete-card-editor": "node .agents/skills/run-diptych-picker/scripts/complete-prompt-card-editor.mjs",
+    "agent:complete-card-blender": "node .agents/skills/run-diptych-picker/scripts/complete-prompt-card-blender.mjs",
     "agent:fail": "node .agents/skills/run-diptych-picker/scripts/fail-job.mjs",
     "agent:heartbeat": "node .agents/skills/run-diptych-picker/scripts/heartbeat.mjs"
   },

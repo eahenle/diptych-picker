@@ -16,6 +16,7 @@ import {
   type GenerationJob,
   type GenerationResult,
   type LeaderboardProfileJob,
+  type PromptCardBlenderJob,
   type PromptCardEditorJob,
 } from "./agent-mailbox";
 
@@ -215,6 +216,25 @@ const promptCardEditorJob = (
   })),
 });
 
+const promptCardBlenderJob = (
+  id = "prompt-card-blender-1",
+): PromptCardBlenderJob => ({
+  id,
+  kind: "prompt-card-blender",
+  createdAt: "2026-07-20T20:00:00.000Z",
+  cards: [
+    promptCardEditorJob().card,
+    {
+      id: "card-2",
+      title: "Glass botany",
+      prompt: "Translucent botanical structures in soft green daylight.",
+      negativePrompt: "hard shadows",
+      tags: ["botanical", "glass"],
+    },
+  ],
+  ratio: 0.5,
+});
+
 async function mailboxRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "diptych-mailbox-"));
 }
@@ -249,6 +269,45 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("strictly persists prompt-card blender work and one proposal", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const blendJob = promptCardBlenderJob();
+    await mailbox.enqueuePromptCardBlender(blendJob);
+
+    await expect(
+      mailbox.readPromptCardBlenderWork(blendJob.id),
+    ).resolves.toEqual(blendJob);
+    const result = {
+      jobId: blendJob.id,
+      kind: "prompt-card-blender",
+      status: "completed",
+      completedAt: "2026-07-20T20:01:00.000Z",
+      cardIds: ["card-1", "card-2"],
+      proposal: {
+        title: "Copper glasshouse",
+        prompt:
+          "A copper-lit editorial portrait inside a translucent botanical glasshouse.",
+        negativePrompt: "readable text, hard shadows",
+        tags: ["portrait", "copper", "botanical", "glass"],
+        reasoningSummary: "Balances the two source directions.",
+      },
+    };
+    await writeRawResult(root, "completed", blendJob.id, result);
+
+    await expect(
+      mailbox.readPromptCardBlenderResult(blendJob.id),
+    ).resolves.toEqual(result);
+    await writeRawResult(root, "completed", "extra-field", {
+      ...result,
+      jobId: "extra-field",
+      unexpected: true,
+    });
+    await expect(
+      mailbox.readPromptCardBlenderResult("extra-field"),
+    ).rejects.toThrow();
+  });
+
   it("strictly persists prompt-card editor work and two proposals", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);
