@@ -10,6 +10,9 @@ import type {
   LeaderboardProfileJob,
   LeaderboardProfileMailbox,
   LeaderboardProfileResult,
+  PromptCardEditorJob,
+  PromptCardEditorMailbox,
+  PromptCardEditorResult,
   SourceProfileJob,
   SourceProfileMailbox,
   SourceProfileResult,
@@ -79,6 +82,10 @@ export class MockAgentWorker {
     }
     if (job.kind === "leaderboard-profile") {
       await this.completeLeaderboardProfile(job);
+      return;
+    }
+    if (job.kind === "prompt-card-editor") {
+      await this.completePromptCardEditor(job);
       return;
     }
 
@@ -191,6 +198,45 @@ export class MockAgentWorker {
       },
       reasoningSummary:
         "Synthesizes shared visual qualities across the ranked leaders while keeping each source image immutable.",
+    };
+    await this.publish("completed", job.id, result);
+  }
+
+  private async completePromptCardEditor(
+    job: PromptCardEditorJob,
+  ): Promise<void> {
+    const result: PromptCardEditorResult = {
+      jobId: job.id,
+      kind: "prompt-card-editor",
+      status: "completed",
+      completedAt: this.now(),
+      cardId: job.card.id,
+      proposals: [
+        {
+          title: `${job.card.title} — focused`.slice(0, 80),
+          prompt:
+            `${job.card.prompt} Emphasize a clearer focal hierarchy and simpler supporting detail.`.slice(
+              0,
+              1_000,
+            ),
+          negativePrompt: job.card.negativePrompt,
+          tags: job.card.tags,
+          reasoningSummary:
+            "Narrows the composition while preserving the original card's intended aesthetic.",
+        },
+        {
+          title: `${job.card.title} — alternate`.slice(0, 80),
+          prompt:
+            `${job.card.prompt} Explore a distinct camera angle and more deliberate lighting rhythm.`.slice(
+              0,
+              1_000,
+            ),
+          negativePrompt: job.card.negativePrompt,
+          tags: job.card.tags,
+          reasoningSummary:
+            "Introduces controlled visual variation in response to repeated rejection evidence.",
+        },
+      ],
     };
     await this.publish("completed", job.id, result);
   }
@@ -331,6 +377,38 @@ export class MockLeaderboardProfileMailbox implements LeaderboardProfileMailbox 
 
   private async resume(job: LeaderboardProfileJob | null): Promise<void> {
     if (job && !(await this.mailbox.readLeaderboardProfileResult(job.id))) {
+      this.worker.schedule(job);
+    }
+  }
+}
+
+export class MockPromptCardEditorMailbox implements PromptCardEditorMailbox {
+  constructor(
+    private readonly mailbox: PromptCardEditorMailbox,
+    private readonly worker: MockAgentWorker,
+  ) {}
+
+  async enqueuePromptCardEditor(job: PromptCardEditorJob): Promise<void> {
+    await this.mailbox.enqueuePromptCardEditor(job);
+    this.worker.schedule(job);
+  }
+
+  async readPromptCardEditorWork(jobId: string) {
+    const job = await this.mailbox.readPromptCardEditorWork(jobId);
+    await this.resume(job);
+    return job;
+  }
+
+  readPromptCardEditorResult(jobId: string) {
+    return this.mailbox.readPromptCardEditorResult(jobId);
+  }
+
+  archivePromptCardEditor(jobId: string) {
+    return this.mailbox.archivePromptCardEditor(jobId);
+  }
+
+  private async resume(job: PromptCardEditorJob | null): Promise<void> {
+    if (job && !(await this.mailbox.readPromptCardEditorResult(job.id))) {
       this.worker.schedule(job);
     }
   }

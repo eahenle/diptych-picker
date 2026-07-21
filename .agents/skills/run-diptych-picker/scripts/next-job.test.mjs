@@ -97,6 +97,26 @@ function leaderboardProfile(id, createdAt) {
   };
 }
 
+function promptCardEditor(id, createdAt) {
+  return {
+    id,
+    kind: "prompt-card-editor",
+    createdAt,
+    card: {
+      id: "card-1",
+      title: "Copper nocturne",
+      prompt: "A severe copper-lit industrial editorial portrait.",
+      negativePrompt: "readable text",
+      tags: ["portrait", "copper"],
+    },
+    recentRejections: Array.from({ length: 4 }, (_, index) => ({
+      resultId: `rejected-${index + 1}`,
+      reason: "Selected comparison winner",
+      recordedAt: `2026-07-16T00:00:0${index}.000Z`,
+    })),
+  };
+}
+
 async function dataRoot() {
   return mkdtemp(join(tmpdir(), "diptych-next-job-"));
 }
@@ -216,6 +236,30 @@ test("prioritizes an interactive source-profile analysis before refills", async 
       join(root, "agent-mailbox", "pending", "older-refill.json"),
       "utf8",
     ),
+  );
+});
+
+test("prioritizes prompt-card editor work before cached analysis and refills", async () => {
+  const root = await dataRoot();
+  await Promise.all([
+    put(root, "pending", refill("older-refill", "2026-07-16T01:00:00.000Z")),
+    put(
+      root,
+      "pending",
+      leaderboardProfile("leaderboard-1", "2026-07-16T01:00:01.000Z"),
+    ),
+    put(
+      root,
+      "pending",
+      promptCardEditor("editor-1", "2026-07-16T01:00:02.000Z"),
+    ),
+  ]);
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.deepEqual(
+    JSON.parse(stdout),
+    promptCardEditor("editor-1", "2026-07-16T01:00:02.000Z"),
   );
 });
 

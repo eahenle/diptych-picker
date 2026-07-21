@@ -71,7 +71,8 @@ and a Next.js production build.
    through the committed lockfile. Adopt an explicit dependency-update policy
    in a separate maintenance change rather than mixing upgrades into feature or
    hardening work.
-4. Prompt-deck persistence, weighted draws, and verdict attribution landed in
-   the next feature pass. Persistent co-proc workers and automated card-editor
-   suggestions remain staged, and transport work should retain the current
-   durable mailbox as fallback until end-to-end result parity is proven.
+4. Prompt-deck persistence, weighted draws, verdict attribution, and
+   approval-gated card-editor suggestions landed in subsequent feature passes.
+   Persistent co-proc workers remain staged, and transport work should retain
+   the current durable mailbox as fallback until end-to-end result parity is
+   proven.

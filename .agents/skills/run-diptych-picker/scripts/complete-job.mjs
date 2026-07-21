@@ -55,11 +55,10 @@ const mailbox = join(root, "agent-mailbox");
 const activeJob = await assertActiveJob(mailbox, jobId);
 if (
   activeJob.kind === "source-profile" ||
-  activeJob.kind === "leaderboard-profile"
+  activeJob.kind === "leaderboard-profile" ||
+  activeJob.kind === "prompt-card-editor"
 ) {
-  throw new Error(
-    "Profile-analysis jobs must use npm run agent:complete-profile",
-  );
+  throw new Error("Non-image jobs must use their dedicated completion command");
 }
 const adaptationMode =
   activeJob.preferenceProfile?.adaptationMode ??

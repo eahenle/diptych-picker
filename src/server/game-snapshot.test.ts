@@ -138,6 +138,60 @@ function withRefillJob(state: ChallengerState): ChallengerState {
   };
 }
 
+function withPromptCardEditorJob(game: GameState): GameState {
+  const card = {
+    id: "card-1",
+    title: "Copper nocturne",
+    prompt: "A severe copper-lit industrial editorial portrait.",
+    negativePrompt: "readable text",
+    weight: 1,
+    tags: ["portrait", "copper"],
+    parents: [],
+    active: true,
+    createdAt: NOW,
+    stats: { wins: 0, rejects: 4 },
+    editorRejectCheckpoint: 4,
+  };
+  const recentRejections = Array.from({ length: 4 }, (_, index) => ({
+    resultId: `rejected-${index + 1}`,
+    reason: "Selected comparison winner",
+    recordedAt: `2026-07-17T11:00:0${index}.000Z`,
+  }));
+  const expectedJob = {
+    id: "editor-1",
+    kind: "prompt-card-editor" as const,
+    createdAt: NOW,
+    card: {
+      id: card.id,
+      title: card.title,
+      prompt: card.prompt,
+      negativePrompt: card.negativePrompt,
+      tags: card.tags,
+    },
+    recentRejections,
+  };
+  return {
+    ...game,
+    promptDeck: {
+      enabled: true,
+      cards: [card],
+      verdicts: recentRejections.map((evidence) => ({
+        cardId: card.id,
+        ...evidence,
+        verdict: "reject" as const,
+      })),
+      editorJob: {
+        jobId: expectedJob.id,
+        cardId: card.id,
+        enqueuedAt: NOW,
+        previousRejectCheckpoint: 0,
+        expectedJob,
+      },
+      suggestions: [],
+    },
+  };
+}
+
 function service(options: {
   game?: GameState | null;
   challengers?: ChallengerState | null;
@@ -224,6 +278,19 @@ describe("GameSnapshotService", () => {
         nextFallbackAt: null,
       },
     });
+  });
+
+  it("exports an editor request as replayable rejection evidence", async () => {
+    const context = service({
+      game: withPromptCardEditorJob(gameState()),
+      challengers: challengerState(),
+    });
+
+    const snapshot = await context.snapshotService.export();
+
+    expect(snapshot.game.promptDeck?.editorJob).toBeNull();
+    expect(snapshot.game.promptDeck?.cards[0].editorRejectCheckpoint).toBe(0);
+    expect(snapshot.game.promptDeck?.verdicts).toHaveLength(4);
   });
 
   it.each(["buffer", "retirement"] as const)(
@@ -316,7 +383,7 @@ describe("GameSnapshotService", () => {
     });
     const snapshot = await source.snapshotService.export();
     const target = service({
-      game: { ...gameState(), history: [] },
+      game: withPromptCardEditorJob({ ...gameState(), history: [] }),
       challengers: withRefillJob(challengerState()),
       createId: () => "new-session",
     });
@@ -334,6 +401,7 @@ describe("GameSnapshotService", () => {
     });
     expect(target.verifyCandidateAsset).toHaveBeenCalledTimes(3);
     expect(target.archive).toHaveBeenCalledWith("old-refill");
+    expect(target.archive).toHaveBeenCalledWith("editor-1");
   });
 
   it("rejects unavailable assets before changing the current game", async () => {

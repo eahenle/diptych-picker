@@ -18,7 +18,12 @@ interface PromptDeckEditorProps {
   onUpdate: (
     update:
       | { kind: "deck"; enabled: boolean }
-      | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+      | { kind: "card"; cardId: string; active?: boolean; weight?: number }
+      | {
+          kind: "suggestion";
+          suggestionId: string;
+          action: "accept" | "discard";
+        },
   ) => Promise<void>;
 }
 
@@ -106,6 +111,70 @@ export function PromptDeckEditor({
             Add concise archetype or style cards, then enable weighted draws.
           </p>
         )}
+
+        {deck?.editorJob ? (
+          <p className={styles.editorStatus} role="status">
+            Editor is drafting two alternatives for{" "}
+            <strong>
+              {cards.find((card) => card.id === deck.editorJob?.cardId)
+                ?.title ?? "a repeatedly rejected card"}
+            </strong>
+            …
+          </p>
+        ) : null}
+
+        {(deck?.suggestions ?? []).length > 0 ? (
+          <section
+            className={styles.suggestions}
+            aria-label="Editor suggestions"
+          >
+            <strong>Editor suggestions</strong>
+            <small>
+              Review first. Accepting creates a new immutable child card; the
+              original is unchanged.
+            </small>
+            <ul>
+              {(deck?.suggestions ?? []).map((suggestion) => (
+                <li key={suggestion.id}>
+                  <strong>{suggestion.title}</strong>
+                  <p>{suggestion.prompt}</p>
+                  {suggestion.negativePrompt ? (
+                    <small>Avoid: {suggestion.negativePrompt}</small>
+                  ) : null}
+                  <small>{suggestion.reasoningSummary}</small>
+                  <div className={styles.suggestionActions}>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void onUpdate({
+                          kind: "suggestion",
+                          suggestionId: suggestion.id,
+                          action: "accept",
+                        })
+                      }
+                    >
+                      Accept as new card
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void onUpdate({
+                          kind: "suggestion",
+                          suggestionId: suggestion.id,
+                          action: "discard",
+                        })
+                      }
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <form className={styles.form} onSubmit={(event) => void submit(event)}>
           <strong>Add immutable card</strong>

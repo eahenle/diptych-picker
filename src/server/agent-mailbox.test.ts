@@ -16,6 +16,7 @@ import {
   type GenerationJob,
   type GenerationResult,
   type LeaderboardProfileJob,
+  type PromptCardEditorJob,
 } from "./agent-mailbox";
 
 const job = (id = "job-1"): GenerationJob => ({
@@ -194,6 +195,26 @@ const leaderboardProfileJob = (
   })),
 });
 
+const promptCardEditorJob = (
+  id = "prompt-card-editor-1",
+): PromptCardEditorJob => ({
+  id,
+  kind: "prompt-card-editor",
+  createdAt: "2026-07-20T20:00:00.000Z",
+  card: {
+    id: "card-1",
+    title: "Copper nocturne",
+    prompt: "A severe copper-lit industrial editorial portrait.",
+    negativePrompt: "readable text",
+    tags: ["portrait", "copper"],
+  },
+  recentRejections: Array.from({ length: 4 }, (_, index) => ({
+    resultId: `rejected-${index + 1}`,
+    reason: "Selected comparison winner",
+    recordedAt: `2026-07-20T19:00:0${index}.000Z`,
+  })),
+});
+
 async function mailboxRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "diptych-mailbox-"));
 }
@@ -228,6 +249,44 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("strictly persists prompt-card editor work and two proposals", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const editorJob = promptCardEditorJob();
+    await mailbox.enqueuePromptCardEditor(editorJob);
+
+    await expect(
+      mailbox.readPromptCardEditorWork(editorJob.id),
+    ).resolves.toEqual(editorJob);
+    const result = {
+      jobId: editorJob.id,
+      kind: "prompt-card-editor",
+      status: "completed",
+      completedAt: "2026-07-20T20:01:00.000Z",
+      cardId: editorJob.card.id,
+      proposals: ["focused", "oblique"].map((treatment) => ({
+        title: `Copper nocturne — ${treatment}`,
+        prompt: `A ${treatment} copper-lit industrial editorial portrait.`,
+        negativePrompt: "readable text",
+        tags: ["portrait", "copper"],
+        reasoningSummary: `Uses a ${treatment} treatment after repeated rejection.`,
+      })),
+    };
+    await writeRawResult(root, "completed", editorJob.id, result);
+
+    await expect(
+      mailbox.readPromptCardEditorResult(editorJob.id),
+    ).resolves.toEqual(result);
+    await writeRawResult(root, "completed", "too-many", {
+      ...result,
+      jobId: "too-many",
+      proposals: [...result.proposals, result.proposals[0]],
+    });
+    await expect(
+      mailbox.readPromptCardEditorResult("too-many"),
+    ).rejects.toThrow();
+  });
+
   it("strictly persists leaderboard analysis work and its completed profile", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);

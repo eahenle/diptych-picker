@@ -55,10 +55,59 @@
 .empty,
 .cards small,
 .cards p,
-.tags {
+.tags,
+.editorStatus,
+.suggestions small,
+.suggestions p {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.4;
+}
+
+.editorStatus {
+  margin: 0;
+  padding: 9px 10px;
+  border-left: 2px solid var(--ultraviolet-bright, #c9b8ec);
+  background: rgba(167, 107, 239, 0.08);
+}
+
+.suggestions {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(201, 184, 236, 0.28);
+  background: rgba(167, 107, 239, 0.055);
+}
+
+.suggestions > strong {
+  font-size: 11px;
+}
+
+.suggestions ul {
+  display: grid;
+  gap: 8px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.suggestions li {
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.suggestions p {
+  margin: 0;
+  color: #cfc8c2;
+}
+
+.suggestionActions {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
 }
 
 .error {
@@ -126,6 +175,7 @@
 }
 
 .cardActions button,
+.suggestionActions button,
 .form button {
   min-height: 32px;
   padding: 0 10px;
@@ -142,6 +192,8 @@
 
 .cardActions button:hover,
 .cardActions button:focus-visible,
+.suggestionActions button:hover,
+.suggestionActions button:focus-visible,
 .form button:hover,
 .form button:focus-visible {
   color: #fff;
@@ -150,6 +202,7 @@
 }
 
 .cardActions button:disabled,
+.suggestionActions button:disabled,
 .form button:disabled {
   cursor: wait;
   opacity: 0.5;

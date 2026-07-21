@@ -91,6 +91,21 @@ export function validateJobKind(job) {
     }
     return;
   }
+  if (kind === "prompt-card-editor") {
+    if (
+      !job.card ||
+      typeof job.card.id !== "string" ||
+      typeof job.card.title !== "string" ||
+      typeof job.card.prompt !== "string" ||
+      job.card.prompt.trim().length < 20 ||
+      !Array.isArray(job.recentRejections) ||
+      job.recentRejections.length < 4 ||
+      job.recentRejections.length > 12
+    ) {
+      throw new Error(`Prompt-card editor job ${job.id} is invalid`);
+    }
+    return;
+  }
   if (kind === "refill") {
     if (!JOB_ID.test(job.sessionId ?? "")) {
       throw new Error(`Refill job ${job.id} requires a valid sessionId`);

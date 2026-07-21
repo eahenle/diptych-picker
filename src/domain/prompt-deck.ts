@@ -3,9 +3,13 @@ import type {
   GameState,
   GenerationPromptCard,
   PromptCard,
+  PromptCardEditorRequest,
   PromptCardVerdict,
   PromptDeck,
 } from "./game";
+
+export const PROMPT_CARD_EDITOR_REJECTION_THRESHOLD = 4;
+export const PROMPT_CARD_EDITOR_VERDICT_WINDOW = 12;
 
 export interface CreatePromptCardInput {
   title: string;
@@ -17,7 +21,13 @@ export interface CreatePromptCardInput {
 }
 
 export function emptyPromptDeck(): PromptDeck {
-  return { enabled: false, cards: [], verdicts: [] };
+  return {
+    enabled: false,
+    cards: [],
+    verdicts: [],
+    editorJob: null,
+    suggestions: [],
+  };
 }
 
 export function createPromptCard(
@@ -36,6 +46,75 @@ export function createPromptCard(
     active: true,
     createdAt,
     stats: { wins: 0, rejects: 0 },
+  };
+}
+
+export function preparePromptCardEditorJob(
+  deck: PromptDeck,
+  createId: () => string,
+  createdAt: string,
+): { deck: PromptDeck; job: PromptCardEditorRequest } | null {
+  if (deck.editorJob) return null;
+  const recentVerdicts = deck.verdicts.slice(
+    -PROMPT_CARD_EDITOR_VERDICT_WINDOW,
+  );
+  const card = deck.cards.find((candidate) => {
+    if (!candidate.active) return false;
+    const checkpoint = candidate.editorRejectCheckpoint ?? 0;
+    if (
+      candidate.stats.rejects - checkpoint <
+      PROMPT_CARD_EDITOR_REJECTION_THRESHOLD
+    ) {
+      return false;
+    }
+    return (
+      recentVerdicts.filter(
+        (verdict) =>
+          verdict.cardId === candidate.id && verdict.verdict === "reject",
+      ).length >= PROMPT_CARD_EDITOR_REJECTION_THRESHOLD
+    );
+  });
+  if (!card) return null;
+  const id = createId();
+  const recentRejections = recentVerdicts
+    .filter(
+      (verdict) => verdict.cardId === card.id && verdict.verdict === "reject",
+    )
+    .map(({ resultId, reason, recordedAt }) => ({
+      resultId,
+      reason,
+      recordedAt,
+    }));
+  const job: PromptCardEditorRequest = {
+    id,
+    kind: "prompt-card-editor",
+    createdAt,
+    card: {
+      id: card.id,
+      title: card.title,
+      prompt: card.prompt,
+      negativePrompt: card.negativePrompt,
+      tags: card.tags,
+    },
+    recentRejections,
+  };
+  return {
+    job,
+    deck: {
+      ...deck,
+      cards: deck.cards.map((candidate) =>
+        candidate.id === card.id
+          ? { ...candidate, editorRejectCheckpoint: candidate.stats.rejects }
+          : candidate,
+      ),
+      editorJob: {
+        jobId: id,
+        cardId: card.id,
+        enqueuedAt: createdAt,
+        previousRejectCheckpoint: card.editorRejectCheckpoint ?? 0,
+        expectedJob: job,
+      },
+    },
   };
 }
 

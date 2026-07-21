@@ -47,6 +47,7 @@ import {
   createPromptCard as createPromptCardRecord,
   drawPromptCard,
   emptyPromptDeck,
+  preparePromptCardEditorJob,
   recordPromptCardDecision,
   type CreatePromptCardInput,
 } from "@/domain/prompt-deck";
@@ -54,6 +55,7 @@ import type {
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
+  PromptCardEditorMailbox,
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
@@ -110,6 +112,7 @@ export class GameService {
     private readonly createId: () => string = () => crypto.randomUUID(),
     private readonly random: () => number = Math.random,
     private readonly leaderboardProfiles?: LeaderboardProfileCoordinator,
+    private readonly promptCardEditor?: PromptCardEditorMailbox,
   ) {}
 
   async assertIdle(): Promise<void> {
@@ -235,7 +238,12 @@ export class GameService {
   async updatePromptDeck(
     update:
       | { kind: "deck"; enabled: boolean }
-      | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+      | { kind: "card"; cardId: string; active?: boolean; weight?: number }
+      | {
+          kind: "suggestion";
+          suggestionId: string;
+          action: "accept" | "discard";
+        },
   ): Promise<GameState> {
     return this.gameRepository.withLock(async () => {
       const current = await this.gameRepository.load();
@@ -245,6 +253,48 @@ export class GameService {
         );
       }
       const promptDeck = current.promptDeck ?? emptyPromptDeck();
+      if (update.kind === "suggestion") {
+        const suggestion = (promptDeck.suggestions ?? []).find(
+          (item) => item.id === update.suggestionId,
+        );
+        if (!suggestion) {
+          throw new PromptDeckError("That prompt-card suggestion is gone.");
+        }
+        if (update.action === "accept" && promptDeck.cards.length >= 50) {
+          throw new PromptDeckError(
+            "Archive or reuse a prompt card before accepting another (maximum 50).",
+          );
+        }
+        const updated: GameState = {
+          ...current,
+          promptDeck: {
+            ...promptDeck,
+            cards:
+              update.action === "accept"
+                ? [
+                    ...promptDeck.cards,
+                    createPromptCardRecord(
+                      {
+                        title: suggestion.title,
+                        prompt: suggestion.prompt,
+                        negativePrompt: suggestion.negativePrompt,
+                        weight: 1,
+                        tags: suggestion.tags,
+                        parents: [suggestion.parentCardId],
+                      },
+                      this.createId(),
+                      this.now(),
+                    ),
+                  ]
+                : promptDeck.cards,
+            suggestions: (promptDeck.suggestions ?? []).filter(
+              (item) => item.id !== suggestion.id,
+            ),
+          },
+        };
+        await this.gameRepository.save(updated);
+        return updated;
+      }
       if (update.kind === "deck") {
         if (
           update.enabled &&
@@ -494,6 +544,7 @@ export class GameService {
       );
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
+      nextGame = await this.syncPromptCardEditor(nextGame);
       if (nextGame.round.status === "idle") {
         await this.challengerRepository.save({
           ...capacity.state,
@@ -635,6 +686,7 @@ export class GameService {
       );
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
+      nextGame = await this.syncPromptCardEditor(nextGame);
       if (nextGame.round.status === "idle") {
         await this.challengerRepository.save({
           ...capacity.state,
@@ -685,6 +737,8 @@ export class GameService {
       game = this.withoutCleanupMarker(game);
       await this.gameRepository.save(game);
     }
+
+    game = await this.syncPromptCardEditor(game);
 
     if (
       game.round.status === "generating" &&
@@ -953,6 +1007,97 @@ export class GameService {
     const cleaned = this.withoutRefillRecord(state, record.jobId);
     await this.challengerRepository.save(cleaned);
     return cleaned;
+  }
+
+  private async syncPromptCardEditor(game: GameState): Promise<GameState> {
+    const mailbox = this.promptCardEditor;
+    if (!mailbox || !game.promptDeck) return game;
+    let next = game;
+    let deck = game.promptDeck;
+    const record = deck.editorJob;
+    if (record) {
+      const [work, result] = await Promise.all([
+        mailbox.readPromptCardEditorWork(record.jobId),
+        mailbox.readPromptCardEditorResult(record.jobId),
+      ]);
+      if (!result) {
+        if (!work) {
+          await this.ensurePromptCardEditorEnqueued(record.expectedJob);
+        } else if (!isDeepStrictEqual(work, record.expectedJob)) {
+          await mailbox.archivePromptCardEditor(record.jobId);
+          deck = {
+            ...deck,
+            cards: deck.cards.map((card) =>
+              card.id === record.cardId
+                ? {
+                    ...card,
+                    editorRejectCheckpoint: record.previousRejectCheckpoint,
+                  }
+                : card,
+            ),
+            editorJob: null,
+          };
+          next = { ...next, promptDeck: deck };
+          await this.gameRepository.save(next);
+        }
+        return next;
+      }
+
+      const validCompleted =
+        work &&
+        isDeepStrictEqual(work, record.expectedJob) &&
+        result.status === "completed" &&
+        result.kind === "prompt-card-editor" &&
+        result.cardId === record.cardId;
+      const suggestions = validCompleted
+        ? [
+            ...(deck.suggestions ?? []),
+            ...result.proposals.map((proposal) => ({
+              id: this.createId(),
+              parentCardId: record.cardId,
+              ...proposal,
+              createdAt: result.completedAt,
+            })),
+          ].slice(-10)
+        : (deck.suggestions ?? []);
+      await mailbox.archivePromptCardEditor(record.jobId);
+      deck = {
+        ...deck,
+        editorJob: null,
+        suggestions,
+      };
+      next = {
+        ...next,
+        promptDeck: deck,
+      };
+      await this.gameRepository.save(next);
+    }
+
+    if (deck.editorJob) return next;
+    const prepared = preparePromptCardEditorJob(
+      deck,
+      this.createId,
+      this.now(),
+    );
+    if (!prepared) return next;
+    next = { ...next, promptDeck: prepared.deck };
+    await this.gameRepository.save(next);
+    await this.ensurePromptCardEditorEnqueued(prepared.job);
+    return next;
+  }
+
+  private async ensurePromptCardEditorEnqueued(
+    job: Parameters<PromptCardEditorMailbox["enqueuePromptCardEditor"]>[0],
+  ): Promise<void> {
+    const mailbox = this.promptCardEditor;
+    if (!mailbox) return;
+    try {
+      await mailbox.enqueuePromptCardEditor(job);
+    } catch (error) {
+      const work = await mailbox.readPromptCardEditorWork(job.id);
+      if (work && isDeepStrictEqual(work, job)) return;
+      throw error;
+    }
   }
 
   private async syncLeaderboardProfile(

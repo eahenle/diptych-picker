@@ -135,6 +135,16 @@ const leaderboardVisualProfileSchema = z
   })
   .strict();
 
+const generationPromptCardSchema = z
+  .object({
+    id: nonBlankStringSchema,
+    title: nonBlankStringSchema.max(80),
+    prompt: nonBlankStringSchema.min(20).max(1_000),
+    negativePrompt: z.string().max(500),
+    tags: z.array(nonBlankStringSchema.max(40)).max(8),
+  })
+  .strict();
+
 const generationJobFields = {
   id: jobIdSchema,
   createdAt: timestampSchema,
@@ -148,16 +158,7 @@ const generationJobFields = {
   leaderboardVisualProfile: leaderboardVisualProfileSchema.optional(),
   preferenceSeed: nonBlankStringSchema,
   preferenceProfile: preferenceProfileSchema.optional(),
-  promptCard: z
-    .object({
-      id: nonBlankStringSchema,
-      title: nonBlankStringSchema.max(80),
-      prompt: nonBlankStringSchema.min(20).max(1_000),
-      negativePrompt: z.string().max(500),
-      tags: z.array(nonBlankStringSchema.max(40)).max(8),
-    })
-    .strict()
-    .optional(),
+  promptCard: generationPromptCardSchema.optional(),
   variationSource: variationSourceSchema.optional(),
 };
 
@@ -274,6 +275,27 @@ const leaderboardProfileJobSchema = z
     }
   });
 
+const promptCardEditorJobSchema = z
+  .object({
+    id: jobIdSchema,
+    kind: z.literal("prompt-card-editor"),
+    createdAt: timestampSchema,
+    card: generationPromptCardSchema,
+    recentRejections: z
+      .array(
+        z
+          .object({
+            resultId: nonBlankStringSchema.max(200),
+            reason: nonBlankStringSchema.max(240),
+            recordedAt: timestampSchema,
+          })
+          .strict(),
+      )
+      .min(4)
+      .max(12),
+  })
+  .strict();
+
 const discriminatedGenerationJobSchema = z.discriminatedUnion("kind", [
   challengerGenerationJobSchema,
   initialGenerationJobSchema,
@@ -300,6 +322,7 @@ const mailboxJobSchema = z.preprocess(
     refillGenerationJobSchema,
     sourceProfileJobSchema,
     leaderboardProfileJobSchema,
+    promptCardEditorJobSchema,
   ]),
 );
 
@@ -387,6 +410,38 @@ const completedLeaderboardProfileResultSchema = z
   })
   .strict();
 
+const promptCardEditorProposalSchema = z
+  .object({
+    title: nonBlankStringSchema.max(80),
+    prompt: nonBlankStringSchema.min(20).max(1_000),
+    negativePrompt: z.string().max(500),
+    tags: z.array(nonBlankStringSchema.max(40)).max(8),
+    reasoningSummary: nonBlankStringSchema.max(1_000),
+  })
+  .strict();
+const promptCardEditorProposalsSchema = z
+  .array(promptCardEditorProposalSchema)
+  .length(2)
+  .superRefine((proposals, context) => {
+    if (proposals[0]?.prompt === proposals[1]?.prompt) {
+      context.addIssue({
+        code: "custom",
+        message: "Prompt-card editor proposals must be distinct",
+      });
+    }
+  });
+
+const completedPromptCardEditorResultSchema = z
+  .object({
+    jobId: jobIdSchema,
+    kind: z.literal("prompt-card-editor"),
+    status: z.literal("completed"),
+    completedAt: timestampSchema,
+    cardId: nonBlankStringSchema,
+    proposals: promptCardEditorProposalsSchema,
+  })
+  .strict();
+
 const failedGenerationResultSchema = z
   .object({
     jobId: jobIdSchema,
@@ -415,10 +470,16 @@ const leaderboardProfileResultSchema = z.union([
   failedGenerationResultSchema,
 ]);
 
+const promptCardEditorResultSchema = z.union([
+  completedPromptCardEditorResultSchema,
+  failedGenerationResultSchema,
+]);
+
 const mailboxResultSchema = z.union([
   completedGenerationResultSchema,
   completedSourceProfileResultSchema,
   completedLeaderboardProfileResultSchema,
+  completedPromptCardEditorResultSchema,
   failedGenerationResultSchema,
 ]);
 
@@ -431,9 +492,20 @@ export type LeaderboardProfileJob = z.infer<typeof leaderboardProfileJobSchema>;
 export type LeaderboardProfileResult = z.infer<
   typeof leaderboardProfileResultSchema
 >;
-export type AgentJob = GenerationJob | SourceProfileJob | LeaderboardProfileJob;
+export type PromptCardEditorJob = z.infer<typeof promptCardEditorJobSchema>;
+export type PromptCardEditorResult = z.infer<
+  typeof promptCardEditorResultSchema
+>;
+export type AgentJob =
+  | GenerationJob
+  | SourceProfileJob
+  | LeaderboardProfileJob
+  | PromptCardEditorJob;
 export type AgentResult =
-  GenerationResult | SourceProfileResult | LeaderboardProfileResult;
+  | GenerationResult
+  | SourceProfileResult
+  | LeaderboardProfileResult
+  | PromptCardEditorResult;
 
 const reservedJobRecordSchema = z
   .object({
@@ -491,10 +563,23 @@ export interface LeaderboardProfileMailbox {
   archiveLeaderboardProfile(jobId: string): Promise<void>;
 }
 
+export interface PromptCardEditorMailbox {
+  enqueuePromptCardEditor(job: PromptCardEditorJob): Promise<void>;
+  readPromptCardEditorWork(jobId: string): Promise<PromptCardEditorJob | null>;
+  readPromptCardEditorResult(
+    jobId: string,
+  ): Promise<PromptCardEditorResult | null>;
+  archivePromptCardEditor(jobId: string): Promise<void>;
+}
+
 export class DuplicateGenerationJobError extends Error {}
 
 export class FileGenerationMailbox
-  implements GenerationMailbox, SourceProfileMailbox, LeaderboardProfileMailbox
+  implements
+    GenerationMailbox,
+    SourceProfileMailbox,
+    LeaderboardProfileMailbox,
+    PromptCardEditorMailbox
 {
   private static readonly inFlightEnqueues = new Map<string, string>();
 
@@ -518,6 +603,11 @@ export class FileGenerationMailbox
 
   async enqueueLeaderboardProfile(job: LeaderboardProfileJob): Promise<void> {
     const validated = leaderboardProfileJobSchema.parse(job);
+    await this.enqueueValidated(validated);
+  }
+
+  async enqueuePromptCardEditor(job: PromptCardEditorJob): Promise<void> {
+    const validated = promptCardEditorJobSchema.parse(job);
     await this.enqueueValidated(validated);
   }
 
@@ -694,6 +784,36 @@ export class FileGenerationMailbox
     return result ? leaderboardProfileResultSchema.parse(result) : null;
   }
 
+  async readPromptCardEditorWork(
+    jobId: string,
+  ): Promise<PromptCardEditorJob | null> {
+    const validatedJobId = jobIdSchema.parse(jobId);
+    const pending = await this.readJobAt(
+      join(this.rootDirectory, "pending", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (pending) return promptCardEditorJobSchema.parse(pending);
+    const active = await this.readJobAt(
+      join(this.rootDirectory, "active", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (active) return promptCardEditorJobSchema.parse(active);
+    const record = await this.readValidated(
+      join(this.rootDirectory, "ids", `${validatedJobId}.json`),
+      generationJobRecordSchema,
+    );
+    return record?.state === "reserved"
+      ? promptCardEditorJobSchema.parse(record.job)
+      : null;
+  }
+
+  async readPromptCardEditorResult(
+    jobId: string,
+  ): Promise<PromptCardEditorResult | null> {
+    const result = await this.readMailboxResult(jobId);
+    return result ? promptCardEditorResultSchema.parse(result) : null;
+  }
+
   private async readMailboxResult(jobId: string): Promise<AgentResult | null> {
     const validatedJobId = jobIdSchema.parse(jobId);
     const [completed, failed] = await Promise.all([
@@ -762,6 +882,10 @@ export class FileGenerationMailbox
   }
 
   archiveLeaderboardProfile(jobId: string): Promise<void> {
+    return this.archive(jobId);
+  }
+
+  archivePromptCardEditor(jobId: string): Promise<void> {
     return this.archive(jobId);
   }
 

@@ -4,6 +4,7 @@ import {
   createPromptCard,
   drawPromptCard,
   emptyPromptDeck,
+  preparePromptCardEditorJob,
   recordPromptCardDecision,
 } from "./prompt-deck";
 
@@ -34,7 +35,50 @@ describe("prompt deck", () => {
       enabled: false,
       cards: [],
       verdicts: [],
+      editorJob: null,
+      suggestions: [],
     });
+  });
+
+  it("prepares one editor job after four recent rejections", () => {
+    const rejectedDeck: PromptDeck = {
+      ...deck,
+      verdicts: Array.from({ length: 4 }, (_, index) => ({
+        cardId: "card-2",
+        resultId: `result-${index + 1}`,
+        verdict: "reject" as const,
+        reason: "Selected comparison winner",
+        recordedAt: `2026-07-21T10:00:0${index}.000Z`,
+      })),
+      cards: deck.cards.map((item) =>
+        item.id === "card-2"
+          ? { ...item, stats: { ...item.stats, rejects: 4 } }
+          : item,
+      ),
+    };
+
+    const prepared = preparePromptCardEditorJob(
+      rejectedDeck,
+      () => "editor-1",
+      "2026-07-21T11:00:00.000Z",
+    );
+
+    expect(prepared?.job).toMatchObject({
+      id: "editor-1",
+      kind: "prompt-card-editor",
+      card: { id: "card-2", title: "Ecology" },
+    });
+    expect(prepared?.job.recentRejections).toHaveLength(4);
+    expect(
+      prepared?.deck.cards.find((item) => item.id === "card-2"),
+    ).toMatchObject({ editorRejectCheckpoint: 4 });
+    expect(
+      preparePromptCardEditorJob(
+        prepared!.deck,
+        () => "editor-2",
+        "2026-07-21T12:00:00.000Z",
+      ),
+    ).toBeNull();
   });
 
   it("raises winner weight and records attributable verdicts", () => {
