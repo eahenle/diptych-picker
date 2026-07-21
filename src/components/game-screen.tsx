@@ -7,6 +7,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -1017,15 +1018,7 @@ export function GameScreen() {
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat)
         return;
       const target = event.target as HTMLElement | null;
-      const focusedControl = target?.closest<HTMLElement>(
-        "textarea, input, select, button",
-      );
-      if (
-        focusedControl &&
-        !focusedControl.matches("[data-allows-gameplay-shortcuts='true']")
-      ) {
-        return;
-      }
+      if (target?.closest("textarea, input, select")) return;
       const key = event.key.toLowerCase();
       if (key === "a" || key === "1") void select("left");
       if (key === "b" || key === "2") void select("right");
@@ -2471,6 +2464,11 @@ export function GameScreen() {
                   max="2"
                   step="1"
                   value={adaptationFreedomValue}
+                  style={
+                    {
+                      "--adaptation-fill": `${adaptationFreedomValue * 50}%`,
+                    } as CSSProperties
+                  }
                   disabled={preferencesBusy}
                   aria-label="Model rewrite freedom"
                   aria-valuetext={
