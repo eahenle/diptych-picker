@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 const launcher = join(process.cwd(), "dev-and-play");
 const runOnly = join(process.cwd(), "run-only");
+const testE2e = join(process.cwd(), "test-e2e");
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
@@ -121,5 +122,38 @@ describe("run-only launcher", () => {
     expect(gitignore).toContain(".next-run/");
     expect(eslintConfig).toContain('".next-run/**"');
     expect(tsconfig).toContain('".next-run/types/**/*.ts"');
+  });
+});
+
+describe("test-e2e launcher", () => {
+  it("restores Next-generated config after Playwright exits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-test-e2e-"));
+    temporaryRoots.push(root);
+    const copiedLauncher = join(root, "test-e2e");
+    const playwright = join(root, "node_modules", ".bin", "playwright");
+    await mkdir(join(root, "node_modules", ".bin"), { recursive: true });
+    await copyFile(testE2e, copiedLauncher);
+    await chmod(copiedLauncher, 0o755);
+    await writeFile(join(root, "next-env.d.ts"), "original\n", "utf8");
+    await writeFile(join(root, "tsconfig.json"), "original config\n", "utf8");
+    await writeFile(
+      playwright,
+      [
+        "#!/bin/sh",
+        'printf "generated\\n" > next-env.d.ts',
+        'printf "generated config\\n" > tsconfig.json',
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(playwright, 0o755);
+
+    await execFileAsync(copiedLauncher);
+
+    expect(await readFile(join(root, "next-env.d.ts"), "utf8")).toBe(
+      "original\n",
+    );
+    expect(await readFile(join(root, "tsconfig.json"), "utf8")).toBe(
+      "original config\n",
+    );
   });
 });

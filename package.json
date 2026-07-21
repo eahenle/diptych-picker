@@ -12,7 +12,7 @@
     "test": "vitest run && npm run test:agent-protocol",
     "test:agent-protocol": "node --test .agents/skills/run-diptych-picker/scripts/next-job.test.mjs",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "./test-e2e",
     "check": "npm run format:check && npm run lint && npm test",
     "hooks:install": "git config core.hooksPath .githooks",
     "codex:play": "./dev-and-play",

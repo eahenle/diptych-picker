@@ -1375,12 +1375,13 @@
     transition: none;
   }
   .spinner {
-    animation-duration: 1800ms;
+    animation: none;
   }
   .preferenceSaveSpinner {
-    animation-duration: 1800ms;
+    animation: none;
   }
   .preferenceSaveProgress::after {
-    animation-duration: 3200ms;
+    animation: none;
+    content: none;
   }
 }

@@ -1063,6 +1063,31 @@ export function GameScreen() {
     return () => window.removeEventListener("keydown", navigateInspector);
   }, [imageInspector]);
 
+  useEffect(() => {
+    if (imageInspector) return;
+    const closeModalOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (historyOpen) setHistoryOpen(false);
+      else if (leaderboardOpen) setLeaderboardOpen(false);
+      else if (preferencesOpen && !preferencesSaving && !sourceProfileAnalyzing)
+        setPreferencesOpen(false);
+      else if (loadGameOpen && !gameTransferAction) setLoadGameOpen(false);
+      else if (newGameOpen && !gameTransferAction) setNewGameOpen(false);
+    };
+    window.addEventListener("keydown", closeModalOnEscape);
+    return () => window.removeEventListener("keydown", closeModalOnEscape);
+  }, [
+    gameTransferAction,
+    historyOpen,
+    imageInspector,
+    leaderboardOpen,
+    loadGameOpen,
+    newGameOpen,
+    preferencesOpen,
+    preferencesSaving,
+    sourceProfileAnalyzing,
+  ]);
+
   const openComparisonHistory = async () => {
     setHistoryOpen(true);
     setHistoryLoading(true);
