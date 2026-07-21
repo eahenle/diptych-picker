@@ -1,10 +1,17 @@
 "use client";
 
-import { useRef, type CSSProperties, type ChangeEvent } from "react";
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 import {
   preferenceAdaptationFreedom,
   preferenceAdaptationProgress,
   type PreferenceProfile,
+  type PreferencePreset,
   type PreferenceProfileSnapshot,
   type VariationSource,
 } from "@/domain/game";
@@ -77,6 +84,9 @@ interface PreferenceProfileModalProps {
   sourceSummary: string | null;
   variationSource: VariationSource | null;
   revisions: readonly PreferenceProfileSnapshot[];
+  presets: readonly PreferencePreset[];
+  presetSaving: boolean;
+  presetError: string | null;
   selectionBoundWait: boolean;
   onClose: () => void;
   onSave: () => void;
@@ -85,6 +95,9 @@ interface PreferenceProfileModalProps {
     revision: PreferenceProfileSnapshot,
     frozen: boolean,
   ) => void;
+  onSavePreset: (name: string) => Promise<boolean>;
+  onApplyPreset: (preset: PreferencePreset) => void;
+  onDeletePreset: (presetId: string) => Promise<void>;
   onFieldChange: <Key extends PreferenceField>(
     key: Key,
     value: PreferenceProfile[Key],
@@ -102,16 +115,23 @@ export function PreferenceProfileModal({
   sourceSummary,
   variationSource,
   revisions,
+  presets,
+  presetSaving,
+  presetError,
   selectionBoundWait,
   onClose,
   onSave,
   onAnalyzeSource,
   onRestoreRevision,
+  onSavePreset,
+  onApplyPreset,
+  onDeletePreset,
   onFieldChange,
   onFreedomChange,
 }: PreferenceProfileModalProps) {
   const sourceInputRef = useRef<HTMLInputElement | null>(null);
-  const busy = saving || sourceAnalyzing;
+  const [presetName, setPresetName] = useState("");
+  const busy = saving || sourceAnalyzing || presetSaving;
   const adaptationFreedom = preferenceAdaptationFreedom(profile);
   const adaptationFreedomValue = {
     frozen: 0,
@@ -132,6 +152,11 @@ export function PreferenceProfileModal({
     } finally {
       input.value = "";
     }
+  };
+
+  const savePreset = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (await onSavePreset(presetName)) setPresetName("");
   };
 
   return (
@@ -210,6 +235,75 @@ export function PreferenceProfileModal({
             candidates.
           </p>
         ) : null}
+        <details className={styles.presets}>
+          <summary>
+            Saved presets <strong>{presets.length}</strong>
+          </summary>
+          <form onSubmit={(event) => void savePreset(event)}>
+            <label htmlFor="preference-preset-name">Preset name</label>
+            <div>
+              <input
+                id="preference-preset-name"
+                value={presetName}
+                maxLength={50}
+                disabled={busy}
+                placeholder="e.g. Ultraviolet editorial"
+                onChange={(event) => setPresetName(event.target.value)}
+              />
+              <button
+                type="submit"
+                disabled={busy || presetName.trim().length === 0}
+              >
+                {presetSaving ? "Saving…" : "Save current draft"}
+              </button>
+            </div>
+            <small>A matching name replaces that preset.</small>
+          </form>
+          {presetError ? (
+            <p className={styles.presetError} role="alert">
+              {presetError}
+            </p>
+          ) : null}
+          {presets.length > 0 ? (
+            <ul>
+              {[...presets]
+                .sort((left, right) =>
+                  right.updatedAt.localeCompare(left.updatedAt),
+                )
+                .map((preset) => (
+                  <li key={preset.id}>
+                    <span>
+                      <strong>{preset.name}</strong>
+                      <time dateTime={preset.updatedAt}>
+                        {formatRevisionTime(preset.updatedAt)}
+                      </time>
+                    </span>
+                    <div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onApplyPreset(preset)}
+                      >
+                        Apply to draft
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void onDeletePreset(preset.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p className={styles.presetEmpty}>
+              Save the current draft for quick reuse without applying it to the
+              game.
+            </p>
+          )}
+        </details>
         {revisions.length > 0 ? (
           <details className={styles.revisionHistory}>
             <summary>

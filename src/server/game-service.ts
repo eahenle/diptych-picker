@@ -39,6 +39,7 @@ import {
   type Candidate,
   type GameState,
   type PreferenceProfile,
+  type PreferencePreset,
   type PreferenceProfileSnapshot,
   type Side,
 } from "@/domain/game";
@@ -55,6 +56,7 @@ import type { GameRepository } from "./repository";
 
 export class SelectionConflictError extends Error {}
 export class MissingGameError extends Error {}
+export class PreferencePresetLimitError extends Error {}
 
 export interface GameServiceConfig {
   bufferTarget: number;
@@ -120,6 +122,68 @@ export class GameService {
       }
       const updated = this.withoutGenerationNotice(current);
       if (updated !== current) await this.gameRepository.save(updated);
+      return updated;
+    });
+  }
+
+  async savePreferencePreset(
+    name: string,
+    profile: PreferenceProfile,
+  ): Promise<GameState> {
+    return this.gameRepository.withLock(async () => {
+      const current = await this.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError("Start a game before saving a preset");
+      }
+      const normalizedName = name.trim();
+      const presets = current.preferencePresets ?? [];
+      const existing = presets.find(
+        (preset) => preset.name.toLowerCase() === normalizedName.toLowerCase(),
+      );
+      if (!existing && presets.length >= 20) {
+        throw new PreferencePresetLimitError(
+          "Delete a preset before saving another (maximum 20).",
+        );
+      }
+      const updatedAt = this.now();
+      const reusableProfile: PreferenceProfile = {
+        ...profile,
+        adaptationLastDecision: 0,
+        adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
+      };
+      const preset: PreferencePreset = {
+        id: existing?.id ?? this.createId(),
+        name: normalizedName,
+        createdAt: existing?.createdAt ?? updatedAt,
+        updatedAt,
+        profile: reusableProfile,
+      };
+      const updated: GameState = {
+        ...current,
+        preferencePresets: existing
+          ? presets.map((item) => (item.id === existing.id ? preset : item))
+          : [...presets, preset],
+      };
+      await this.gameRepository.save(updated);
+      return updated;
+    });
+  }
+
+  async deletePreferencePreset(presetId: string): Promise<GameState> {
+    return this.gameRepository.withLock(async () => {
+      const current = await this.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError("Start a game before deleting a preset");
+      }
+      const preferencePresets = (current.preferencePresets ?? []).filter(
+        (preset) => preset.id !== presetId,
+      );
+      if (preferencePresets.length === current.preferencePresets?.length) {
+        return current;
+      }
+      const updated: GameState = { ...current, preferencePresets };
+      await this.gameRepository.save(updated);
       return updated;
     });
   }

@@ -305,6 +305,65 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("saves, replaces, and deletes named preference presets without changing the active profile", async () => {
+    const game = gameState();
+    const context = serviceFor({ game, createId: ids("preset-1") });
+    const profile = {
+      ...preferenceProfileFromSeed(game.preferenceSeed),
+      inspiration: "copper edge lighting",
+      adaptationLastDecision: 9,
+      adaptationSourceWinnerIds: ["winner-1"],
+      adaptationSourceRejectedIds: ["rejected-1"],
+    };
+
+    const saved = await context.service.savePreferencePreset(
+      " Copper study ",
+      profile,
+    );
+    expect(saved.preferencePresets).toEqual([
+      {
+        id: "preset-1",
+        name: "Copper study",
+        createdAt: NOW,
+        updatedAt: NOW,
+        profile: {
+          ...profile,
+          adaptationLastDecision: 0,
+          adaptationSourceWinnerIds: [],
+          adaptationSourceRejectedIds: [],
+        },
+      },
+    ]);
+    expect(saved.preferenceProfile).toEqual(
+      preferenceProfileFromSeed(game.preferenceSeed),
+    );
+    expect(context.queue.enqueue).not.toHaveBeenCalled();
+
+    const replacement = {
+      ...profile,
+      inspiration: "ultraviolet rim lighting",
+    };
+    const replaced = await context.service.savePreferencePreset(
+      "copper STUDY",
+      replacement,
+    );
+    expect(replaced.preferencePresets).toEqual([
+      expect.objectContaining({
+        id: "preset-1",
+        name: "copper STUDY",
+        profile: {
+          ...replacement,
+          adaptationLastDecision: 0,
+          adaptationSourceWinnerIds: [],
+          adaptationSourceRejectedIds: [],
+        },
+      }),
+    ]);
+
+    const deleted = await context.service.deletePreferencePreset("preset-1");
+    expect(deleted.preferencePresets).toEqual([]);
+  });
+
   it("caches leaderboard image analysis and includes it in adaptive refills", async () => {
     const base = gameState();
     const game = gameState({

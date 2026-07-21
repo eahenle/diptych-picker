@@ -42,11 +42,17 @@ function renderPreferences(
     sourceSummary: null,
     variationSource: null,
     revisions: [],
+    presets: [],
+    presetSaving: false,
+    presetError: null,
     selectionBoundWait: false,
     onClose: vi.fn(),
     onSave: vi.fn(),
     onAnalyzeSource: vi.fn(async () => undefined),
     onRestoreRevision: vi.fn(),
+    onSavePreset: vi.fn(async () => true),
+    onApplyPreset: vi.fn(),
+    onDeletePreset: vi.fn(async () => undefined),
     onFieldChange: vi.fn(),
     onFreedomChange: vi.fn(),
     ...overrides,
@@ -100,6 +106,36 @@ describe("PreferenceProfileModal", () => {
       props.revisions[1],
       true,
     );
+  });
+
+  it("saves, applies, and deletes named presets without applying them automatically", async () => {
+    const props = renderPreferences({
+      presets: [
+        {
+          id: "preset-1",
+          name: "Copper nocturne",
+          createdAt: "2026-07-20T10:00:00.000Z",
+          updatedAt: "2026-07-21T10:00:00.000Z",
+          profile,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByText("Saved presets"));
+    fireEvent.change(screen.getByLabelText("Preset name"), {
+      target: { value: "Editorial violet" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save current draft" }));
+    await waitFor(() =>
+      expect(props.onSavePreset).toHaveBeenCalledWith("Editorial violet"),
+    );
+    expect(screen.getByLabelText("Preset name")).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply to draft" }));
+    expect(props.onApplyPreset).toHaveBeenCalledWith(props.presets[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(props.onDeletePreset).toHaveBeenCalledWith("preset-1");
+    expect(props.onSave).not.toHaveBeenCalled();
   });
 
   it("delegates profile fields, freedom, source analysis, and actions", async () => {

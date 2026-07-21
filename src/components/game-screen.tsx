@@ -21,6 +21,7 @@ import {
   type GameStartState,
   type GameState,
   type PreferenceProfile,
+  type PreferencePreset,
   type PreferenceProfileSnapshot,
   type PreferenceRevision,
   type Side,
@@ -282,6 +283,8 @@ export function GameScreen() {
   const [initializing, setInitializing] = useState(true);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [presetSaving, setPresetSaving] = useState(false);
+  const [presetError, setPresetError] = useState<string | null>(null);
   const [preferenceSaveQueued, setPreferenceSaveQueued] = useState(false);
   const [sourceProfileAnalyzing, setSourceProfileAnalyzing] = useState(false);
   const [sourceProfileError, setSourceProfileError] = useState<string | null>(
@@ -1360,6 +1363,64 @@ export function GameScreen() {
     );
   };
 
+  const savePreferencePreset = async (name: string): Promise<boolean> => {
+    setPresetSaving(true);
+    setPresetError(null);
+    try {
+      const state = await readJson<GameState>(
+        await fetch("/api/game/preferences/presets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, profile: preferenceDraft }),
+        }),
+      );
+      commitGame(state);
+      return true;
+    } catch (error) {
+      setPresetError(
+        error instanceof Error ? error.message : "Could not save preset",
+      );
+      return false;
+    } finally {
+      setPresetSaving(false);
+    }
+  };
+
+  const applyPreferencePreset = (preset: PreferencePreset) => {
+    setPreferenceDraft({
+      ...preset.profile,
+      adaptationLastDecision: game?.history.length ?? 0,
+      adaptationSourceWinnerIds: [],
+      adaptationSourceRejectedIds: [],
+    });
+    setPreferenceVariationSource(null);
+    setSourceProfileError(null);
+    setSourceProfileSummary(
+      `Preset “${preset.name}” applied to the draft. Review it, then save to apply.`,
+    );
+  };
+
+  const deletePreferencePreset = async (presetId: string) => {
+    setPresetSaving(true);
+    setPresetError(null);
+    try {
+      const state = await readJson<GameState>(
+        await fetch("/api/game/preferences/presets", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ presetId }),
+        }),
+      );
+      commitGame(state);
+    } catch (error) {
+      setPresetError(
+        error instanceof Error ? error.message : "Could not delete preset",
+      );
+    } finally {
+      setPresetSaving(false);
+    }
+  };
+
   const analyzeSourceImage = async (
     image: File,
     variationSource: VariationSource | null = null,
@@ -1430,7 +1491,7 @@ export function GameScreen() {
   };
 
   const closePreferences = () => {
-    if (preferencesSaving || sourceProfileAnalyzing) return;
+    if (preferencesSaving || sourceProfileAnalyzing || presetSaving) return;
     setPreferencesOpen(false);
   };
 
@@ -1445,6 +1506,7 @@ export function GameScreen() {
     setPreferencesSaving(false);
     setSourceProfileError(null);
     setSourceProfileSummary(null);
+    setPresetError(null);
     setPreferenceDraft(currentProfile);
     setPreferenceDraftBaseProfile(currentProfile);
     setPreferenceVariationSource(game.variationSource ?? null);
@@ -1969,11 +2031,17 @@ export function GameScreen() {
           sourceSummary={sourceProfileSummary}
           variationSource={preferenceVariationSource}
           revisions={game.preferenceRevisions ?? []}
+          presets={game.preferencePresets ?? []}
+          presetSaving={presetSaving}
+          presetError={presetError}
           selectionBoundWait={selectionBoundWait}
           onClose={closePreferences}
           onSave={() => void savePreferences()}
           onAnalyzeSource={analyzeSourceImage}
           onRestoreRevision={restorePreferenceRevision}
+          onSavePreset={savePreferencePreset}
+          onApplyPreset={applyPreferencePreset}
+          onDeletePreset={deletePreferencePreset}
           onFieldChange={setPreferenceField}
           onFreedomChange={setAdaptationFreedom}
         />
