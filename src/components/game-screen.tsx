@@ -671,9 +671,14 @@ export function GameScreen() {
     };
   }, [healthPollingEnabled, healthRound]);
 
-  const promptCardEditorJobId = game?.promptDeck?.editorJob?.jobId;
+  const promptCardBackgroundJobIds = [
+    game?.promptDeck?.editorJob?.jobId,
+    game?.promptDeck?.blendJob?.jobId,
+  ].filter((jobId): jobId is string => Boolean(jobId));
+  const promptCardBackgroundJobKey = promptCardBackgroundJobIds.join(":");
   useEffect(() => {
-    if (!promptCardEditorJobId) return;
+    if (!promptCardBackgroundJobKey) return;
+    const watchedJobIds = new Set(promptCardBackgroundJobKey.split(":"));
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -684,9 +689,11 @@ export function GameScreen() {
         );
         if (!active || response.status !== "ready") return;
         commitGame(response.game);
-        if (
-          response.game.promptDeck?.editorJob?.jobId === promptCardEditorJobId
-        ) {
+        const activeJobIds = [
+          response.game.promptDeck?.editorJob?.jobId,
+          response.game.promptDeck?.blendJob?.jobId,
+        ];
+        if (activeJobIds.some((jobId) => jobId && watchedJobIds.has(jobId))) {
           timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
         }
       } catch {
@@ -699,7 +706,7 @@ export function GameScreen() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [commitGame, promptCardEditorJobId]);
+  }, [commitGame, promptCardBackgroundJobKey]);
 
   useEffect(() => {
     if (
@@ -1523,6 +1530,31 @@ export function GameScreen() {
     }
   };
 
+  const blendPromptCards = async (
+    cardIds: [string, string],
+  ): Promise<boolean> => {
+    setPromptDeckSaving(true);
+    setPromptDeckError(null);
+    try {
+      const state = await readJson<GameState>(
+        await fetch("/api/game/preferences/deck/blend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cardIds, ratio: 0.5 }),
+        }),
+      );
+      commitGame(state);
+      return true;
+    } catch (error) {
+      setPromptDeckError(
+        error instanceof Error ? error.message : "Could not blend prompt cards",
+      );
+      return false;
+    } finally {
+      setPromptDeckSaving(false);
+    }
+  };
+
   const analyzeSourceImage = async (
     image: File,
     variationSource: VariationSource | null = null,
@@ -2156,6 +2188,7 @@ export function GameScreen() {
           onDeletePreset={deletePreferencePreset}
           onCreatePromptCard={createPromptCard}
           onUpdatePromptDeck={updatePromptDeck}
+          onBlendPromptCards={blendPromptCards}
           onFieldChange={setPreferenceField}
           onFreedomChange={setAdaptationFreedom}
         />

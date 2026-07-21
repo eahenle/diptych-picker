@@ -36,6 +36,7 @@ describe("prompt deck", () => {
       cards: [],
       verdicts: [],
       editorJob: null,
+      blendJob: null,
       suggestions: [],
     });
   });

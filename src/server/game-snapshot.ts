@@ -231,6 +231,16 @@ export class GameSnapshotService {
           };
         }
 
+        if (stableGame.promptDeck?.blendJob) {
+          stableGame = {
+            ...stableGame,
+            promptDeck: {
+              ...stableGame.promptDeck,
+              blendJob: null,
+            },
+          };
+        }
+
         return parseGameSnapshot({
           format: GAME_SNAPSHOT_FORMAT,
           version: GAME_SNAPSHOT_VERSION,
@@ -284,6 +294,13 @@ export class GameSnapshotService {
             ? [
                 this.options.mailbox.archive(
                   currentGame.promptDeck.editorJob.jobId,
+                ),
+              ]
+            : []),
+          ...(currentGame?.promptDeck?.blendJob
+            ? [
+                this.options.mailbox.archive(
+                  currentGame.promptDeck.blendJob.jobId,
                 ),
               ]
             : []),

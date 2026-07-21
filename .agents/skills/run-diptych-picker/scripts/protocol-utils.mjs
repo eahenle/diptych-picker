@@ -106,6 +106,28 @@ export function validateJobKind(job) {
     }
     return;
   }
+  if (kind === "prompt-card-blender") {
+    if (
+      !Array.isArray(job.cards) ||
+      job.cards.length !== 2 ||
+      new Set(job.cards.map((card) => card?.id)).size !== 2 ||
+      job.cards.some(
+        (card) =>
+          !card ||
+          typeof card.id !== "string" ||
+          typeof card.title !== "string" ||
+          typeof card.prompt !== "string" ||
+          card.prompt.trim().length < 20 ||
+          !Array.isArray(card.tags),
+      ) ||
+      typeof job.ratio !== "number" ||
+      job.ratio < 0.1 ||
+      job.ratio > 0.9
+    ) {
+      throw new Error(`Prompt-card blender job ${job.id} is invalid`);
+    }
+    return;
+  }
   if (kind === "refill") {
     if (!JOB_ID.test(job.sessionId ?? "")) {
       throw new Error(`Refill job ${job.id} requires a valid sessionId`);

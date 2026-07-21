@@ -101,9 +101,25 @@ export interface PromptCardEditorJobRecord {
   expectedJob: PromptCardEditorRequest;
 }
 
+export interface PromptCardBlendRequest {
+  id: string;
+  kind: "prompt-card-blender";
+  createdAt: string;
+  cards: [GenerationPromptCard, GenerationPromptCard];
+  ratio: number;
+}
+
+export interface PromptCardBlendJobRecord {
+  jobId: string;
+  cardIds: [string, string];
+  enqueuedAt: string;
+  expectedJob: PromptCardBlendRequest;
+}
+
 export interface PromptCardSuggestion {
   id: string;
   parentCardId: string;
+  parentCardIds?: string[];
   title: string;
   prompt: string;
   negativePrompt: string;
@@ -117,6 +133,7 @@ export interface PromptDeck {
   cards: PromptCard[];
   verdicts: PromptCardVerdict[];
   editorJob?: PromptCardEditorJobRecord | null;
+  blendJob?: PromptCardBlendJobRecord | null;
   suggestions?: PromptCardSuggestion[];
 }
 

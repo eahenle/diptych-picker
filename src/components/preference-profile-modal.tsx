@@ -106,6 +106,7 @@ interface PreferenceProfileModalProps {
   onDeletePreset: (presetId: string) => Promise<void>;
   onCreatePromptCard: ComponentProps<typeof PromptDeckEditor>["onCreate"];
   onUpdatePromptDeck: ComponentProps<typeof PromptDeckEditor>["onUpdate"];
+  onBlendPromptCards: ComponentProps<typeof PromptDeckEditor>["onBlend"];
   onFieldChange: <Key extends PreferenceField>(
     key: Key,
     value: PreferenceProfile[Key],
@@ -139,6 +140,7 @@ export function PreferenceProfileModal({
   onDeletePreset,
   onCreatePromptCard,
   onUpdatePromptDeck,
+  onBlendPromptCards,
   onFieldChange,
   onFreedomChange,
 }: PreferenceProfileModalProps) {
@@ -254,6 +256,7 @@ export function PreferenceProfileModal({
           error={promptDeckError}
           onCreate={onCreatePromptCard}
           onUpdate={onUpdatePromptDeck}
+          onBlend={onBlendPromptCards}
         />
         <details className={styles.presets}>
           <summary>

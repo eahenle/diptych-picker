@@ -3,6 +3,7 @@ import type {
   GameState,
   GenerationPromptCard,
   PromptCard,
+  PromptCardBlendRequest,
   PromptCardEditorRequest,
   PromptCardVerdict,
   PromptDeck,
@@ -26,6 +27,7 @@ export function emptyPromptDeck(): PromptDeck {
     cards: [],
     verdicts: [],
     editorJob: null,
+    blendJob: null,
     suggestions: [],
   };
 }
@@ -133,12 +135,24 @@ export function drawPromptCard(
       cumulative += card.weight;
       return threshold < cumulative;
     }) ?? active.at(-1)!;
+  return generationPromptCard(selected);
+}
+
+export function createPromptCardBlendRequest(
+  cards: [PromptCard, PromptCard],
+  ratio: number,
+  id: string,
+  createdAt: string,
+): PromptCardBlendRequest {
   return {
-    id: selected.id,
-    title: selected.title,
-    prompt: selected.prompt,
-    negativePrompt: selected.negativePrompt,
-    tags: selected.tags,
+    id,
+    kind: "prompt-card-blender",
+    createdAt,
+    cards: cards.map(generationPromptCard) as [
+      GenerationPromptCard,
+      GenerationPromptCard,
+    ],
+    ratio,
   };
 }
 
@@ -216,4 +230,14 @@ function countCardIds(
       counts.set(promptCardId, (counts.get(promptCardId) ?? 0) + 1);
   }
   return counts;
+}
+
+function generationPromptCard(card: PromptCard): GenerationPromptCard {
+  return {
+    id: card.id,
+    title: card.title,
+    prompt: card.prompt,
+    negativePrompt: card.negativePrompt,
+    tags: card.tags,
+  };
 }

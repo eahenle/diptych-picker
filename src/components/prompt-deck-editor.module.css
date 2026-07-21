@@ -110,6 +110,21 @@
   justify-content: flex-end;
 }
 
+.blendControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px dashed rgba(201, 184, 236, 0.28);
+}
+
+.blendControls span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .error {
   margin: 0;
   color: #f0a49a;
@@ -176,6 +191,7 @@
 
 .cardActions button,
 .suggestionActions button,
+.blendControls button,
 .form button {
   min-height: 32px;
   padding: 0 10px;
@@ -194,6 +210,8 @@
 .cardActions button:focus-visible,
 .suggestionActions button:hover,
 .suggestionActions button:focus-visible,
+.blendControls button:hover,
+.blendControls button:focus-visible,
 .form button:hover,
 .form button:focus-visible {
   color: #fff;
@@ -203,9 +221,16 @@
 
 .cardActions button:disabled,
 .suggestionActions button:disabled,
+.blendControls button:disabled,
 .form button:disabled {
   cursor: wait;
   opacity: 0.5;
+}
+
+.cardActions button[aria-pressed="true"] {
+  color: #fff;
+  border-color: var(--copper-bright);
+  background: rgba(186, 105, 61, 0.14);
 }
 
 .form {
@@ -236,5 +261,10 @@
 @media (max-width: 600px) {
   .formPair {
     grid-template-columns: 1fr;
+  }
+
+  .blendControls {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

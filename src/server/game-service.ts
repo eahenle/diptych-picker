@@ -44,6 +44,7 @@ import {
   type Side,
 } from "@/domain/game";
 import {
+  createPromptCardBlendRequest,
   createPromptCard as createPromptCardRecord,
   drawPromptCard,
   emptyPromptDeck,
@@ -55,6 +56,7 @@ import type {
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
+  PromptCardBlenderMailbox,
   PromptCardEditorMailbox,
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
@@ -113,6 +115,7 @@ export class GameService {
     private readonly random: () => number = Math.random,
     private readonly leaderboardProfiles?: LeaderboardProfileCoordinator,
     private readonly promptCardEditor?: PromptCardEditorMailbox,
+    private readonly promptCardBlender?: PromptCardBlenderMailbox,
   ) {}
 
   async assertIdle(): Promise<void> {
@@ -235,6 +238,64 @@ export class GameService {
     });
   }
 
+  async requestPromptCardBlend(
+    cardIds: [string, string],
+    ratio: number,
+  ): Promise<GameState> {
+    return this.gameRepository.withLock(async () => {
+      const current = await this.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError("Start a game before blending prompt cards");
+      }
+      if (!this.promptCardBlender) {
+        throw new PromptDeckError("Prompt-card blending is unavailable.");
+      }
+      const promptDeck = current.promptDeck ?? emptyPromptDeck();
+      if (promptDeck.blendJob) {
+        throw new PromptDeckError(
+          "Wait for the current prompt-card blend before starting another.",
+        );
+      }
+      if (new Set(cardIds).size !== 2) {
+        throw new PromptDeckError("Choose two distinct prompt cards to blend.");
+      }
+      if (!Number.isFinite(ratio) || ratio < 0.1 || ratio > 0.9) {
+        throw new PromptDeckError("Blend ratio must be between 10% and 90%.");
+      }
+      const cards = cardIds.map((cardId) =>
+        promptDeck.cards.find((card) => card.id === cardId),
+      );
+      if (!cards[0] || !cards[1]) {
+        throw new PromptDeckError(
+          "Both prompt cards must exist in the current deck.",
+        );
+      }
+      const jobId = this.createId();
+      const createdAt = this.now();
+      const job = createPromptCardBlendRequest(
+        [cards[0], cards[1]],
+        ratio,
+        jobId,
+        createdAt,
+      );
+      const updated: GameState = {
+        ...current,
+        promptDeck: {
+          ...promptDeck,
+          blendJob: {
+            jobId,
+            cardIds,
+            enqueuedAt: createdAt,
+            expectedJob: job,
+          },
+        },
+      };
+      await this.gameRepository.save(updated);
+      await this.ensurePromptCardBlenderEnqueued(job);
+      return updated;
+    });
+  }
+
   async updatePromptDeck(
     update:
       | { kind: "deck"; enabled: boolean }
@@ -280,7 +341,9 @@ export class GameService {
                         negativePrompt: suggestion.negativePrompt,
                         weight: 1,
                         tags: suggestion.tags,
-                        parents: [suggestion.parentCardId],
+                        parents: suggestion.parentCardIds ?? [
+                          suggestion.parentCardId,
+                        ],
                       },
                       this.createId(),
                       this.now(),
@@ -739,6 +802,7 @@ export class GameService {
     }
 
     game = await this.syncPromptCardEditor(game);
+    game = await this.syncPromptCardBlender(game);
 
     if (
       game.round.status === "generating" &&
@@ -1095,6 +1159,76 @@ export class GameService {
       await mailbox.enqueuePromptCardEditor(job);
     } catch (error) {
       const work = await mailbox.readPromptCardEditorWork(job.id);
+      if (work && isDeepStrictEqual(work, job)) return;
+      throw error;
+    }
+  }
+
+  private async syncPromptCardBlender(game: GameState): Promise<GameState> {
+    const mailbox = this.promptCardBlender;
+    const deck = game.promptDeck;
+    const record = deck?.blendJob;
+    if (!mailbox || !deck || !record) return game;
+
+    const [work, result] = await Promise.all([
+      mailbox.readPromptCardBlenderWork(record.jobId),
+      mailbox.readPromptCardBlenderResult(record.jobId),
+    ]);
+    if (!result) {
+      if (!work) {
+        await this.ensurePromptCardBlenderEnqueued(record.expectedJob);
+      } else if (!isDeepStrictEqual(work, record.expectedJob)) {
+        await mailbox.archivePromptCardBlender(record.jobId);
+        const next = {
+          ...game,
+          promptDeck: { ...deck, blendJob: null },
+        };
+        await this.gameRepository.save(next);
+        return next;
+      }
+      return game;
+    }
+
+    const validCompleted =
+      work &&
+      isDeepStrictEqual(work, record.expectedJob) &&
+      result.status === "completed" &&
+      result.kind === "prompt-card-blender" &&
+      isDeepStrictEqual(result.cardIds, record.cardIds);
+    const suggestions = validCompleted
+      ? [
+          ...(deck.suggestions ?? []),
+          {
+            id: this.createId(),
+            parentCardId: record.cardIds[0],
+            parentCardIds: record.cardIds,
+            ...result.proposal,
+            createdAt: result.completedAt,
+          },
+        ].slice(-10)
+      : (deck.suggestions ?? []);
+    await mailbox.archivePromptCardBlender(record.jobId);
+    const next = {
+      ...game,
+      promptDeck: {
+        ...deck,
+        blendJob: null,
+        suggestions,
+      },
+    };
+    await this.gameRepository.save(next);
+    return next;
+  }
+
+  private async ensurePromptCardBlenderEnqueued(
+    job: Parameters<PromptCardBlenderMailbox["enqueuePromptCardBlender"]>[0],
+  ): Promise<void> {
+    const mailbox = this.promptCardBlender;
+    if (!mailbox) return;
+    try {
+      await mailbox.enqueuePromptCardBlender(job);
+    } catch (error) {
+      const work = await mailbox.readPromptCardBlenderWork(job.id);
       if (work && isDeepStrictEqual(work, job)) return;
       throw error;
     }
