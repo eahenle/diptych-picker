@@ -39,6 +39,7 @@ import {
   type Candidate,
   type GameState,
   type PreferenceProfile,
+  type PreferenceProfileSnapshot,
   type Side,
 } from "@/domain/game";
 import type {
@@ -162,10 +163,28 @@ export class GameService {
         challengers,
         variationSourceCandidateId,
       );
+      const profileChanged = !isDeepStrictEqual(
+        current.preferenceProfile ??
+          preferenceProfileFromSeed(current.preferenceSeed),
+        preferenceProfile,
+      );
+      const variationSourceChanged =
+        current.variationSource?.candidateId !== variationSource?.candidateId;
+      const preferenceRevisions =
+        profileChanged || variationSourceChanged
+          ? this.appendPreferenceRevision(
+              current,
+              preferenceProfile,
+              variationSource ? "variation" : "manual",
+              this.now(),
+              variationSource,
+            )
+          : current.preferenceRevisions;
       const updated = this.withoutGenerationNotice({
         ...current,
         preferenceSeed,
         preferenceProfile,
+        ...(preferenceRevisions ? { preferenceRevisions } : {}),
         ...(variationSource ? { variationSource } : {}),
       });
       if (!variationSource) delete updated.variationSource;
@@ -1410,8 +1429,23 @@ export class GameService {
       composedNextProfile === composedProfile
         ? game.preferenceSeed
         : composedNextProfile;
+    const preferenceRevisions =
+      preferenceSeed === game.preferenceSeed
+        ? game.preferenceRevisions
+        : this.appendPreferenceRevision(
+            game,
+            nextProfile,
+            "adaptive",
+            selection.selectedAt,
+            game.variationSource,
+          );
     return {
-      game: { ...game, preferenceProfile: nextProfile, preferenceSeed },
+      game: {
+        ...game,
+        preferenceProfile: nextProfile,
+        preferenceSeed,
+        ...(preferenceRevisions ? { preferenceRevisions } : {}),
+      },
       challengers:
         preferenceSeed === game.preferenceSeed
           ? challengers
@@ -1596,6 +1630,40 @@ export class GameService {
       );
     }
     return { candidateId: source.id, concept: source.concept };
+  }
+
+  private appendPreferenceRevision(
+    game: GameState,
+    profile: PreferenceProfile,
+    source: PreferenceProfileSnapshot["source"],
+    createdAt: string,
+    variationSource = game.variationSource,
+  ): PreferenceProfileSnapshot[] {
+    const previous = game.preferenceRevisions ?? [];
+    const baseline: PreferenceProfileSnapshot[] =
+      previous.length > 0
+        ? previous
+        : [
+            {
+              createdAt,
+              source: "initial",
+              profile:
+                game.preferenceProfile ??
+                preferenceProfileFromSeed(game.preferenceSeed),
+              ...(game.variationSource
+                ? { variationSource: game.variationSource }
+                : {}),
+            },
+          ];
+    return [
+      ...baseline,
+      {
+        createdAt,
+        source,
+        profile,
+        ...(variationSource ? { variationSource } : {}),
+      },
+    ].slice(-25);
   }
 
   private newRating(

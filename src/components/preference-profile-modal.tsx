@@ -5,6 +5,7 @@ import {
   preferenceAdaptationFreedom,
   preferenceAdaptationProgress,
   type PreferenceProfile,
+  type PreferenceProfileSnapshot,
   type VariationSource,
 } from "@/domain/game";
 import { ModalShell } from "./modal-shell";
@@ -20,6 +21,52 @@ export type PreferenceField =
   | "contentLevel"
   | "avoid";
 
+const REVISION_FIELDS: ReadonlyArray<
+  readonly [keyof PreferenceProfile, string]
+> = [
+  ["themes", "Themes"],
+  ["inspiration", "Inspiration"],
+  ["mediaTypes", "Media"],
+  ["visualStyle", "Style"],
+  ["colorPalette", "Palette"],
+  ["contentLevel", "Content range"],
+  ["avoid", "Avoid"],
+  ["adaptationMode", "Model freedom"],
+  ["adaptationStrength", "Model freedom"],
+];
+
+function preferenceFieldChanges(
+  previous: PreferenceProfile,
+  current: PreferenceProfile,
+): string[] {
+  return [
+    ...new Set(
+      REVISION_FIELDS.filter(
+        ([field]) => previous[field] !== current[field],
+      ).map(([, label]) => label),
+    ),
+  ];
+}
+
+function revisionLabel(source: PreferenceProfileSnapshot["source"]): string {
+  return {
+    initial: "Baseline",
+    manual: "Manual save",
+    variation: "Variation branch",
+    adaptive: "Model adaptation",
+  }[source];
+}
+
+function formatRevisionTime(createdAt: string): string {
+  const date = new Date(createdAt);
+  return Number.isNaN(date.valueOf())
+    ? createdAt
+    : new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
+}
+
 interface PreferenceProfileModalProps {
   profile: PreferenceProfile;
   historyLength: number;
@@ -29,10 +76,15 @@ interface PreferenceProfileModalProps {
   sourceError: string | null;
   sourceSummary: string | null;
   variationSource: VariationSource | null;
+  revisions: readonly PreferenceProfileSnapshot[];
   selectionBoundWait: boolean;
   onClose: () => void;
   onSave: () => void;
   onAnalyzeSource: (image: File) => Promise<void>;
+  onRestoreRevision: (
+    revision: PreferenceProfileSnapshot,
+    frozen: boolean,
+  ) => void;
   onFieldChange: <Key extends PreferenceField>(
     key: Key,
     value: PreferenceProfile[Key],
@@ -49,10 +101,12 @@ export function PreferenceProfileModal({
   sourceError,
   sourceSummary,
   variationSource,
+  revisions,
   selectionBoundWait,
   onClose,
   onSave,
   onAnalyzeSource,
+  onRestoreRevision,
   onFieldChange,
   onFreedomChange,
 }: PreferenceProfileModalProps) {
@@ -155,6 +209,52 @@ export function PreferenceProfileModal({
             Saving this draft preserves the source as parent lineage for new
             candidates.
           </p>
+        ) : null}
+        {revisions.length > 0 ? (
+          <details className={styles.revisionHistory}>
+            <summary>
+              Revision history <strong>{revisions.length}</strong>
+            </summary>
+            <ol>
+              {revisions.toReversed().map((revision, reverseIndex) => {
+                const index = revisions.length - reverseIndex - 1;
+                const previous = revisions[index - 1];
+                const changedFields = previous
+                  ? preferenceFieldChanges(previous.profile, revision.profile)
+                  : ["Starting profile"];
+                return (
+                  <li key={`${revision.createdAt}-${index}`}>
+                    <span>
+                      <strong>{revisionLabel(revision.source)}</strong>
+                      <time dateTime={revision.createdAt}>
+                        {formatRevisionTime(revision.createdAt)}
+                      </time>
+                    </span>
+                    {revision.variationSource ? (
+                      <small>From {revision.variationSource.concept}</small>
+                    ) : null}
+                    <small>{changedFields.join(" · ")}</small>
+                    <div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onRestoreRevision(revision, false)}
+                      >
+                        Restore as draft
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onRestoreRevision(revision, true)}
+                      >
+                        Restore frozen
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </details>
         ) : null}
         {adaptationProgress ? (
           <div

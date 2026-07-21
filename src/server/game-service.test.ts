@@ -440,6 +440,19 @@ describe("GameService challenger buffer", () => {
     expect(updated.preferenceSeed).toContain(
       "Themes and subjects: Clearly adult alternative portrait studies",
     );
+    expect(updated.preferenceRevisions).toMatchObject([
+      {
+        source: "initial",
+        profile: { inspiration: "Keep the lighting stark." },
+      },
+      {
+        source: "adaptive",
+        profile: {
+          inspiration:
+            "Favor ultraviolet rim light and severe off-axis framing.",
+        },
+      },
+    ]);
     expect(
       context.queue.enqueue.mock.calls.map(
         ([job]) => job.preferenceProfile?.adaptationMode,
@@ -618,6 +631,22 @@ describe("GameService challenger buffer", () => {
       candidateId: "right",
       concept: "right concept",
     });
+    expect(saved.preferenceRevisions).toMatchObject([
+      {
+        createdAt: NOW,
+        source: "initial",
+        profile: { themes: game.preferenceSeed },
+      },
+      {
+        createdAt: NOW,
+        source: "variation",
+        profile: { themes: profile.themes },
+        variationSource: {
+          candidateId: "right",
+          concept: "right concept",
+        },
+      },
+    ]);
     expect(context.queue.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "variation-refill",
