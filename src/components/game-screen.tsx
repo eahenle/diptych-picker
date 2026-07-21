@@ -35,6 +35,7 @@ import type {
   PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
 import { CandidateCard } from "./candidate-card";
+import { ModalShell } from "./modal-shell";
 import styles from "./game-screen.module.css";
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -1040,10 +1041,6 @@ export function GameScreen() {
   useEffect(() => {
     if (!imageInspector) return;
     const navigateInspector = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setImageInspector(null);
-        return;
-      }
       const direction =
         event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
       if (direction === 0 || imageInspector.candidates.length < 2) return;
@@ -1871,24 +1868,17 @@ export function GameScreen() {
       ) : null}
 
       {inspectedCandidate ? (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onMouseDown={() => setImageInspector(null)}
+        <ModalShell
+          className={styles.imageInspector}
+          ariaLabel={`Expanded image: ${inspectedCandidate.concept}`}
+          onClose={() => setImageInspector(null)}
         >
-          <section
-            className={styles.imageInspector}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Expanded image: ${inspectedCandidate.concept}`}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+          <>
             <button
               type="button"
               className={styles.leaderboardClose}
               aria-label="Close expanded image"
               onClick={() => setImageInspector(null)}
-              autoFocus
             >
               ×
             </button>
@@ -1949,8 +1939,8 @@ export function GameScreen() {
                 ) : null}
               </figcaption>
             </figure>
-          </section>
-        </div>
+          </>
+        </ModalShell>
       ) : null}
 
       {historyOpen && game ? (

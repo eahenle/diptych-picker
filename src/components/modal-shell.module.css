@@ -1,0 +1,16 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.76);
+}
+
+@media (max-width: 700px) {
+  .backdrop {
+    align-items: end;
+    padding: 12px;
+  }
+}
