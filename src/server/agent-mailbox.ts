@@ -11,6 +11,10 @@ import { join, resolve } from "node:path";
 import { GENERATION_JOB_ID_PATTERN } from "@/domain/game";
 import type { LeaderboardPreferenceEvidence } from "@/domain/challenger-state";
 import { z } from "zod";
+import {
+  preferenceProfileSchema,
+  preferenceRevisionSchema,
+} from "./preference-profile-schema";
 
 const timestampSchema = z.string().datetime({ offset: true });
 const nonBlankStringSchema = z.string().trim().min(1);
@@ -18,79 +22,6 @@ const jobIdSchema = z
   .string()
   .min(1)
   .regex(GENERATION_JOB_ID_PATTERN, "Invalid generation job ID");
-
-const preferenceRevisionSchema = z
-  .object({
-    themes: z
-      .string()
-      .refine((value) => value.trim().length >= 20)
-      .max(2_000),
-    inspiration: z.string().max(1_000),
-    mediaTypes: z.string().max(500),
-    visualStyle: z.string().max(500),
-    colorPalette: z.string().max(500),
-    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
-    avoid: z.string().max(800),
-  })
-  .strict();
-
-const currentPreferenceProfileSchema = preferenceRevisionSchema.extend({
-  adaptationMode: z.enum(["static", "adaptive"]),
-  adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
-  adaptationLastDecision: z.number().int().nonnegative().optional(),
-  adaptationSourceWinnerIds: z.array(nonBlankStringSchema.max(200)).max(12),
-  adaptationSourceRejectedIds: z
-    .array(nonBlankStringSchema.max(200))
-    .max(12)
-    .default([]),
-});
-
-const transitionalPreferenceProfileSchema = preferenceRevisionSchema
-  .extend({
-    inspirationBase: z.string().optional(),
-    inspirationMode: z.enum(["static", "adaptive"]),
-    inspirationSourceWinnerIds: z
-      .array(nonBlankStringSchema.max(200))
-      .max(12)
-      .optional(),
-    adaptationMode: z.enum(["static", "adaptive"]).optional(),
-    adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
-    adaptationLastDecision: z.number().int().nonnegative().optional(),
-    adaptationSourceWinnerIds: z
-      .array(nonBlankStringSchema.max(200))
-      .max(12)
-      .optional(),
-    adaptationSourceRejectedIds: z
-      .array(nonBlankStringSchema.max(200))
-      .max(12)
-      .optional(),
-  })
-  .transform((profile) => ({
-    themes: profile.themes,
-    inspiration: profile.inspiration,
-    mediaTypes: profile.mediaTypes,
-    visualStyle: profile.visualStyle,
-    colorPalette: profile.colorPalette,
-    contentLevel: profile.contentLevel,
-    avoid: profile.avoid,
-    adaptationMode: profile.adaptationMode ?? profile.inspirationMode,
-    ...(profile.adaptationStrength
-      ? { adaptationStrength: profile.adaptationStrength }
-      : {}),
-    ...(profile.adaptationLastDecision !== undefined
-      ? { adaptationLastDecision: profile.adaptationLastDecision }
-      : {}),
-    adaptationSourceWinnerIds:
-      profile.adaptationSourceWinnerIds ??
-      profile.inspirationSourceWinnerIds ??
-      [],
-    adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds ?? [],
-  }));
-
-const preferenceProfileSchema = z.union([
-  currentPreferenceProfileSchema,
-  transitionalPreferenceProfileSchema,
-]);
 
 const variationSourceSchema = z
   .object({

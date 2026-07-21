@@ -4,33 +4,10 @@ import {
   MissingGameError,
   PreferencePresetLimitError,
 } from "@/server/game-service";
+import { preferenceProfileRequestSchema as preferenceProfileSchema } from "@/server/preference-profile-schema";
 import { deletePreferencePreset, savePreferencePreset } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
-
-const preferenceProfileSchema = z
-  .object({
-    themes: z
-      .string()
-      .max(2_000)
-      .refine((value) => value.trim().length >= 20),
-    inspiration: z.string().max(1_000),
-    mediaTypes: z.string().max(500),
-    visualStyle: z.string().max(500),
-    colorPalette: z.string().max(500),
-    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
-    avoid: z.string().max(800),
-    adaptationMode: z.enum(["static", "adaptive"]),
-    adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
-    adaptationLastDecision: z.number().int().nonnegative().optional(),
-    adaptationSourceWinnerIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12),
-    adaptationSourceRejectedIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12),
-  })
-  .strict();
 
 const savePresetSchema = z
   .object({

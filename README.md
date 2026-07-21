@@ -141,13 +141,14 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
+Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, preference revisions and presets, five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
 
 ## Architecture
 
 - `.agents/skills/run-diptych-picker/`: persistent coordinator workflow, protocol, and validated mailbox helper scripts.
 - `src/domain/game.ts` and `challenger-state.ts`: round transitions, winner identity, FIFO/pool state, Elo, and fallback pacing.
 - `src/server/agent-mailbox.ts`: validated durable job/result protocol and restart recovery.
+- `src/server/preference-profile-schema.ts`: shared strict, request, and backward-compatible persisted preference validation.
 - `src/server/co-proc-generation-transport.ts`: opt-in live NDJSON notification over secure attachable `co-proc` endpoints, with durable mailbox fallback.
 - `src/server/game-service.ts`: transactional selection, buffer/refill coordination, result verification, winner-preserving reconciliation, and cleanup retry.
 - `src/server/game-snapshot.ts`: versioned save validation, asset verification, fresh-session restore, and stale-job exclusion.
@@ -160,3 +161,6 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `GET /api/game/history`: up to fifty newest-first decisions with display-safe winner and rejected-candidate metadata plus the full decision count.
 - `PUT /api/game/favorites`: persist or remove a candidate favorite under the challenger-state lock without changing its rating or pool membership.
 - `GET` and `PUT /api/game/snapshot`: download and restore validated local game saves.
+
+The latest comprehensive maintainability audit and its deferred structural work
+are recorded in [Codebase Review — 2026-07-21](docs/CODEBASE_REVIEW_2026-07-21.md).

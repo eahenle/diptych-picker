@@ -2,6 +2,10 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { migrateGameState, type GameState } from "@/domain/game";
 import { z } from "zod";
+import {
+  persistedPreferenceProfileSchema as preferenceProfileSchema,
+  preferenceRevisionSchema,
+} from "./preference-profile-schema";
 
 export interface GameRepository {
   load(): Promise<GameState | null>;
@@ -23,21 +27,6 @@ interface LockOwner {
 }
 
 export class RepositoryLockTimeoutError extends Error {}
-
-const preferenceRevisionSchema = z
-  .object({
-    themes: z
-      .string()
-      .max(2_000)
-      .refine((value) => value.trim().length >= 20),
-    inspiration: z.string().max(1_000),
-    mediaTypes: z.string().max(500),
-    visualStyle: z.string().max(500),
-    colorPalette: z.string().max(500),
-    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
-    avoid: z.string().max(800),
-  })
-  .strict();
 
 const candidateLineageSchema = z
   .object({
@@ -62,97 +51,6 @@ const candidateSchema = z
     lineage: candidateLineageSchema.optional(),
   })
   .strict();
-
-const currentPreferenceProfileSchema = z
-  .object({
-    themes: z
-      .string()
-      .max(2_000)
-      .refine((value) => value.trim().length >= 20),
-    inspiration: z.string().max(1_000).optional(),
-    mediaTypes: z.string().max(500),
-    visualStyle: z.string().max(500),
-    colorPalette: z.string().max(500),
-    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
-    avoid: z.string().max(800),
-    adaptationMode: z.enum(["static", "adaptive"]).optional(),
-    adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
-    adaptationLastDecision: z.number().int().nonnegative().optional(),
-    adaptationSourceWinnerIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12)
-      .optional(),
-    adaptationSourceRejectedIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12)
-      .optional(),
-  })
-  .strict()
-  .transform((profile) => ({
-    ...profile,
-    inspiration: profile.inspiration ?? "",
-    adaptationMode: profile.adaptationMode ?? ("static" as const),
-    adaptationSourceWinnerIds: profile.adaptationSourceWinnerIds ?? [],
-    adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds ?? [],
-  }));
-
-const transitionalPreferenceProfileSchema = z
-  .object({
-    themes: z
-      .string()
-      .max(2_000)
-      .refine((value) => value.trim().length >= 20),
-    inspiration: z.string().max(1_000).optional(),
-    inspirationBase: z.string().max(1_000).optional(),
-    inspirationMode: z.enum(["static", "adaptive"]),
-    inspirationSourceWinnerIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12)
-      .optional(),
-    mediaTypes: z.string().max(500),
-    visualStyle: z.string().max(500),
-    colorPalette: z.string().max(500),
-    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
-    avoid: z.string().max(800),
-    adaptationMode: z.enum(["static", "adaptive"]).optional(),
-    adaptationStrength: z.enum(["guided", "unfettered"]).optional(),
-    adaptationLastDecision: z.number().int().nonnegative().optional(),
-    adaptationSourceWinnerIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12)
-      .optional(),
-    adaptationSourceRejectedIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12)
-      .optional(),
-  })
-  .strict()
-  .transform((profile) => ({
-    themes: profile.themes,
-    inspiration: profile.inspiration ?? "",
-    mediaTypes: profile.mediaTypes,
-    visualStyle: profile.visualStyle,
-    colorPalette: profile.colorPalette,
-    contentLevel: profile.contentLevel,
-    avoid: profile.avoid,
-    adaptationMode: profile.adaptationMode ?? profile.inspirationMode,
-    ...(profile.adaptationStrength
-      ? { adaptationStrength: profile.adaptationStrength }
-      : {}),
-    ...(profile.adaptationLastDecision !== undefined
-      ? { adaptationLastDecision: profile.adaptationLastDecision }
-      : {}),
-    adaptationSourceWinnerIds:
-      profile.adaptationSourceWinnerIds ??
-      profile.inspirationSourceWinnerIds ??
-      [],
-    adaptationSourceRejectedIds: profile.adaptationSourceRejectedIds ?? [],
-  }));
-
-const preferenceProfileSchema = z.union([
-  currentPreferenceProfileSchema,
-  transitionalPreferenceProfileSchema,
-]);
 
 const pendingSelectionSchema = z.discriminatedUnion("kind", [
   z

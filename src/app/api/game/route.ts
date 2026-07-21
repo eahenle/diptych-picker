@@ -5,6 +5,7 @@ import {
   preferenceProfileFromSeed,
 } from "@/domain/game";
 import { SelectionConflictError } from "@/server/game-service";
+import { preferenceProfileRequestSchema as preferenceProfileSchema } from "@/server/preference-profile-schema";
 import {
   generationProvider,
   getBufferHealth,
@@ -14,32 +15,6 @@ import {
 } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
-
-const preferenceProfileSchema = z
-  .object({
-    themes: z
-      .string()
-      .max(2_000)
-      .refine((value) => value.trim().length >= 20),
-    inspiration: z.string().max(1_000).default(""),
-    adaptationMode: z.enum(["static", "adaptive"]).default("static"),
-    adaptationStrength: z.enum(["guided", "unfettered"]).default("guided"),
-    adaptationLastDecision: z.number().int().nonnegative().default(0),
-    adaptationSourceWinnerIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12)
-      .default([]),
-    adaptationSourceRejectedIds: z
-      .array(z.string().trim().min(1).max(200))
-      .max(12)
-      .default([]),
-    mediaTypes: z.string().max(500),
-    visualStyle: z.string().max(500),
-    colorPalette: z.string().max(500),
-    contentLevel: z.enum(["family-friendly", "adult-allowed"]),
-    avoid: z.string().max(800),
-  })
-  .strict();
 
 const preferencePatchSchema = z
   .union([
