@@ -524,6 +524,39 @@ describe("GameScreen challenger reconciliation", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("accepts gameplay shortcuts after inspector focus returns to the magnifier", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    const inspectButton = screen.getByRole("button", {
+      name: "View image A larger",
+    });
+    inspectButton.focus();
+    fireEvent.click(inspectButton);
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Close expanded image" }),
+      { key: "Escape" },
+    );
+
+    expect(inspectButton).toHaveFocus();
+    fireEvent.keyDown(inspectButton, { key: "a" });
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/game/select",
+        expect.objectContaining({
+          body: JSON.stringify({ winnerSide: "left", roundNumber: 1 }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        }),
+      ),
+    );
+  });
+
   it("shows live ready-queue and reusable-pool health", async () => {
     vi.stubGlobal(
       "fetch",

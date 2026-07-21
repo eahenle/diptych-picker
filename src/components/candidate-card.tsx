@@ -90,6 +90,7 @@ export const CandidateCard = memo(function CandidateCard({
       <button
         type="button"
         className={styles.inspectButton}
+        data-allows-gameplay-shortcuts="true"
         aria-label={`View image ${label} larger`}
         title="View larger"
         onClick={() => onInspect(candidate)}

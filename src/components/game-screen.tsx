@@ -1017,7 +1017,15 @@ export function GameScreen() {
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat)
         return;
       const target = event.target as HTMLElement | null;
-      if (target?.matches("textarea, input, select, button")) return;
+      const focusedControl = target?.closest<HTMLElement>(
+        "textarea, input, select, button",
+      );
+      if (
+        focusedControl &&
+        !focusedControl.matches("[data-allows-gameplay-shortcuts='true']")
+      ) {
+        return;
+      }
       const key = event.key.toLowerCase();
       if (key === "a" || key === "1") void select("left");
       if (key === "b" || key === "2") void select("right");
