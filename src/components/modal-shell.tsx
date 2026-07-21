@@ -20,6 +20,7 @@ interface ModalShellProps {
   ariaLabelledBy?: string;
   ariaDescribedBy?: string;
   ariaBusy?: boolean;
+  initialFocusSelector?: string;
 }
 
 export function ModalShell({
@@ -30,6 +31,7 @@ export function ModalShell({
   ariaLabelledBy,
   ariaDescribedBy,
   ariaBusy,
+  initialFocusSelector,
 }: ModalShellProps) {
   const dialogRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -48,9 +50,20 @@ export function ModalShell({
     const focusable = () =>
       Array.from(
         dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+      ).filter((element) => {
+        const style = window.getComputedStyle(element);
+        return (
+          !element.hidden &&
+          element.getAttribute("aria-hidden") !== "true" &&
+          style.display !== "none" &&
+          style.visibility !== "hidden"
+        );
+      });
     if (!dialog.contains(document.activeElement)) {
-      (focusable()[0] ?? dialog).focus();
+      const requestedFocus = initialFocusSelector
+        ? dialog.querySelector<HTMLElement>(initialFocusSelector)
+        : null;
+      (requestedFocus ?? focusable()[0] ?? dialog).focus();
     }
 
     const containFocus = (event: KeyboardEvent) => {
@@ -82,7 +95,7 @@ export function ModalShell({
       document.removeEventListener("keydown", containFocus);
       if (returnFocus?.isConnected) returnFocus.focus();
     };
-  }, []);
+  }, [initialFocusSelector]);
 
   const closeFromBackdrop = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) onClose();

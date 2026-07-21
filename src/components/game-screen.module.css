@@ -517,15 +517,6 @@
   letter-spacing: 0.08em;
 }
 
-.modalBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.76);
-}
 .preferencesModal {
   width: min(760px, 100%);
   max-height: min(860px, calc(100vh - 48px));
@@ -1306,10 +1297,6 @@
   }
   .conceptLabel {
     font-size: 9px;
-  }
-  .modalBackdrop {
-    align-items: start;
-    padding: 12px;
   }
   .preferencesModal {
     max-height: calc(100vh - 24px);

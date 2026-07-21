@@ -23,6 +23,10 @@ function Harness() {
         >
           <button type="button">First action</button>
           <button type="button">Last action</button>
+          <input aria-label="Hidden file input" type="file" hidden />
+          <button type="button" style={{ display: "none" }}>
+            Visually hidden action
+          </button>
         </ModalShell>
       ) : null}
     </>

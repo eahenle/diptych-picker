@@ -1060,31 +1060,6 @@ export function GameScreen() {
     return () => window.removeEventListener("keydown", navigateInspector);
   }, [imageInspector]);
 
-  useEffect(() => {
-    if (imageInspector) return;
-    const closeModalOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (historyOpen) setHistoryOpen(false);
-      else if (leaderboardOpen) setLeaderboardOpen(false);
-      else if (preferencesOpen && !preferencesSaving && !sourceProfileAnalyzing)
-        setPreferencesOpen(false);
-      else if (loadGameOpen && !gameTransferAction) setLoadGameOpen(false);
-      else if (newGameOpen && !gameTransferAction) setNewGameOpen(false);
-    };
-    window.addEventListener("keydown", closeModalOnEscape);
-    return () => window.removeEventListener("keydown", closeModalOnEscape);
-  }, [
-    gameTransferAction,
-    historyOpen,
-    imageInspector,
-    leaderboardOpen,
-    loadGameOpen,
-    newGameOpen,
-    preferencesOpen,
-    preferencesSaving,
-    sourceProfileAnalyzing,
-  ]);
-
   const openComparisonHistory = async () => {
     setHistoryOpen(true);
     setHistoryLoading(true);
@@ -1944,19 +1919,13 @@ export function GameScreen() {
       ) : null}
 
       {historyOpen && game ? (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onMouseDown={() => setHistoryOpen(false)}
+        <ModalShell
+          className={`${styles.preferencesModal} ${styles.historyModal}`}
+          onClose={() => setHistoryOpen(false)}
+          ariaLabelledBy="comparison-history-title"
+          ariaDescribedBy="comparison-history-description"
         >
-          <section
-            className={`${styles.preferencesModal} ${styles.historyModal}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="comparison-history-title"
-            aria-describedby="comparison-history-description"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+          <>
             <button
               type="button"
               className={styles.leaderboardClose}
@@ -2147,29 +2116,22 @@ export function GameScreen() {
                 type="button"
                 className={styles.utilityButton}
                 onClick={() => setHistoryOpen(false)}
-                autoFocus
               >
                 Close
               </button>
             </div>
-          </section>
-        </div>
+          </>
+        </ModalShell>
       ) : null}
 
       {leaderboardOpen && game ? (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onMouseDown={() => setLeaderboardOpen(false)}
+        <ModalShell
+          className={`${styles.preferencesModal} ${styles.leaderboardModal}`}
+          onClose={() => setLeaderboardOpen(false)}
+          ariaLabelledBy="pool-leaderboard-title"
+          ariaDescribedBy="pool-leaderboard-description"
         >
-          <section
-            className={`${styles.preferencesModal} ${styles.leaderboardModal}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pool-leaderboard-title"
-            aria-describedby="pool-leaderboard-description"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+          <>
             <button
               type="button"
               className={styles.leaderboardClose}
@@ -2265,31 +2227,25 @@ export function GameScreen() {
                 type="button"
                 className={styles.utilityButton}
                 onClick={() => setLeaderboardOpen(false)}
-                autoFocus
               >
                 Close
               </button>
             </div>
-          </section>
-        </div>
+          </>
+        </ModalShell>
       ) : null}
 
       {loadGameOpen && game ? (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onMouseDown={() => {
+        <ModalShell
+          className={`${styles.preferencesModal} ${styles.gameStateModal}`}
+          onClose={() => {
             if (!gameTransferAction) setLoadGameOpen(false);
           }}
+          ariaLabelledBy="load-game-title"
+          ariaDescribedBy="load-game-description load-game-save-note"
+          ariaBusy={gameTransferAction !== null}
         >
-          <section
-            className={`${styles.preferencesModal} ${styles.gameStateModal}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="load-game-title"
-            aria-describedby="load-game-description load-game-save-note"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+          <>
             <h2 id="load-game-title">Load saved game</h2>
             <p id="load-game-description">
               Loading replaces the current round and learned state after the
@@ -2309,7 +2265,6 @@ export function GameScreen() {
                   className={styles.utilityButton}
                   disabled={gameTransferAction !== null}
                   onClick={() => void exportCurrentGame()}
-                  autoFocus
                 >
                   {gameTransferAction === "exporting"
                     ? "Exporting…"
@@ -2367,26 +2322,21 @@ export function GameScreen() {
                 Cancel
               </button>
             </div>
-          </section>
-        </div>
+          </>
+        </ModalShell>
       ) : null}
 
       {newGameOpen && game ? (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onMouseDown={() => {
+        <ModalShell
+          className={`${styles.preferencesModal} ${styles.gameStateModal}`}
+          onClose={() => {
             if (!gameTransferAction) setNewGameOpen(false);
           }}
+          ariaLabelledBy="new-game-title"
+          ariaDescribedBy="new-game-description game-save-note"
+          ariaBusy={gameTransferAction !== null}
         >
-          <section
-            className={`${styles.preferencesModal} ${styles.gameStateModal}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="new-game-title"
-            aria-describedby="new-game-description game-save-note"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+          <>
             <h2 id="new-game-title">New game</h2>
             <p id="new-game-description">
               Save this exact game before starting over, or restore a game you
@@ -2406,7 +2356,6 @@ export function GameScreen() {
                   className={styles.utilityButton}
                   disabled={gameTransferAction !== null}
                   onClick={() => void exportCurrentGame()}
-                  autoFocus
                 >
                   {gameTransferAction === "exporting"
                     ? "Exporting…"
@@ -2483,29 +2432,24 @@ export function GameScreen() {
                 Cancel
               </button>
             </div>
-          </section>
-        </div>
+          </>
+        </ModalShell>
       ) : null}
 
       {preferencesOpen && game ? (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onMouseDown={closePreferences}
+        <ModalShell
+          className={styles.preferencesModal}
+          onClose={closePreferences}
+          ariaBusy={preferencesBusy}
+          ariaLabelledBy="preferences-title"
+          ariaDescribedBy={
+            selectionBoundWait
+              ? "preferences-description preferences-wait-note"
+              : "preferences-description"
+          }
+          initialFocusSelector="#preference-themes"
         >
-          <section
-            className={styles.preferencesModal}
-            role="dialog"
-            aria-modal="true"
-            aria-busy={preferencesBusy}
-            aria-labelledby="preferences-title"
-            aria-describedby={
-              selectionBoundWait
-                ? "preferences-description preferences-wait-note"
-                : "preferences-description"
-            }
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+          <>
             <div className={styles.preferenceTitleRow}>
               <h2 id="preferences-title">Preference profile</h2>
               <div className={styles.adaptationFreedom}>
@@ -2625,7 +2569,6 @@ export function GameScreen() {
                   maxLength={2000}
                   placeholder="What worlds, subjects, or ideas should the game explore?"
                   aria-describedby="preference-themes-hint"
-                  autoFocus
                 />
                 <small id="preference-themes-hint">20–2,000 characters.</small>
               </div>
@@ -2824,8 +2767,8 @@ export function GameScreen() {
                   : "Save profile"}
               </button>
             </div>
-          </section>
-        </div>
+          </>
+        </ModalShell>
       ) : null}
     </main>
   );
