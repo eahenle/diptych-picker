@@ -7,6 +7,9 @@ import type {
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
+  LeaderboardProfileJob,
+  LeaderboardProfileMailbox,
+  LeaderboardProfileResult,
   SourceProfileJob,
   SourceProfileMailbox,
   SourceProfileResult,
@@ -74,6 +77,10 @@ export class MockAgentWorker {
       await this.completeSourceProfile(job);
       return;
     }
+    if (job.kind === "leaderboard-profile") {
+      await this.completeLeaderboardProfile(job);
+      return;
+    }
 
     // Playwright-only deterministic failure hook. A worker consumes this
     // sentinel once for challenger or refill jobs; no external provider runs.
@@ -98,6 +105,7 @@ export class MockAgentWorker {
       selectionHistory: job.selectionHistory,
       recentConcepts,
       leaderboardEvidence: job.leaderboardEvidence,
+      leaderboardVisualProfile: job.leaderboardVisualProfile,
       preferenceSeed: job.preferenceSeed,
       preferenceProfile:
         job.preferenceProfile ?? preferenceProfileFromSeed(job.preferenceSeed),
@@ -153,6 +161,36 @@ export class MockAgentWorker {
       },
       reasoningSummary:
         "The editable profile carries transferable subject, composition, medium, style, and palette cues without requesting a specific identity or exact likeness.",
+    };
+    await this.publish("completed", job.id, result);
+  }
+
+  private async completeLeaderboardProfile(
+    job: LeaderboardProfileJob,
+  ): Promise<void> {
+    const leading = job.sources[0];
+    const sharedStyles = [
+      ...new Set(job.sources.flatMap(({ style }) => style)),
+    ].slice(0, 6);
+    const result: LeaderboardProfileResult = {
+      jobId: job.id,
+      kind: "leaderboard-profile",
+      status: "completed",
+      completedAt: this.now(),
+      fingerprint: job.fingerprint,
+      profile: {
+        themes: `Transferable visual themes shared by ${job.sources.length} leading pool images, led by ${leading.concept}`,
+        inspiration: `Favor recurring composition and lighting qualities from the top-ranked cohort without copying any one image`,
+        mediaTypes: "media patterns visible across the leading pool cohort",
+        visualStyle: sharedStyles.join(", ") || "cohesive and detailed",
+        colorPalette:
+          "recurring palette relationships across the leading images",
+        contentLevel: "family-friendly",
+        avoid:
+          "exact identity, facial likeness, logos, readable text, and direct reproduction of any pool image",
+      },
+      reasoningSummary:
+        "Synthesizes shared visual qualities across the ranked leaders while keeping each source image immutable.",
     };
     await this.publish("completed", job.id, result);
   }
@@ -261,6 +299,38 @@ export class MockSourceProfileMailbox implements SourceProfileMailbox {
 
   private async resume(job: SourceProfileJob | null): Promise<void> {
     if (job && !(await this.mailbox.readSourceProfileResult(job.id))) {
+      this.worker.schedule(job);
+    }
+  }
+}
+
+export class MockLeaderboardProfileMailbox implements LeaderboardProfileMailbox {
+  constructor(
+    private readonly mailbox: LeaderboardProfileMailbox,
+    private readonly worker: MockAgentWorker,
+  ) {}
+
+  async enqueueLeaderboardProfile(job: LeaderboardProfileJob): Promise<void> {
+    await this.mailbox.enqueueLeaderboardProfile(job);
+    this.worker.schedule(job);
+  }
+
+  async readLeaderboardProfileWork(jobId: string) {
+    const job = await this.mailbox.readLeaderboardProfileWork(jobId);
+    await this.resume(job);
+    return job;
+  }
+
+  readLeaderboardProfileResult(jobId: string) {
+    return this.mailbox.readLeaderboardProfileResult(jobId);
+  }
+
+  archiveLeaderboardProfile(jobId: string) {
+    return this.mailbox.archiveLeaderboardProfile(jobId);
+  }
+
+  private async resume(job: LeaderboardProfileJob | null): Promise<void> {
+    if (job && !(await this.mailbox.readLeaderboardProfileResult(job.id))) {
       this.worker.schedule(job);
     }
   }

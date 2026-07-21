@@ -15,6 +15,7 @@ import {
   generationJobSchema,
   type GenerationJob,
   type GenerationResult,
+  type LeaderboardProfileJob,
 } from "./agent-mailbox";
 
 const job = (id = "job-1"): GenerationJob => ({
@@ -165,6 +166,34 @@ const failure = (jobId = "job-1"): FailedResult => ({
   retryable: true,
 });
 
+const leaderboardProfileJob = (
+  id = "leaderboard-profile-1",
+): LeaderboardProfileJob => ({
+  id,
+  kind: "leaderboard-profile",
+  createdAt: "2026-07-20T20:00:00.000Z",
+  fingerprint: "b".repeat(64),
+  sources: [1, 2].map((rank) => ({
+    candidateId: `leader-${rank}`,
+    rank,
+    rating: 1120 - rank * 20,
+    wins: 4 - rank,
+    losses: rank,
+    favorite: rank === 1,
+    source: "generated" as const,
+    concept: `leader ${rank} concept`,
+    style: ["cinematic"],
+    sourceImage: {
+      filename: `${String(rank).repeat(64)}.png`,
+      path: `profile-sources/${String(rank).repeat(64)}.png`,
+      contentType: "image/png" as const,
+      width: 100,
+      height: 100,
+      byteLength: 1024,
+    },
+  })),
+});
+
 async function mailboxRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "diptych-mailbox-"));
 }
@@ -199,6 +228,40 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("strictly persists leaderboard analysis work and its completed profile", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const analysisJob = leaderboardProfileJob();
+    await mailbox.enqueueLeaderboardProfile(analysisJob);
+
+    await expect(
+      mailbox.readLeaderboardProfileWork(analysisJob.id),
+    ).resolves.toEqual(analysisJob);
+
+    const result = {
+      jobId: analysisJob.id,
+      kind: "leaderboard-profile",
+      status: "completed",
+      completedAt: "2026-07-20T20:01:00.000Z",
+      fingerprint: analysisJob.fingerprint,
+      profile: {
+        themes: "architectural portrait studies",
+        inspiration: "diagonal light and low-angle framing",
+        mediaTypes: "editorial photography",
+        visualStyle: "dramatic and tactile",
+        colorPalette: "violet and pale gold",
+        contentLevel: "family-friendly",
+        avoid: "logos and readable text",
+      },
+      reasoningSummary: "Shared traits across the strongest pool images.",
+    };
+    await writeRawResult(root, "completed", analysisJob.id, result);
+
+    await expect(
+      mailbox.readLeaderboardProfileResult(analysisJob.id),
+    ).resolves.toEqual(result);
+  });
+
   it("enqueues one durable job and restores it through a new mailbox instance", async () => {
     const root = await mailboxRoot();
     await new FileGenerationMailbox(root).enqueue(job());

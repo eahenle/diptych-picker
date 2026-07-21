@@ -20,7 +20,7 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `agent-work/<jobId>/proposal.json`: structured proposal passed by file
 - `agent-work/<jobId>/failure.txt`: failure reason passed by file
 - `agent-work/<jobId>/image.png`: worker-generated standalone image
-- `agent-work/<jobId>/profile.json`: source-profile analysis passed by file
+- `agent-work/<jobId>/profile.json`: source-profile or leaderboard-profile analysis passed by file
 - `profile-sources/<sha256-of-normalized-png-bytes>.png`: private, metadata-stripped source upload
 - `assets/<sha256-of-png-bytes>.png`: immutable content-addressed generated candidate asset
 - `output/artifacts/<sha256-of-png-bytes>.png`: discoverable immutable export of every completed candidate
@@ -89,7 +89,7 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
 }
 ```
 
-`kind` is `challenger`, `initial`, `refill`, or `source-profile`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+`kind` is `challenger`, `initial`, `refill`, `source-profile`, or `leaderboard-profile`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
 
 ```json
 {
@@ -122,9 +122,62 @@ An interactive source-image analysis has no comparison or preference context. Th
 
 The source remains private: it is not copied to generated assets or exports. A fresh source-profile worker inspects the existing file without calling image generation. It describes transferable subject matter, setting, composition, medium, lighting, mood, palette, and constraints without identifying a depicted person or requesting identity, likeness, or exact reproduction.
 
+Adaptive games cache a visual synthesis of the exact current top cohort. Pool assets are read through their validated local storage, normalized through the same content-addressed `profile-sources` pipeline as an uploaded source, and enqueued without exposing prompts or modifying the originals:
+
+```json
+{
+  "id": "leaderboard-profile-job-1",
+  "kind": "leaderboard-profile",
+  "createdAt": "ISO-8601 timestamp",
+  "fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "sources": [
+    {
+      "candidateId": "pool-leader",
+      "rank": 1,
+      "rating": 1124,
+      "wins": 9,
+      "losses": 2,
+      "favorite": false,
+      "source": "generated",
+      "concept": "display-safe concept",
+      "style": ["concise tag"],
+      "sourceImage": {
+        "filename": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+        "path": "profile-sources/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+        "contentType": "image/png",
+        "width": 1024,
+        "height": 1024,
+        "byteLength": 123456
+      }
+    },
+    {
+      "candidateId": "pool-runner-up",
+      "rank": 2,
+      "rating": 1098,
+      "wins": 7,
+      "losses": 3,
+      "favorite": true,
+      "source": "curated",
+      "concept": "second display-safe concept",
+      "style": ["second concise tag"],
+      "sourceImage": {
+        "filename": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.png",
+        "path": "profile-sources/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.png",
+        "contentType": "image/png",
+        "width": 1024,
+        "height": 1024,
+        "byteLength": 123457
+      }
+    }
+  ]
+}
+```
+
+A leaderboard-profile job contains two through four unique leaders. Its SHA-256 fingerprint depends on their ordered rank and candidate IDs, so ordinary Elo changes do not repeat visual analysis while a meaningful cohort or rank-order change does. One fresh analysis worker inspects every source together, emits the same strict profile shape as source-image ingestion, and never calls image generation. A failed fingerprint is not retried until the cohort changes. The completed digest is cached internally; it never directly overwrites user-entered preferences.
+
 The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the image proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
 
-New refill jobs include `leaderboardEvidence`, a display-safe sample of at most 12 current reusable candidates. It contains the highest and lowest ranks when the pool is larger than the bound, plus the full pool size; it never contains prompts, image paths, reasoning, or mailbox state. Rank, Elo, win/loss record, repeated performance, and favorites are the primary basis for Adaptive steering. High-ranked candidates with repeated success are positive aggregate evidence; repeatedly losing low-ranked candidates are negative aggregate evidence. Omitted middle ranks are neutral, not negative. Recent selections, retained/rejected compatibility fields, and recent concepts are secondary novelty context and may break a tie only when aggregate evidence is sparse.
+New refill jobs include `leaderboardEvidence`, a display-safe sample of at most 12 current reusable candidates. It contains the highest and lowest ranks when the pool is larger than the bound, plus the full pool size; it never contains prompts, image paths, reasoning, or mailbox state. When the cached fingerprint still matches the current leaders, the refill also includes `leaderboardVisualProfile` with the shared visual synthesis, source candidate IDs, reasoning, and analysis timestamp. Rank, Elo, win/loss record, repeated performance, favorites, and the matching visual synthesis are the primary basis for Adaptive steering. High-ranked candidates with repeated success are positive aggregate evidence; repeatedly losing low-ranked candidates are negative aggregate evidence. Omitted middle ranks are neutral, not negative. Recent selections, retained/rejected compatibility fields, and recent concepts are secondary novelty context and may break a tie only when aggregate evidence is sparse.
 
 New jobs include the structured `preferenceProfile`; legacy jobs may omit it and are treated as Static. In Static mode, omit `preferenceRevision` and preserve every preference field exactly. In Adaptive mode, the worker must add a complete `preferenceRevision` based primarily on `leaderboardEvidence`. The profile carries separate bounded source-ID lists for positive and negative provenance. The app adopts a model-authored revision only if its generated candidate later wins, while every generated loser is recorded immediately as negative provenance for future jobs.
 
@@ -148,7 +201,7 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
-`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or source-profile request. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
+`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or interactive source-profile request, then one cached leaderboard-profile request. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
 
 ```json
 {
@@ -183,7 +236,7 @@ Write this strict JSON object to `<data-root>/agent-work/<jobId>/proposal.json`:
 }
 ```
 
-The four base proposal fields are always required. `preferenceRevision` must be omitted for Static jobs and is required for Adaptive jobs; it must contain every preference field except the mode and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed, responds to aggregate leaderboard evidence, and stays distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
+The four base proposal fields are always required. `preferenceRevision` must be omitted for Static jobs and is required for Adaptive jobs; it must contain every preference field except the mode and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed, responds to aggregate numeric and visual leaderboard evidence, and stays distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
 
 ## Completed result
 
@@ -238,7 +291,7 @@ For a source-profile job, write this strict object to `<data-root>/agent-work/<j
 }
 ```
 
-`npm run agent:complete-profile -- --job <id> --profile-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/profile.json"` requires the matching active source-profile job, verifies that its private source still exists, reserves the outcome, and publishes the editable draft without saving it to the game:
+`npm run agent:complete-profile -- --job <id> --profile-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/profile.json"` requires the matching active profile-analysis job and verifies every referenced normalized source before reserving the outcome. For a source-profile job it publishes the editable draft without saving it to the game:
 
 ```json
 {
@@ -256,6 +309,28 @@ For a source-profile job, write this strict object to `<data-root>/agent-work/<j
     "avoid": "exact identity, likeness, logos, readable text, and exact copying"
   },
   "reasoningSummary": "Transferable analysis only."
+}
+```
+
+The same `agent:complete-profile` command completes a leaderboard-profile job. It verifies every normalized source and publishes the job's exact fingerprint with the shared profile analysis:
+
+```json
+{
+  "jobId": "leaderboard-profile-job-1",
+  "kind": "leaderboard-profile",
+  "status": "completed",
+  "completedAt": "ISO-8601 timestamp",
+  "fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "profile": {
+    "themes": "shared transferable themes across the leaders",
+    "inspiration": "recurring composition, lighting, and mood cues",
+    "mediaTypes": "shared or analogous media",
+    "visualStyle": "recurring visual treatment",
+    "colorPalette": "shared palette relationships",
+    "contentLevel": "family-friendly",
+    "avoid": "identity, likeness, readable text, logos, and exact copying"
+  },
+  "reasoningSummary": "Visible qualities shared across the weighted leaders."
 }
 ```
 

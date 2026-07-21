@@ -201,6 +201,55 @@ const leaderboardPreferenceEvidenceSchema = z
     }
   });
 
+const leaderboardVisualProfileSchema = z
+  .object({
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    sourceCandidateIds: z.array(z.string().min(1).max(200)).min(2).max(4),
+    profile: preferenceRevisionSchema,
+    reasoningSummary: z.string().trim().min(1).max(2_000),
+    analyzedAt: z.string().min(1),
+  })
+  .strict();
+
+const profileSourceImageSchema = z
+  .object({
+    filename: z.string().regex(/^[a-f0-9]{64}\.png$/),
+    path: z.string().regex(/^profile-sources\/[a-f0-9]{64}\.png$/),
+    contentType: z.literal("image/png"),
+    width: z.number().int().positive().max(4096),
+    height: z.number().int().positive().max(4096),
+    byteLength: z.number().int().positive(),
+  })
+  .strict();
+
+const leaderboardProfileJobSnapshotSchema = z
+  .object({
+    id: z.string().regex(GENERATION_JOB_ID_PATTERN),
+    kind: z.literal("leaderboard-profile"),
+    createdAt: z.string().min(1),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    sources: z
+      .array(
+        z
+          .object({
+            candidateId: z.string().trim().min(1).max(200),
+            rank: z.number().int().positive(),
+            rating: z.number().int(),
+            wins: z.number().int().nonnegative(),
+            losses: z.number().int().nonnegative(),
+            favorite: z.boolean(),
+            source: z.enum(["curated", "generated"]),
+            concept: z.string().trim().min(1).max(240),
+            style: z.array(z.string().trim().min(1).max(80)).max(4),
+            sourceImage: profileSourceImageSchema,
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(4),
+  })
+  .strict();
+
 const refillGenerationJobSnapshotSchema = z
   .object({
     id: z.string().regex(GENERATION_JOB_ID_PATTERN),
@@ -213,6 +262,7 @@ const refillGenerationJobSnapshotSchema = z
     selectionHistory: z.array(selectionHistorySchema),
     recentConcepts: z.array(z.string().min(1)),
     leaderboardEvidence: leaderboardPreferenceEvidenceSchema.optional(),
+    leaderboardVisualProfile: leaderboardVisualProfileSchema.optional(),
     preferenceSeed: z.string().min(1),
     preferenceProfile: preferenceProfileSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
@@ -263,6 +313,47 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
           }
         }),
     ),
+    leaderboardProfileJob: z
+      .object({
+        jobId: z.string().regex(GENERATION_JOB_ID_PATTERN),
+        fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+        enqueuedAt: z.string().min(1),
+        expectedJob: leaderboardProfileJobSnapshotSchema,
+      })
+      .strict()
+      .superRefine((record, context) => {
+        if (record.jobId !== record.expectedJob.id) {
+          context.addIssue({
+            code: "custom",
+            path: ["jobId"],
+            message: "jobId must equal expectedJob.id",
+          });
+        }
+        if (record.fingerprint !== record.expectedJob.fingerprint) {
+          context.addIssue({
+            code: "custom",
+            path: ["fingerprint"],
+            message: "fingerprint must equal expectedJob.fingerprint",
+          });
+        }
+        if (record.enqueuedAt !== record.expectedJob.createdAt) {
+          context.addIssue({
+            code: "custom",
+            path: ["enqueuedAt"],
+            message: "enqueuedAt must equal expectedJob.createdAt",
+          });
+        }
+      })
+      .nullable()
+      .default(null),
+    leaderboardVisualProfile: leaderboardVisualProfileSchema
+      .nullable()
+      .default(null),
+    leaderboardProfileAttemptedFingerprint: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable()
+      .default(null),
     pendingComparison: z
       .union([
         z
@@ -339,6 +430,9 @@ function resetSession(
     sessionId,
     ready: [],
     refillJobs: [],
+    leaderboardProfileJob: null,
+    leaderboardVisualProfile: null,
+    leaderboardProfileAttemptedFingerprint: null,
     pendingComparison: null,
     pendingSelectionBaseline: null,
     consecutiveFallbackDraws: 0,

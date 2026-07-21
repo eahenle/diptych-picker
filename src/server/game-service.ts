@@ -11,6 +11,7 @@ import {
   type BufferedCandidate,
   type CandidateRating,
   type ChallengerState,
+  type LeaderboardVisualProfile,
   type PendingComparisonReceipt,
   type PendingSelectionBaseline,
   type RefillJobRecord,
@@ -45,6 +46,7 @@ import type {
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
+import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import type { AssetStore } from "./providers";
 import type { GameRepository } from "./repository";
 
@@ -94,6 +96,7 @@ export class GameService {
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createId: () => string = () => crypto.randomUUID(),
     private readonly random: () => number = Math.random,
+    private readonly leaderboardProfiles?: LeaderboardProfileCoordinator,
   ) {}
 
   async assertIdle(): Promise<void> {
@@ -470,6 +473,8 @@ export class GameService {
       await this.challengerRepository.save(challengers);
     }
 
+    challengers = await this.syncLeaderboardProfile(game, challengers);
+
     challengers = await this.prepareComparison(game, challengers);
 
     const prepared = await this.completePreparedSelection(game, challengers);
@@ -718,12 +723,149 @@ export class GameService {
     return cleaned;
   }
 
+  private async syncLeaderboardProfile(
+    game: GameState,
+    state: ChallengerState,
+  ): Promise<ChallengerState> {
+    const coordinator = this.leaderboardProfiles;
+    if (!coordinator) return state;
+
+    let next = state;
+    const record = next.leaderboardProfileJob;
+    if (record) {
+      const [work, result] = await Promise.all([
+        coordinator.readWork(record.jobId),
+        coordinator.readResult(record.jobId),
+      ]);
+      if (!result) {
+        if (!work)
+          await this.ensureLeaderboardProfileEnqueued(record.expectedJob);
+        else if (!isDeepStrictEqual(work, record.expectedJob)) {
+          await coordinator.archive(record.jobId);
+          next = {
+            ...next,
+            leaderboardProfileJob: null,
+            leaderboardProfileAttemptedFingerprint: null,
+          };
+          await this.challengerRepository.save(next);
+        }
+        return next;
+      }
+
+      let visualProfile = next.leaderboardVisualProfile ?? null;
+      let attemptedFingerprint: string | null =
+        next.leaderboardProfileAttemptedFingerprint ?? record.fingerprint;
+      if (
+        work &&
+        isDeepStrictEqual(work, record.expectedJob) &&
+        result.status === "completed" &&
+        result.kind === "leaderboard-profile" &&
+        result.fingerprint === record.fingerprint
+      ) {
+        visualProfile = {
+          fingerprint: result.fingerprint,
+          sourceCandidateIds: record.expectedJob.sources.map(
+            ({ candidateId }) => candidateId,
+          ),
+          profile: result.profile,
+          reasoningSummary: result.reasoningSummary,
+          analyzedAt: result.completedAt,
+        };
+      } else if (!work || !isDeepStrictEqual(work, record.expectedJob)) {
+        attemptedFingerprint = null;
+      }
+      await coordinator.archive(record.jobId);
+      next = {
+        ...next,
+        leaderboardProfileJob: null,
+        leaderboardVisualProfile: visualProfile,
+        leaderboardProfileAttemptedFingerprint: attemptedFingerprint,
+      };
+      await this.challengerRepository.save(next);
+    }
+
+    if (
+      (game.preferenceProfile?.adaptationMode ?? "static") !== "adaptive" ||
+      next.leaderboardProfileJob
+    ) {
+      return next;
+    }
+    const desired = coordinator.desired(next);
+    if (
+      !desired ||
+      next.leaderboardVisualProfile?.fingerprint === desired.fingerprint ||
+      next.leaderboardProfileAttemptedFingerprint === desired.fingerprint
+    ) {
+      return next;
+    }
+
+    const id = this.createId();
+    const createdAt = this.now();
+    let job: Parameters<LeaderboardProfileCoordinator["enqueue"]>[0];
+    try {
+      job = await coordinator.prepare(id, createdAt, desired);
+    } catch (error) {
+      console.warn("Leaderboard visual analysis could not be prepared", error);
+      next = {
+        ...next,
+        leaderboardProfileAttemptedFingerprint: desired.fingerprint,
+      };
+      await this.challengerRepository.save(next);
+      return next;
+    }
+    next = {
+      ...next,
+      leaderboardProfileJob: {
+        jobId: id,
+        fingerprint: desired.fingerprint,
+        enqueuedAt: createdAt,
+        expectedJob: job,
+      },
+      leaderboardProfileAttemptedFingerprint: desired.fingerprint,
+    };
+    await this.challengerRepository.save(next);
+    await this.ensureLeaderboardProfileEnqueued(job);
+    return next;
+  }
+
+  private currentLeaderboardVisualProfile(
+    state: ChallengerState,
+    game: GameState,
+  ): LeaderboardVisualProfile | undefined {
+    if ((game.preferenceProfile?.adaptationMode ?? "static") !== "adaptive") {
+      return undefined;
+    }
+    const desired = this.leaderboardProfiles?.desired(state);
+    const visualProfile = state.leaderboardVisualProfile ?? undefined;
+    return desired && visualProfile?.fingerprint === desired.fingerprint
+      ? visualProfile
+      : undefined;
+  }
+
+  private async ensureLeaderboardProfileEnqueued(
+    job: Parameters<LeaderboardProfileCoordinator["enqueue"]>[0],
+  ): Promise<void> {
+    const coordinator = this.leaderboardProfiles;
+    if (!coordinator) return;
+    try {
+      await coordinator.enqueue(job);
+    } catch (error) {
+      const work = await coordinator.readWork(job.id);
+      if (work && isDeepStrictEqual(work, job)) return;
+      throw error;
+    }
+  }
+
   private addRefillCapacity(
     state: ChallengerState,
     context: RefillContext,
   ): CapacityResult {
     const jobs: GenerationJob[] = [];
     const records: RefillJobRecord[] = [];
+    const leaderboardVisualProfile = this.currentLeaderboardVisualProfile(
+      state,
+      context.game,
+    );
     const deficit = Math.max(
       0,
       this.config.bufferTarget - state.ready.length - state.refillJobs.length,
@@ -749,6 +891,7 @@ export class GameService {
         selectionHistory: context.game.history.slice(-12),
         recentConcepts: recentConcepts(context.game, 10),
         leaderboardEvidence: summarizeLeaderboardPreferenceEvidence(state),
+        ...(leaderboardVisualProfile ? { leaderboardVisualProfile } : {}),
         preferenceSeed: context.game.preferenceSeed,
         preferenceProfile:
           context.game.preferenceProfile ??

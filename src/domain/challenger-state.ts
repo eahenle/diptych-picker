@@ -4,6 +4,7 @@ import type {
   DisplayedEloRatings,
   GameState,
   PreferenceProfile,
+  PreferenceRevision,
   SelectionHistory,
   Side,
 } from "./game";
@@ -51,11 +52,57 @@ export interface RefillGenerationJobSnapshot {
   selectionHistory: SelectionHistory[];
   recentConcepts: string[];
   leaderboardEvidence?: LeaderboardPreferenceEvidence;
+  leaderboardVisualProfile?: LeaderboardVisualProfile;
   preferenceSeed: string;
   preferenceProfile?: PreferenceProfile;
   sessionId: string;
   pinnedWinnerId: string;
   comparisonOutcome?: "tie" | "both-lose";
+}
+
+export interface ProfileSourceImageSnapshot {
+  filename: string;
+  path: string;
+  contentType: "image/png";
+  width: number;
+  height: number;
+  byteLength: number;
+}
+
+export interface LeaderboardProfileSourceSnapshot {
+  candidateId: string;
+  rank: number;
+  rating: number;
+  wins: number;
+  losses: number;
+  favorite: boolean;
+  source: CandidateRating["source"];
+  concept: string;
+  style: string[];
+  sourceImage: ProfileSourceImageSnapshot;
+}
+
+export interface LeaderboardProfileJobSnapshot {
+  id: string;
+  kind: "leaderboard-profile";
+  createdAt: string;
+  fingerprint: string;
+  sources: LeaderboardProfileSourceSnapshot[];
+}
+
+export interface LeaderboardProfileJobRecord {
+  jobId: string;
+  fingerprint: string;
+  enqueuedAt: string;
+  expectedJob: LeaderboardProfileJobSnapshot;
+}
+
+export interface LeaderboardVisualProfile {
+  fingerprint: string;
+  sourceCandidateIds: string[];
+  profile: PreferenceRevision;
+  reasoningSummary: string;
+  analyzedAt: string;
 }
 
 export interface WinningComparisonReceipt {
@@ -99,6 +146,9 @@ export interface ChallengerState {
   sessionId: string;
   ready: BufferedCandidate[];
   refillJobs: RefillJobRecord[];
+  leaderboardProfileJob?: LeaderboardProfileJobRecord | null;
+  leaderboardVisualProfile?: LeaderboardVisualProfile | null;
+  leaderboardProfileAttemptedFingerprint?: string | null;
   pendingComparison: PendingComparisonReceipt | null;
   pendingSelectionBaseline?: PendingSelectionBaseline | null;
   ratings: CandidateRating[];

@@ -53,9 +53,12 @@ const root = dataDirectory();
 const mailbox = join(root, "agent-mailbox");
 
 const activeJob = await assertActiveJob(mailbox, jobId);
-if (activeJob.kind === "source-profile") {
+if (
+  activeJob.kind === "source-profile" ||
+  activeJob.kind === "leaderboard-profile"
+) {
   throw new Error(
-    "Source-profile jobs must use npm run agent:complete-profile",
+    "Profile-analysis jobs must use npm run agent:complete-profile",
   );
 }
 const adaptationMode =
