@@ -596,6 +596,45 @@
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
+  text-align: center;
+}
+.imageInspector figcaption small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0.035em;
+  text-transform: none;
+}
+.inspectorNavigation {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 44px;
+  height: 64px;
+  color: var(--text);
+  font-size: 40px;
+  line-height: 1;
+  background: rgba(7, 8, 10, 0.78);
+  border: 1px solid #484247;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+.inspectorNavigation:hover,
+.inspectorNavigation:focus-visible {
+  color: #fff;
+  border-color: var(--copper-bright);
+  outline: 2px solid rgba(216, 139, 104, 0.32);
+  outline-offset: 2px;
+}
+.inspectorPrevious {
+  left: 18px;
+}
+.inspectorNext {
+  right: 18px;
 }
 .leaderboardClose {
   position: sticky;
