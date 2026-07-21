@@ -9,6 +9,7 @@ import type {
   PreferenceProfile,
 } from "@/domain/game";
 import {
+  refillJobMatchesGenerationPreferences,
   summarizeBufferHealth,
   summarizeComparisonHistory,
   summarizeDisplayedScores,
@@ -256,10 +257,31 @@ export async function getOrCreateGame(): Promise<GameStartState> {
 }
 
 export async function getBufferHealth(): Promise<BufferHealth> {
+  const [challengers, game] = await Promise.all([
+    challengerRepository.load(),
+    repository.load(),
+  ]);
+  const refillJobs = challengers?.refillJobs ?? [];
+  const pending = (
+    await Promise.all(
+      refillJobs.map(({ jobId }) => fileGenerationMailbox.readPending(jobId)),
+    )
+  ).filter(Boolean).length;
+  const draining = game
+    ? refillJobs.filter(
+        ({ expectedJob }) =>
+          !refillJobMatchesGenerationPreferences(expectedJob, game),
+      ).length
+    : 0;
   return summarizeBufferHealth(
-    await challengerRepository.load(),
+    challengers,
     challengerConfig.bufferTarget,
     challengerConfig.poolMaximum,
+    {
+      active: Math.max(0, refillJobs.length - pending),
+      pending,
+      draining,
+    },
   );
 }
 

@@ -48,6 +48,9 @@ describe("GET /api/game", () => {
     getBufferHealth.mockResolvedValue({
       ready: 5,
       inFlight: 0,
+      active: 0,
+      pending: 0,
+      draining: 0,
       target: 5,
       pool: 30,
       poolMaximum: 50,
@@ -76,6 +79,9 @@ describe("GET /api/game", () => {
       bufferHealth: {
         ready: 5,
         inFlight: 0,
+        active: 0,
+        pending: 0,
+        draining: 0,
         target: 5,
         pool: 30,
         poolMaximum: 50,
@@ -90,6 +96,9 @@ describe("GET /api/game/health", () => {
     const health = {
       ready: 4,
       inFlight: 1,
+      active: 1,
+      pending: 0,
+      draining: 0,
       target: 5,
       pool: 12,
       poolMaximum: 50,
@@ -112,6 +121,9 @@ describe("POST /api/game/start", () => {
     getBufferHealth.mockResolvedValue({
       ready: 5,
       inFlight: 0,
+      active: 0,
+      pending: 0,
+      draining: 0,
       target: 5,
       pool: 7,
       poolMaximum: 50,
@@ -151,6 +163,9 @@ describe("GET and PUT /api/game/snapshot", () => {
     getBufferHealth.mockResolvedValue({
       ready: 3,
       inFlight: 2,
+      active: 1,
+      pending: 1,
+      draining: 0,
       target: 5,
       pool: 20,
       poolMaximum: 50,

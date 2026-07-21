@@ -597,6 +597,9 @@ describe("GameScreen challenger reconciliation", () => {
           bufferHealth: {
             ready: 3,
             inFlight: 2,
+            active: 1,
+            pending: 1,
+            draining: 0,
             target: 5,
             pool: 30,
             poolMaximum: 50,
@@ -609,7 +612,9 @@ describe("GameScreen challenger reconciliation", () => {
     render(<GameScreen />);
 
     expect(
-      await screen.findByLabelText("Ready queue 3 of 5; 2 generating"),
+      await screen.findByLabelText(
+        "View queue details; 3 ready, 1 generating, 1 waiting",
+      ),
     ).toHaveTextContent("Queue3/5+2");
     expect(
       screen.getByLabelText("View pool leaderboard; 30 of 50 reusable images"),
@@ -625,6 +630,21 @@ describe("GameScreen challenger reconciliation", () => {
         name: "Choose image A: left concept. Elo rating 1017",
       }),
     ).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "View queue details; 3 ready, 1 generating, 1 waiting",
+      }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Generation queue" }),
+    ).toHaveTextContent("The compact +2 count");
+    expect(screen.getByText("Generating now").nextSibling).toHaveTextContent(
+      "1",
+    );
+    expect(
+      screen.getByText("Waiting for a worker").nextSibling,
+    ).toHaveTextContent("1");
   });
 
   it("replaces Elo with accessible first-appearance and pool-exit cues", async () => {
@@ -784,6 +804,9 @@ describe("GameScreen challenger reconciliation", () => {
             bufferHealth: {
               ready: 5,
               inFlight: 0,
+              active: 0,
+              pending: 0,
+              draining: 0,
               target: 5,
               pool: 2,
               poolMaximum: 50,

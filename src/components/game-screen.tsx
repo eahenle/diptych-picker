@@ -41,6 +41,7 @@ import {
   type InspectableCandidate,
 } from "./image-inspector";
 import { PoolLeaderboard } from "./pool-leaderboard";
+import { QueueDetails } from "./queue-details";
 import {
   PreferenceProfileModal,
   type PreferenceField,
@@ -299,6 +300,7 @@ export function GameScreen() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [queueDetailsOpen, setQueueDetailsOpen] = useState(false);
   const [leaderboardEntries, setLeaderboardEntries] = useState<
     PoolLeaderboardEntry[]
   >([]);
@@ -1001,6 +1003,7 @@ export function GameScreen() {
       newGameOpen ||
       loadGameOpen ||
       leaderboardOpen ||
+      queueDetailsOpen ||
       historyOpen ||
       Boolean(imageInspector),
     onSelect: select,
@@ -1617,10 +1620,12 @@ export function GameScreen() {
             {bufferHealth && bufferStatus ? (
               <>
                 <i aria-hidden="true" />
-                <span
-                  className={styles.supplyMetric}
-                  aria-label={`Ready queue ${bufferHealth.ready} of ${bufferHealth.target}; ${bufferHealth.inFlight} generating`}
-                  title={`${bufferHealth.inFlight} challenger${bufferHealth.inFlight === 1 ? "" : "s"} generating`}
+                <button
+                  type="button"
+                  className={`${styles.supplyMetric} ${styles.metricButton}`}
+                  aria-label={`View queue details; ${bufferHealth.ready} ready, ${bufferHealth.active} generating, ${bufferHealth.pending} waiting`}
+                  title="View generation queue details"
+                  onClick={() => setQueueDetailsOpen(true)}
                 >
                   <span
                     className={styles.healthDot}
@@ -1634,7 +1639,7 @@ export function GameScreen() {
                   {bufferHealth.inFlight > 0 ? (
                     <small>+{bufferHealth.inFlight}</small>
                   ) : null}
-                </span>
+                </button>
                 <i aria-hidden="true" />
                 <button
                   type="button"
@@ -1832,6 +1837,13 @@ export function GameScreen() {
           onToggleFavorite={(candidateId, favorite) =>
             void updateFavorite(candidateId, favorite)
           }
+        />
+      ) : null}
+
+      {queueDetailsOpen && bufferHealth ? (
+        <QueueDetails
+          health={bufferHealth}
+          onClose={() => setQueueDetailsOpen(false)}
         />
       ) : null}
 

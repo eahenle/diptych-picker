@@ -249,14 +249,36 @@ export function summarizeBufferHealth(
   state: ChallengerState | null,
   target = DEFAULT_READY_TARGET,
   poolMaximum = DEFAULT_POOL_MAXIMUM,
+  work: Pick<BufferHealth, "active" | "pending" | "draining"> = {
+    active: state?.refillJobs.length ?? 0,
+    pending: 0,
+    draining: 0,
+  },
 ): BufferHealth {
   return {
     ready: state?.ready.length ?? 0,
     inFlight: state?.refillJobs.length ?? 0,
+    ...work,
     target,
     pool: state?.ratings.filter((item) => item.poolMember).length ?? 0,
     poolMaximum,
   };
+}
+
+export function refillJobMatchesGenerationPreferences(
+  job: Pick<
+    RefillGenerationJobSnapshot,
+    "preferenceSeed" | "preferenceProfile"
+  >,
+  game: Pick<GameState, "preferenceSeed" | "preferenceProfile">,
+): boolean {
+  return (
+    job.preferenceSeed === game.preferenceSeed &&
+    (job.preferenceProfile?.adaptationMode ?? "static") ===
+      (game.preferenceProfile?.adaptationMode ?? "static") &&
+    (job.preferenceProfile?.adaptationStrength ?? "guided") ===
+      (game.preferenceProfile?.adaptationStrength ?? "guided")
+  );
 }
 
 export function summarizeDisplayedEloRatings(
