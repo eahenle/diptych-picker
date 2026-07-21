@@ -369,6 +369,19 @@ export async function updatePreferenceSeed(
   );
 }
 
+export async function savePreferencePreset(
+  name: string,
+  profile: PreferenceProfile,
+): Promise<GameState> {
+  return gameService.savePreferencePreset(name, profile);
+}
+
+export async function deletePreferencePreset(
+  presetId: string,
+): Promise<GameState> {
+  return gameService.deletePreferencePreset(presetId);
+}
+
 export async function dismissGenerationNotice(): Promise<GameState> {
   return gameService.dismissGenerationNotice();
 }

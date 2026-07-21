@@ -12,6 +12,8 @@ const select = vi.fn();
 const tie = vi.fn();
 const bothLose = vi.fn();
 const updatePreferenceSeed = vi.fn();
+const savePreferencePreset = vi.fn();
+const deletePreferencePreset = vi.fn();
 const dismissGenerationNotice = vi.fn();
 const requestSourceProfile = vi.fn();
 const getSourceProfileStatus = vi.fn();
@@ -29,6 +31,8 @@ vi.mock("@/server/runtime", () => ({
   publishGameExport,
   gameService: { select, tie, bothLose },
   updatePreferenceSeed,
+  savePreferencePreset,
+  deletePreferencePreset,
   dismissGenerationNotice,
   requestSourceProfile,
   getSourceProfileStatus,
@@ -321,6 +325,64 @@ describe("PATCH /api/game", () => {
 
     expect(response.status).toBe(400);
     expect(updatePreferenceSeed).not.toHaveBeenCalled();
+  });
+});
+
+describe("preference presets", () => {
+  const profile = {
+    themes: "mythic engineering and strange ecosystems",
+    inspiration: "sharp off-axis lighting",
+    adaptationMode: "static" as const,
+    adaptationStrength: "guided" as const,
+    adaptationLastDecision: 0,
+    adaptationSourceWinnerIds: [],
+    adaptationSourceRejectedIds: [],
+    mediaTypes: "large-format photography",
+    visualStyle: "cinematic and tactile",
+    colorPalette: "ultraviolet, copper, and oxblood",
+    contentLevel: "family-friendly" as const,
+    avoid: "readable text",
+  };
+
+  beforeEach(() => {
+    savePreferencePreset.mockReset();
+    deletePreferencePreset.mockReset();
+    savePreferencePreset.mockResolvedValue({ preferencePresets: [] });
+    deletePreferencePreset.mockResolvedValue({ preferencePresets: [] });
+  });
+
+  it("saves the current draft under a trimmed name", async () => {
+    const { POST } = await import("./preferences/presets/route");
+    const response = await POST(
+      new Request("http://localhost/api/game/preferences/presets", {
+        method: "POST",
+        body: JSON.stringify({ name: " Copper study ", profile }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(savePreferencePreset).toHaveBeenCalledWith("Copper study", profile);
+  });
+
+  it("deletes a preset by id and rejects malformed saves", async () => {
+    const { DELETE, POST } = await import("./preferences/presets/route");
+    const deleted = await DELETE(
+      new Request("http://localhost/api/game/preferences/presets", {
+        method: "DELETE",
+        body: JSON.stringify({ presetId: "preset-1" }),
+      }),
+    );
+    const malformed = await POST(
+      new Request("http://localhost/api/game/preferences/presets", {
+        method: "POST",
+        body: JSON.stringify({ name: "", profile }),
+      }),
+    );
+
+    expect(deleted.status).toBe(200);
+    expect(deletePreferencePreset).toHaveBeenCalledWith("preset-1");
+    expect(malformed.status).toBe(400);
+    expect(savePreferencePreset).not.toHaveBeenCalled();
   });
 });
 

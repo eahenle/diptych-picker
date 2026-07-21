@@ -44,6 +44,14 @@ export interface PreferenceProfileSnapshot {
   variationSource?: VariationSource;
 }
 
+export interface PreferencePreset {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  profile: PreferenceProfile;
+}
+
 export interface CandidateLineage {
   kind: "variation";
   parentCandidateId: string;
@@ -128,6 +136,7 @@ export interface GameState {
   preferenceSeed: string;
   preferenceProfile?: PreferenceProfile;
   preferenceRevisions?: PreferenceProfileSnapshot[];
+  preferencePresets?: PreferencePreset[];
   variationSource?: VariationSource;
   pendingSelection?: PendingSelection;
   mailboxCleanupJobId?: string;

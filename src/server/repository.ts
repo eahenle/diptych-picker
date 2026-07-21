@@ -255,6 +255,20 @@ const gameStateSchema: z.ZodType<GameState> = z
       )
       .max(25)
       .optional(),
+    preferencePresets: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1),
+            name: z.string().trim().min(1).max(50),
+            createdAt: z.string().trim().min(1),
+            updatedAt: z.string().trim().min(1),
+            profile: preferenceProfileSchema,
+          })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
     variationSource: z
       .object({
         candidateId: z.string().trim().min(1),

@@ -634,6 +634,54 @@ test("persists a fine-grained preference profile and composes generation context
   expect(state.game.preferenceRevisions).toHaveLength(2);
 });
 
+test("saves and applies named preference presets as drafts", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  const inspiration = page.getByLabel("Inspiration");
+  const activeProfile = (await (await request.get("/api/game")).json()).game
+    .preferenceProfile;
+  await inspiration.fill("violet rim light and copper reflections");
+  await page.getByText("Saved presets").click();
+  await page.getByLabel("Preset name").fill("Copper nocturne");
+
+  const savePresetResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/presets") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save current draft" }).click();
+  expect((await savePresetResponse).status()).toBe(200);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByText("Copper nocturne")).toBeVisible();
+
+  await inspiration.fill("temporary unsaved edit");
+  await page.getByRole("button", { name: "Apply to draft" }).click();
+  await expect(inspiration).toHaveValue(
+    "violet rim light and copper reflections",
+  );
+  await expect(page.getByText(/applied to the draft/i)).toBeVisible();
+
+  let state = await (await request.get("/api/game")).json();
+  expect(state.game.preferenceProfile).toEqual(activeProfile);
+  expect(state.game.preferencePresets).toHaveLength(1);
+
+  const deletePresetResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/presets") &&
+      response.request().method() === "DELETE",
+  );
+  await page.getByRole("button", { name: "Delete" }).click();
+  expect((await deletePresetResponse).status()).toBe(200);
+  await expect(
+    page.getByRole("button", { name: "Apply to draft" }),
+  ).toHaveCount(0);
+  state = await (await request.get("/api/game")).json();
+  expect(state.game.preferencePresets).toEqual([]);
+  expect(state.game.preferenceProfile).toEqual(activeProfile);
+});
+
 test("derives an editable preference profile from a private source image", async ({
   page,
   request,

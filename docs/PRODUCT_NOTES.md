@@ -13,14 +13,14 @@ normal implementation and play-testing loop.
        history, and favorites. Reuse the private source-image analysis pipeline to
        extract transferable visual themes, then preserve parent and profile lineage
        for every resulting branch.
-3. [ ] Add an attributable preference-revision timeline with field-level diffs,
+3. [x] Add an attributable preference-revision timeline with field-level diffs,
        rollback, freeze, and save-as-preset controls.
 4. [ ] Continue the staged weighted prompt-deck and persistent `co-proc` transport
        design in [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md),
        keeping durable mailbox operation as the fallback during migration.
-5. [ ] After those foundations, consider named preference presets, one-step undo,
-       tournament play, and a dedicated favorites gallery. Broad refactoring should
-       follow feature boundaries instead of preceding them.
+5. [ ] After those foundations, consider one-step undo, tournament play, and a
+       dedicated favorites gallery. Broad refactoring should follow feature
+       boundaries instead of preceding them.
 
 Compatibility remains the default: a moderate, non-blocking advisory alone is
 not sufficient reason to introduce a breaking save, API, or workflow change.
@@ -59,8 +59,19 @@ first change also captures its preceding baseline, while provenance-only
 evidence updates do not create noisy revisions. The Preferences modal shows
 newest-first origin, time, changed fields, and variation source where relevant.
 A revision can be restored as an editable draft or as a Frozen draft; neither
-action changes the game until **Save profile** is confirmed. Named preset
-creation remains the final part of this roadmap item.
+action changes the game until **Save profile** is confirmed.
+
+### Named preference presets
+
+The Preferences modal can save its current draft under a name without applying
+it to the game. Presets are durable in the game and its exported snapshot,
+bounded to twenty entries, and a case-insensitive matching name replaces the
+older value. Applying a preset only updates the editable draft and clears any
+candidate-specific variation lineage; **Save profile** remains the explicit
+commit point. Session-specific adaptation evidence and checkpoint counters are
+reset so a reused preset begins cleanly in the current game. Deleting a preset
+does not alter the active profile or its revision history. The saved shape is
+optional so existing games remain valid.
 
 ## 2026-07-20
 

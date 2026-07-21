@@ -168,6 +168,129 @@
   background: rgba(167, 107, 239, 0.08);
 }
 
+.presets {
+  margin: 14px 0 18px;
+  border: 1px solid rgba(180, 104, 73, 0.32);
+  background: rgba(180, 104, 73, 0.035);
+}
+
+.presets summary {
+  padding: 11px 12px;
+  color: #d9d2cb;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.presets summary strong {
+  margin-left: 6px;
+  color: var(--copper-bright);
+}
+
+.presets form {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.presets form > label {
+  color: #d9d2cb;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.presets form > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.presets form > small,
+.presetEmpty {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.presets ul {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0 10px 10px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.presets li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.presets li > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.presets li strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presets time {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.presets li > div {
+  display: flex;
+  gap: 7px;
+}
+
+.presets button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: #e0c7bc;
+  font-size: 10px;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid rgba(180, 104, 73, 0.42);
+  cursor: pointer;
+}
+
+.presets button:hover,
+.presets button:focus-visible {
+  color: #fff;
+  border-color: var(--copper-bright);
+  outline: none;
+}
+
+.presets button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.dialog p.presetError {
+  margin: 0 10px 10px;
+  color: #f0a49a;
+  font-size: 10px;
+}
+
+.dialog p.presetEmpty {
+  margin: 0;
+  padding: 0 10px 10px;
+}
+
 .revisionHistory {
   margin: 14px 0 18px;
   border: 1px solid #383337;
@@ -498,6 +621,11 @@
 
   .fieldWide {
     grid-column: 1;
+  }
+
+  .presets li {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
