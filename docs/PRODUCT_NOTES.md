@@ -73,6 +73,16 @@ reset so a reused preset begins cleanly in the current game. Deleting a preset
 does not alter the active profile or its revision history. The saved shape is
 optional so existing games remain valid.
 
+### Comprehensive codebase hardening
+
+The post-feature review is recorded in
+[Codebase Review — 2026-07-21](CODEBASE_REVIEW_2026-07-21.md). Its first
+non-breaking pass centralizes preference validation across API, mailbox, and
+storage boundaries; adds schema-compatibility and launcher-contract tests; and
+extends CI to cover a production build plus all Chromium game flows. Larger
+`GameScreen` and `GameService` decompositions remain explicitly staged as
+behavior-neutral follow-ups rather than being mixed into feature changes.
+
 ## 2026-07-20
 
 ### Large image inspection
