@@ -8,7 +8,7 @@ import modalStyles from "./game-modal.module.css";
 import styles from "./pool-leaderboard.module.css";
 
 interface PoolLeaderboardProps {
-  entries: PoolLeaderboardEntry[];
+  entries: readonly PoolLeaderboardEntry[];
   loading: boolean;
   error: string | null;
   favoriteError: string | null;

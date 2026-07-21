@@ -47,7 +47,7 @@ Install the repository's pre-commit hook once per clone:
 npm run hooks:install
 ```
 
-The hook runs formatting, lint, and unit/integration tests through `npm run check`. Pull requests and pushes to `main` run the same focused check in GitHub Actions.
+The hook runs formatting, lint, TypeScript validation, and unit/integration tests through `npm run check`. Pull requests and pushes to `main` run the same focused check in GitHub Actions.
 
 ## Challenger buffer and generation loop
 
