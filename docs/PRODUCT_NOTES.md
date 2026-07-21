@@ -1,5 +1,43 @@
 # Product Notes
 
+## Agreed next directions
+
+These directions are recorded as the current product sequence. Checked items
+have shipped and are detailed below; unchecked items remain subject to the
+normal implementation and play-testing loop.
+
+1. [x] Make Queue inspectable so the compact count clearly separates ready images,
+       jobs actively generating, jobs waiting for a worker, and superseded work
+       draining after a preference change. Keep the endpoint aggregate-only.
+2. [ ] Add **Explore variations** from active candidates, leaderboard entries,
+       history, and favorites. Reuse the private source-image analysis pipeline to
+       extract transferable visual themes, then preserve parent and profile lineage
+       for every resulting branch.
+3. [ ] Add an attributable preference-revision timeline with field-level diffs,
+       rollback, freeze, and save-as-preset controls.
+4. [ ] Continue the staged weighted prompt-deck and persistent `co-proc` transport
+       design in [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md),
+       keeping durable mailbox operation as the fallback during migration.
+5. [ ] After those foundations, consider named preference presets, one-step undo,
+       tournament play, and a dedicated favorites gallery. Broad refactoring should
+       follow feature boundaries instead of preceding them.
+
+Compatibility remains the default: a moderate, non-blocking advisory alone is
+not sufficient reason to introduce a breaking save, API, or workflow change.
+Prefer additive validation and migration-safe hardening unless a higher-severity
+risk justifies a deliberate compatibility break.
+
+## 2026-07-21
+
+### Inspectable generation queue
+
+The Queue metric opens an aggregate-only status view that distinguishes ready
+images, jobs actively generating, and jobs still waiting for a worker. Its copy
+explicitly explains that the compact `+N` is occupied queue capacity rather than
+worker concurrency. When preferences change while work is active, the view also
+reports old-profile jobs that are safely draining before replacement capacity
+opens. Prompts, job identifiers, and mailbox paths remain private.
+
 ## 2026-07-20
 
 ### Large image inspection

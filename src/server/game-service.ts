@@ -6,6 +6,7 @@ import {
   admitGeneratedCandidate,
   backfillGeneratedPool,
   recordGenerationTurnaround,
+  refillJobMatchesGenerationPreferences,
   summarizeLeaderboardPreferenceEvidence,
   updateElo,
   type BufferedCandidate,
@@ -563,7 +564,7 @@ export class GameService {
     const { record, work, result } = observation;
     const expected = record.expectedJob;
 
-    if (!this.jobMatchesGenerationPreferences(expected, game)) {
+    if (!refillJobMatchesGenerationPreferences(expected, game)) {
       // Do not interrupt a worker that already owns the old request. Once it
       // terminates, archive the result without admitting it to the ready FIFO.
       if (work && !result) return { game, challengers };
@@ -1631,19 +1632,6 @@ export class GameService {
     const updated = { ...game };
     delete updated.generationNotice;
     return updated;
-  }
-
-  private jobMatchesGenerationPreferences(
-    job: GenerationJob,
-    game: GameState,
-  ): boolean {
-    return (
-      job.preferenceSeed === game.preferenceSeed &&
-      (job.preferenceProfile?.adaptationMode ?? "static") ===
-        (game.preferenceProfile?.adaptationMode ?? "static") &&
-      (job.preferenceProfile?.adaptationStrength ?? "guided") ===
-        (game.preferenceProfile?.adaptationStrength ?? "guided")
-    );
   }
 
   private withStateLocks<T>(operation: () => Promise<T>): Promise<T> {

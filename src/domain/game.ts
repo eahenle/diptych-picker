@@ -116,6 +116,9 @@ export interface GameState {
 export interface BufferHealth {
   ready: number;
   inFlight: number;
+  active: number;
+  pending: number;
+  draining: number;
   target: number;
   pool: number;
   poolMaximum: number;

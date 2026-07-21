@@ -7,6 +7,7 @@ import {
   drawFallbackBatch,
   popReady,
   recordGenerationTurnaround,
+  refillJobMatchesGenerationPreferences,
   refillDeficit,
   summarizeBufferHealth,
   summarizeComparisonHistory,
@@ -159,10 +160,28 @@ describe("challenger state", () => {
     ).toEqual({
       ready: 2,
       inFlight: 1,
+      active: 1,
+      pending: 0,
+      draining: 0,
       target: 5,
       pool: 1,
       poolMaximum: 50,
     });
+  });
+
+  it("identifies refill work from an earlier preference configuration", () => {
+    const record = refillJob("job-1");
+    const current = game();
+
+    expect(
+      refillJobMatchesGenerationPreferences(record.expectedJob, current),
+    ).toBe(true);
+    expect(
+      refillJobMatchesGenerationPreferences(record.expectedJob, {
+        ...current,
+        preferenceSeed: "a newly composed preference seed",
+      }),
+    ).toBe(false);
   });
 
   it("rounds displayed Elo ratings and falls back for an unrated candidate", () => {
