@@ -5,7 +5,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -15,8 +14,6 @@ import {
   beginTie,
   isSelectionBoundWait,
   mergeServerResult,
-  preferenceAdaptationFreedom,
-  preferenceAdaptationProgress,
   preferenceProfileFromSeed,
   willRetireChampion,
   type BufferHealth,
@@ -41,6 +38,10 @@ import {
 } from "./image-inspector";
 import { ModalShell } from "./modal-shell";
 import { PoolLeaderboard } from "./pool-leaderboard";
+import {
+  PreferenceProfileModal,
+  type PreferenceField,
+} from "./preference-profile-modal";
 import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
 import styles from "./game-screen.module.css";
 
@@ -333,7 +334,6 @@ export function GameScreen() {
   );
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const sourceProfileInputRef = useRef<HTMLInputElement | null>(null);
   const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
   const queuedPreferenceSaveStartedRef = useRef(false);
@@ -1401,9 +1401,6 @@ export function GameScreen() {
         sourceProfileControllerRef.current = null;
         setSourceProfileAnalyzing(false);
       }
-      if (sourceProfileInputRef.current) {
-        sourceProfileInputRef.current.value = "";
-      }
     }
   };
 
@@ -1443,7 +1440,7 @@ export function GameScreen() {
     }
   };
 
-  const setPreferenceField = <Key extends keyof PreferenceProfile>(
+  const setPreferenceField = <Key extends PreferenceField>(
     key: Key,
     value: PreferenceProfile[Key],
   ) => {
@@ -1474,16 +1471,6 @@ export function GameScreen() {
 
   const retryAvailable =
     game?.round.status === "error" && Boolean(game.pendingSelection);
-  const preferencesBusy = preferencesSaving || sourceProfileAnalyzing;
-  const adaptationFreedom = preferenceAdaptationFreedom(preferenceDraft);
-  const adaptationFreedomValue = {
-    frozen: 0,
-    guided: 1,
-    unfettered: 2,
-  }[adaptationFreedom];
-  const adaptationProgress = game
-    ? preferenceAdaptationProgress(preferenceDraft, game.history.length)
-    : null;
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
   const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
@@ -2050,343 +2037,21 @@ export function GameScreen() {
       ) : null}
 
       {preferencesOpen && game ? (
-        <ModalShell
-          className={styles.preferencesModal}
+        <PreferenceProfileModal
+          profile={preferenceDraft}
+          historyLength={game.history.length}
+          saving={preferencesSaving}
+          saveQueued={preferenceSaveQueued}
+          sourceAnalyzing={sourceProfileAnalyzing}
+          sourceError={sourceProfileError}
+          sourceSummary={sourceProfileSummary}
+          selectionBoundWait={selectionBoundWait}
           onClose={closePreferences}
-          ariaBusy={preferencesBusy}
-          ariaLabelledBy="preferences-title"
-          ariaDescribedBy={
-            selectionBoundWait
-              ? "preferences-description preferences-wait-note"
-              : "preferences-description"
-          }
-          initialFocusSelector="#preference-themes"
-        >
-          <>
-            <div className={styles.preferenceTitleRow}>
-              <h2 id="preferences-title">Preference profile</h2>
-              <div className={styles.adaptationFreedom}>
-                <label htmlFor="adaptation-freedom">
-                  Model freedom <strong>{adaptationFreedom}</strong>
-                </label>
-                <input
-                  id="adaptation-freedom"
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="1"
-                  value={adaptationFreedomValue}
-                  style={
-                    {
-                      "--adaptation-fill": `${adaptationFreedomValue * 50}%`,
-                    } as CSSProperties
-                  }
-                  disabled={preferencesBusy}
-                  aria-label="Model rewrite freedom"
-                  aria-valuetext={
-                    adaptationFreedom === "frozen"
-                      ? "Frozen"
-                      : adaptationFreedom === "guided"
-                        ? "Guided, every 15 rounds"
-                        : "Unfettered, every 5 rounds"
-                  }
-                  onChange={(event) => {
-                    const freedom = ["frozen", "guided", "unfettered"] as const;
-                    setAdaptationFreedom(
-                      freedom[Number(event.target.value)] ?? "guided",
-                    );
-                  }}
-                />
-                <span className={styles.adaptationFreedomTicks}>
-                  <small>Frozen</small>
-                  <small>Guided</small>
-                  <small>Unfettered</small>
-                </span>
-              </div>
-            </div>
-            <p id="preferences-description">
-              {adaptationFreedom === "frozen"
-                ? "Frozen preserves every field exactly as saved."
-                : adaptationFreedom === "guided"
-                  ? "Guided allows restrained, leaderboard-driven refinements across the profile after every 15 completed rounds."
-                  : "Unfettered lets the model rewrite every preference field after every 5 completed rounds."}{" "}
-              {adaptationFreedom !== "frozen" &&
-              preferenceDraft.adaptationSourceWinnerIds.length +
-                preferenceDraft.adaptationSourceRejectedIds.length >
-                0
-                ? `Evidence — winners: ${preferenceDraft.adaptationSourceWinnerIds.length}; rejected: ${preferenceDraft.adaptationSourceRejectedIds.length}. `
-                : null}
-              Novelty rules still take priority.
-            </p>
-            {adaptationProgress ? (
-              <div
-                className={styles.adaptationCadence}
-                role="status"
-                aria-label="Preference rewrite cadence"
-              >
-                <span>
-                  {adaptationProgress.due
-                    ? "Rewrite checkpoint ready"
-                    : `Next rewrite checkpoint in ${adaptationProgress.remaining} ${adaptationProgress.remaining === 1 ? "round" : "rounds"}`}
-                </span>
-                <progress
-                  aria-label="Rounds toward next preference rewrite"
-                  max={adaptationProgress.interval}
-                  value={adaptationProgress.completed}
-                />
-                <small>
-                  {adaptationProgress.due
-                    ? "The next winning generated candidate may update this profile."
-                    : `${adaptationProgress.completed} of ${adaptationProgress.interval} rounds completed since the last rewrite checkpoint.`}
-                </small>
-              </div>
-            ) : null}
-            <div className={styles.sourceProfileImport}>
-              <span>
-                <strong>Start from an image</strong>
-                <small>
-                  Infer transferable content and style, then review every field
-                  before saving.
-                </small>
-              </span>
-              <input
-                ref={sourceProfileInputRef}
-                className={styles.hiddenFileInput}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                aria-label="Choose source image"
-                disabled={preferencesBusy}
-                onChange={(event) => {
-                  const image = event.target.files?.[0];
-                  if (image) void analyzeSourceImage(image);
-                }}
-              />
-              <button
-                type="button"
-                className={styles.utilityButton}
-                disabled={preferencesBusy}
-                onClick={() => sourceProfileInputRef.current?.click()}
-              >
-                Analyze image
-              </button>
-            </div>
-            <div className={styles.preferenceGrid}>
-              <div className={styles.fieldWide}>
-                <label htmlFor="preference-themes">
-                  <span>Themes &amp; subjects</span>
-                </label>
-                <textarea
-                  id="preference-themes"
-                  value={preferenceDraft.themes}
-                  disabled={preferencesBusy}
-                  onChange={(event) =>
-                    setPreferenceField("themes", event.target.value)
-                  }
-                  rows={4}
-                  minLength={20}
-                  maxLength={2000}
-                  placeholder="What worlds, subjects, or ideas should the game explore?"
-                  aria-describedby="preference-themes-hint"
-                />
-                <small id="preference-themes-hint">20–2,000 characters.</small>
-              </div>
-              <div className={styles.fieldWide}>
-                <label htmlFor="preference-inspiration">
-                  <span>Inspiration</span>
-                </label>
-                <textarea
-                  id="preference-inspiration"
-                  value={preferenceDraft.inspiration}
-                  disabled={preferencesBusy}
-                  onChange={(event) =>
-                    setPreferenceField("inspiration", event.target.value)
-                  }
-                  rows={3}
-                  maxLength={1000}
-                  placeholder="Optional composition, lighting, mood, or treatment cues"
-                  aria-describedby="preference-inspiration-hint"
-                />
-                <small id="preference-inspiration-hint">
-                  Optional composition, lighting, mood, or treatment cues.
-                </small>
-              </div>
-              <label className={styles.field}>
-                <span>Preferred media</span>
-                <input
-                  value={preferenceDraft.mediaTypes}
-                  disabled={preferencesBusy}
-                  maxLength={500}
-                  onChange={(event) =>
-                    setPreferenceField("mediaTypes", event.target.value)
-                  }
-                  placeholder="Photography, oil paint, linocut…"
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Visual style &amp; mood</span>
-                <input
-                  value={preferenceDraft.visualStyle}
-                  disabled={preferencesBusy}
-                  maxLength={500}
-                  onChange={(event) =>
-                    setPreferenceField("visualStyle", event.target.value)
-                  }
-                  placeholder="Cinematic, eerie, playful…"
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Color palette</span>
-                <input
-                  value={preferenceDraft.colorPalette}
-                  disabled={preferencesBusy}
-                  maxLength={500}
-                  onChange={(event) =>
-                    setPreferenceField("colorPalette", event.target.value)
-                  }
-                  placeholder="Oxblood, copper, ultraviolet…"
-                />
-              </label>
-              <fieldset className={`${styles.field} ${styles.contentField}`}>
-                <legend>Content range</legend>
-                <div className={styles.contentChoices}>
-                  <label className={styles.contentChoice}>
-                    <input
-                      type="radio"
-                      name="content-range"
-                      value="family-friendly"
-                      disabled={preferencesBusy}
-                      checked={
-                        preferenceDraft.contentLevel === "family-friendly"
-                      }
-                      onChange={() =>
-                        setPreferenceField("contentLevel", "family-friendly")
-                      }
-                    />
-                    <span>
-                      Family-friendly
-                      <small>Broadly suitable imagery</small>
-                    </span>
-                  </label>
-                  <label className={styles.contentChoice}>
-                    <input
-                      type="radio"
-                      name="content-range"
-                      value="adult-allowed"
-                      disabled={preferencesBusy}
-                      checked={preferenceDraft.contentLevel === "adult-allowed"}
-                      onChange={() =>
-                        setPreferenceField("contentLevel", "adult-allowed")
-                      }
-                    />
-                    <span>
-                      Adult themes
-                      <small>Mature, never explicit</small>
-                    </span>
-                  </label>
-                </div>
-              </fieldset>
-              <label className={styles.fieldWide}>
-                <span>Avoid or de-emphasize</span>
-                <textarea
-                  value={preferenceDraft.avoid}
-                  disabled={preferencesBusy}
-                  maxLength={800}
-                  onChange={(event) =>
-                    setPreferenceField("avoid", event.target.value)
-                  }
-                  rows={2}
-                  placeholder="Subjects, clichés, media, or colors you would rather see less often"
-                />
-              </label>
-            </div>
-            {sourceProfileAnalyzing ? (
-              <div
-                className={styles.preferenceSaveProgress}
-                role="status"
-                aria-live="polite"
-              >
-                <span
-                  className={styles.preferenceSaveSpinner}
-                  data-testid="source-profile-spinner"
-                  aria-hidden="true"
-                />
-                <span>
-                  <strong>Analyzing source image</strong>
-                  <small>
-                    Extracting transferable themes, composition, style, and
-                    palette…
-                  </small>
-                </span>
-              </div>
-            ) : sourceProfileError ? (
-              <p className={styles.sourceProfileError} role="alert">
-                {sourceProfileError}
-              </p>
-            ) : sourceProfileSummary ? (
-              <p className={styles.sourceProfileSummary} role="status">
-                Profile populated for review. {sourceProfileSummary}
-              </p>
-            ) : null}
-            {preferencesSaving ? (
-              <div
-                id={selectionBoundWait ? "preferences-wait-note" : undefined}
-                className={styles.preferenceSaveProgress}
-                role="status"
-                aria-live="polite"
-              >
-                <span
-                  className={styles.preferenceSaveSpinner}
-                  data-testid="preference-save-spinner"
-                  aria-hidden="true"
-                />
-                <span>
-                  <strong>
-                    {preferenceSaveQueued && selectionBoundWait
-                      ? "Profile queued"
-                      : "Saving profile"}
-                  </strong>
-                  <small>
-                    {preferenceSaveQueued && selectionBoundWait
-                      ? "Waiting for the challenger to arrive…"
-                      : "Applying your preferences…"}
-                  </small>
-                </span>
-              </div>
-            ) : selectionBoundWait ? (
-              <p
-                id="preferences-wait-note"
-                className={styles.preferenceNotice}
-                role="status"
-              >
-                Save now to apply these changes when the challenger arrives.
-              </p>
-            ) : null}
-            <div className={styles.modalActions}>
-              <button
-                type="button"
-                className={styles.utilityButton}
-                disabled={preferencesBusy}
-                onClick={closePreferences}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={styles.newGameButton}
-                disabled={
-                  preferencesBusy || preferenceDraft.themes.trim().length < 20
-                }
-                onClick={() => void savePreferences()}
-              >
-                {preferencesSaving
-                  ? preferenceSaveQueued && selectionBoundWait
-                    ? "Waiting…"
-                    : "Saving…"
-                  : "Save profile"}
-              </button>
-            </div>
-          </>
-        </ModalShell>
+          onSave={() => void savePreferences()}
+          onAnalyzeSource={analyzeSourceImage}
+          onFieldChange={setPreferenceField}
+          onFreedomChange={setAdaptationFreedom}
+        />
       ) : null}
     </main>
   );
