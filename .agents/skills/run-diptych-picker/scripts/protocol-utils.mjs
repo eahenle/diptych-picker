@@ -59,6 +59,22 @@ export async function assertActiveJob(mailbox, jobId) {
 export function validateJobKind(job) {
   const kind = job.kind ?? "challenger";
   if (kind === "challenger") return;
+  if (kind === "source-profile") {
+    if (
+      !job.sourceImage ||
+      !/^[a-f0-9]{64}\.png$/.test(job.sourceImage.filename ?? "") ||
+      job.sourceImage.path !== `profile-sources/${job.sourceImage.filename}` ||
+      job.sourceImage.contentType !== "image/png" ||
+      !Number.isInteger(job.sourceImage.width) ||
+      !Number.isInteger(job.sourceImage.height) ||
+      !Number.isInteger(job.sourceImage.byteLength)
+    ) {
+      throw new Error(
+        `Source-profile job ${job.id} has invalid image metadata`,
+      );
+    }
+    return;
+  }
   if (kind === "refill") {
     if (!JOB_ID.test(job.sessionId ?? "")) {
       throw new Error(`Refill job ${job.id} requires a valid sessionId`);

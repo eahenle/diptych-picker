@@ -914,6 +914,50 @@
   gap: 12px;
   margin-bottom: 8px;
 }
+.sourceProfileImport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 14px 0 18px;
+  padding: 11px 12px;
+  border: 1px solid rgba(167, 107, 239, 0.34);
+  background: rgba(167, 107, 239, 0.06);
+}
+.sourceProfileImport > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.sourceProfileImport strong {
+  font-size: 12px;
+  letter-spacing: 0.025em;
+}
+.sourceProfileImport small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.preferencesModal input.hiddenFileInput {
+  display: none;
+}
+.preferencesModal .sourceProfileError,
+.preferencesModal .sourceProfileSummary {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.preferencesModal .sourceProfileError {
+  color: #f0a49a;
+  border: 1px solid rgba(209, 125, 114, 0.4);
+  background: rgba(209, 125, 114, 0.08);
+}
+.preferencesModal .sourceProfileSummary {
+  color: #c9b8ec;
+  border: 1px solid rgba(167, 107, 239, 0.32);
+  background: rgba(167, 107, 239, 0.06);
+}
 .preferencesModal .preferenceTitleRow h2 {
   margin: 0;
 }
@@ -1139,6 +1183,10 @@
   }
   .generationNotice > div {
     justify-content: flex-end;
+  }
+  .sourceProfileImport {
+    align-items: stretch;
+    flex-direction: column;
   }
   .conceptLabel {
     font-size: 9px;

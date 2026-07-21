@@ -2,9 +2,14 @@ import { link, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { preferenceProfileFromSeed } from "@/domain/game";
 import type {
+  AgentJob,
+  AgentResult,
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
+  SourceProfileJob,
+  SourceProfileMailbox,
+  SourceProfileResult,
 } from "./agent-mailbox";
 import {
   MockChallengerPromptProvider,
@@ -45,7 +50,7 @@ export class MockAgentWorker {
     this.imageProvider = options.imageProvider ?? new MockImageProvider();
   }
 
-  schedule(job: GenerationJob): void {
+  schedule(job: AgentJob): void {
     if (this.scheduled.has(job.id)) return;
     this.scheduled.add(job.id);
     const timer = setTimeout(async () => {
@@ -64,7 +69,12 @@ export class MockAgentWorker {
     this.timers.clear();
   }
 
-  private async complete(job: GenerationJob): Promise<void> {
+  private async complete(job: AgentJob): Promise<void> {
+    if (job.kind === "source-profile") {
+      await this.completeSourceProfile(job);
+      return;
+    }
+
     // Playwright-only deterministic failure hook. A worker consumes this
     // sentinel once for challenger or refill jobs; no external provider runs.
     if (
@@ -123,8 +133,31 @@ export class MockAgentWorker {
     await this.publish("completed", job.id, result);
   }
 
-  private async fail(job: GenerationJob, error: unknown): Promise<void> {
-    const result: GenerationResult = {
+  private async completeSourceProfile(job: SourceProfileJob): Promise<void> {
+    const result: SourceProfileResult = {
+      jobId: job.id,
+      kind: "source-profile",
+      status: "completed",
+      completedAt: this.now(),
+      profile: {
+        themes:
+          "Variations on the uploaded source image's subjects, setting, and visual relationships",
+        inspiration: `Preserve the source's ${job.sourceImage.width} × ${job.sourceImage.height} composition while exploring new arrangements and lighting`,
+        mediaTypes: "digital illustration and photography",
+        visualStyle: "cohesive, detailed, and composition-led",
+        colorPalette: "colors sampled from the uploaded source image",
+        contentLevel: "family-friendly",
+        avoid:
+          "exact identity, facial likeness, logos, readable text, and pixel-for-pixel reproduction",
+      },
+      reasoningSummary:
+        "The editable profile carries transferable subject, composition, medium, style, and palette cues without requesting a specific identity or exact likeness.",
+    };
+    await this.publish("completed", job.id, result);
+  }
+
+  private async fail(job: AgentJob, error: unknown): Promise<void> {
+    const result: AgentResult = {
       jobId: job.id,
       status: "failed",
       completedAt: this.now(),
@@ -138,7 +171,7 @@ export class MockAgentWorker {
   private async publish(
     directoryName: "completed" | "failed",
     jobId: string,
-    result: GenerationResult,
+    result: AgentResult,
   ): Promise<void> {
     const directory = join(this.options.mailboxDirectory, directoryName);
     await mkdir(directory, { recursive: true });
@@ -195,6 +228,38 @@ export class MockGenerationMailbox implements GenerationMailbox {
 
   private async resume(job: GenerationJob | null): Promise<void> {
     if (job && !(await this.mailbox.readResult(job.id))) {
+      this.worker.schedule(job);
+    }
+  }
+}
+
+export class MockSourceProfileMailbox implements SourceProfileMailbox {
+  constructor(
+    private readonly mailbox: SourceProfileMailbox,
+    private readonly worker: MockAgentWorker,
+  ) {}
+
+  async enqueueSourceProfile(job: SourceProfileJob): Promise<void> {
+    await this.mailbox.enqueueSourceProfile(job);
+    this.worker.schedule(job);
+  }
+
+  async readSourceProfileWork(jobId: string) {
+    const job = await this.mailbox.readSourceProfileWork(jobId);
+    await this.resume(job);
+    return job;
+  }
+
+  readSourceProfileResult(jobId: string) {
+    return this.mailbox.readSourceProfileResult(jobId);
+  }
+
+  archiveSourceProfile(jobId: string) {
+    return this.mailbox.archiveSourceProfile(jobId);
+  }
+
+  private async resume(job: SourceProfileJob | null): Promise<void> {
+    if (job && !(await this.mailbox.readSourceProfileResult(job.id))) {
       this.worker.schedule(job);
     }
   }

@@ -12,6 +12,7 @@ Keep the root interactive session responsive as supervisor. Start and verify the
 - **Root session (supervisor):** Own the user conversation, app-process lifecycle, provider verification, monitor lifecycle, and final status reporting. Never run the blocking mailbox loop or claim a generation job itself.
 - **Mailbox monitor (one persistent subagent):** Own heartbeats, startup recovery, ordinary polling, every job claim, owned-initial-batch inspection, worker spawning, completion/failure publication, and recovery status. It may spawn its own image workers and must continue after each terminal job.
 - **Image workers (fresh subagents):** Generate exactly one candidate each through native image generation, write only their assigned `image.png` and `proposal.json`, report paths to the monitor, and exit. Never reuse a worker for another candidate.
+- **Source-profile workers (fresh subagents):** Inspect exactly one user-uploaded source image, write only their assigned `profile.json`, report its path to the monitor, and exit. They describe transferable content and aesthetics without identifying a person or requesting an exact likeness.
 
 Before spawning the monitor, determine how many child-agent slots can remain available beneath it while the root session and monitor are active. Set `workerLimit` to that count capped at 3. When the launch prompt supplies `workerLimit=3`, use all three slots after confirming that the current session exposes them. Require `workerLimit >= 2` because a new initial pair must start together. Pass the limit to the monitor. The monitor must use `--max-refills <workerLimit>` and must never claim a refill it cannot immediately delegate. Do not count terminal recovery entries as workers. `agents.max_threads` is only a concurrency ceiling, so the monitor must explicitly spawn one worker per independent claimed job; with at least three pending refills, a three-worker limit means three worker subagents, not two.
 
@@ -20,7 +21,7 @@ Before spawning the monitor, determine how many child-agent slots can remain ava
 - Work from the repository root containing `package.json` and this skill.
 - Never launch `codex`, `codex exec`, another model process, or an external image API. The root session, monitor subagent, and image-worker subagents are the complete agent tree.
 - Never ask for or use an OpenAI API key.
-- Generate one standalone square PNG per candidate. Never generate a diptych, split frame, comparison sheet, collage, or combined A/B image.
+- For candidate-generation jobs, generate one standalone square PNG per candidate. Never generate a diptych, split frame, comparison sheet, collage, or combined A/B image. Source-profile jobs analyze their existing private image and must not generate another image.
 - Never edit, replace, reinterpret, or regenerate the retained winner. Treat its ID, metadata, URL, bytes, file, side, and visible DOM node as immutable.
 - The root must use a fresh dedicated monitor subagent each time the runner starts or resumes. Never perform monitoring in the root session and never split mailbox ownership across multiple monitors.
 - The monitor must use a fresh subagent for every generated candidate. Each worker must use native image generation and return one PNG path plus the structured proposal.
@@ -36,7 +37,7 @@ Read [references/job-protocol.md](references/job-protocol.md) before processing 
 4. Spawn exactly one long-lived monitor subagent. Give it the repository path, `workerLimit`, the app URL, whether the root started the app, and instructions to read this `SKILL.md` plus [references/job-protocol.md](references/job-protocol.md) completely before touching the mailbox. Do not ask the monitor to return after one poll or one job.
 5. The monitor records readiness with `npm run agent:heartbeat -- --status waiting`.
 6. At monitor startup or restart, it runs `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>`. It processes returned unfinished work, then repeats the same recovery command until it prints no JSON. Initial jobs include their durable `batchOwnerToken`. Do not use `--resume` in the normal polling loop.
-7. The monitor repeatedly runs `npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>`. Ordinary challenger and initial work has priority. When neither is claimable, the helper atomically claims up to `workerLimit` oldest pending refills and emits one `refill-batch`. Never use a wait longer than 30 seconds, a refill limit above 3, or a limit above immediately available worker slots.
+7. The monitor repeatedly runs `npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>`. Ordinary challenger, initial, and interactive source-profile work has priority. When none is claimable, the helper atomically claims up to `workerLimit` oldest pending refills and emits one `refill-batch`. Never use a wait longer than 30 seconds, a refill limit above 3, or a limit above immediately available worker slots.
 8. When no JSON is printed, the monitor refreshes the waiting heartbeat and continues. It sends concise readiness, terminal-job, failure, and blocked-status updates to the root without exiting.
 9. The root remains available for user requests and may work on unrelated non-mailbox tasks. It must not call `agent:next`, `agent:complete`, or `agent:fail` while the monitor owns the loop.
 10. When stopped by the user, the root tells the monitor to claim no new work. The monitor lets already-started image workers reach a terminal result when practical, records `--status stopped`, reports active recoverable jobs, and exits. The root then stops only an app process it started and reports the final state.
@@ -46,10 +47,13 @@ Read [references/job-protocol.md](references/job-protocol.md) before processing 
 The monitor inspects each claimed job's `kind`. A missing `kind` is a legacy challenger.
 
 - For `kind: "challenger"`, process the one claimed job with one fresh worker subagent.
+- For `kind: "source-profile"`, process the one claimed job with one fresh source-profile worker. Resolve `sourceImage.path` beneath the data root, give the worker that exact local image, and do not call image generation.
 - For `kind: "initial"`, require `batchId`, `initialSide`, and `batchOwnerToken`. Before spawning a worker, run `npm run agent:next -- --wait-ms 30000 --batch <batchId> --owner-token <batchOwnerToken>` to claim or inspect the other side. An ordinary `agent:next` call cannot claim that owner's pending partner. If no partner JSON is printed, spawn nothing. Keep repeating this owned batch command with the same batch ID, owner token, and 30000 ms wait until partner or terminal JSON appears, or until the user stops the runner. Do not return to ordinary polling while an owned initial partner is pending. For a new pair, start exactly two fresh subagents in parallel only after both unfinished sides are available. If batch inspection returns the other side with `terminalStatus: "completed"` or `"failed"`, do not spawn a worker for that terminal side; start one fresh worker for the claimed unfinished side only.
 - For `kind: "refill-batch"`, require a non-empty `jobs` array of at most `workerLimit` entries and require every entry to have `kind: "refill"`. Spawn exactly one fresh native image-generation worker per entry, together in parallel. Give each worker only its complete job JSON and its own work directory. Never combine refill prompts or images. Complete or fail every claimed refill independently even if a sibling worker fails, then return to waiting.
 
 Resolve the data root as `${LOCAL_DATA_DIR:-.local-data}`. Create `<data-root>/agent-work/<jobId>/` for each worker. Have the worker save its native image-generation output as `image.png` and its strict proposal JSON as `proposal.json` there. Do not pass proposal JSON or failure text directly as command-line arguments.
+
+For a source-profile job, create the same work directory and have the worker save only `profile.json`. The upload remains private under `<data-root>/profile-sources/` and is never copied to `assets/` or `output/artifacts/`. Do not pass profile JSON directly as a command-line argument.
 
 Give each worker the complete job JSON and these constraints:
 
@@ -63,12 +67,26 @@ Give each worker the complete job JSON and these constraints:
 - Produce exactly one standalone square PNG through native image generation, fully decoded and saved to a local path.
 - Write a strict proposal object with required `concept`, `visualPrompt`, `styleTags`, and `reasoningSummary` fields plus `preferenceRevision` only for an Adaptive job. In `reasoningSummary`, state how the proposal follows the preference seed, responds to positive and negative trajectory evidence, and remains distinct from recent work, then return both work-file paths.
 
-For each claimed job (including every entry in a refill batch):
+For a source-profile worker instead:
+
+- Inspect the exact local PNG resolved as `<data-root>/<sourceImage.path>`; do not generate or edit an image.
+- Write `profile.json` with exactly `profile` and `reasoningSummary`. `profile` contains `themes`, `inspiration`, `mediaTypes`, `visualStyle`, `colorPalette`, `contentLevel`, and `avoid` under the same limits as the Preference modal. Themes must contain at least 20 characters.
+- Describe the depicted subject matter, setting, composition, medium, lighting, mood, palette, and useful constraints as transferable generation guidance. Never name or identify a depicted person, infer sensitive personal traits, request facial identity or likeness, or ask future workers to reproduce the source exactly. Add identity, logo, readable-text, or exact-copy exclusions when relevant.
+- Choose `adult-allowed` only when the depicted themes materially require mature non-explicit treatment; otherwise use `family-friendly`. The result remains an editable draft and is never auto-saved.
+
+For each claimed candidate-generation job (including every entry in a refill batch):
 
 1. Record `npm run agent:heartbeat -- --status generating --job <id>`.
 2. Delegate to a fresh worker and inspect its proposal and image path. Reject the handoff if its proposal or visible image contradicts an explicit preference-seed constraint; ask that worker to revise or regenerate, and fail the job rather than publish an out-of-brief result if it cannot comply.
 3. Complete with `npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png"`. Let the helper validate the PNG, name it from its exact SHA-256 content digest, and publish immutable copies to local asset storage and `output/artifacts`; never copy it manually over an existing asset.
 4. If generation or validation cannot complete, write a concise reason to `<data-root>/agent-work/<id>/failure.txt`, then run `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt" --category <category>`. Use `moderation` only for a provider safety or moderation block, `invalid-output` for an unusable worker handoff, and `operational` for interruptions or other infrastructure failures. Failures are retryable.
 5. Record the terminal outcome. For a refill batch, wait until every claimed entry has independently reached `completed` or `failed`. Return the heartbeat to `waiting`, and continue the loop.
+
+For each claimed source-profile job:
+
+1. Record `npm run agent:heartbeat -- --status analyzing --job <id>`.
+2. Delegate to one fresh source-profile worker and inspect its `profile.json`. Reject identity/likeness instructions, missing fields, or out-of-bounds values; ask the same worker to revise once, then fail invalid output if it cannot comply.
+3. Complete with `npm run agent:complete-profile -- --job <id> --profile-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/profile.json"`.
+4. On failure, use the same file-backed `agent:fail` command and categories as generation jobs. Return the heartbeat to `waiting` and continue the loop.
 
 Do not exit after a successful or failed job. The mailbox is durable: startup `--resume` recovers unterminated active work, matching outcome retries safely continue after interruption, and terminal artifacts remain until the app reconciles and archives them.

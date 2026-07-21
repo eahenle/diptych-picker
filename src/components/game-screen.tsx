@@ -24,6 +24,7 @@ import {
   type GameStartState,
   type GameState,
   type PreferenceProfile,
+  type PreferenceRevision,
   type Side,
 } from "@/domain/game";
 import type {
@@ -43,6 +44,7 @@ const POLL_INTERVAL_MS = 150;
 const HEALTH_POLL_INTERVAL_MS = 2_000;
 const MAX_RECONNECT_DELAY_MS = 2_400;
 const RECONNECT_MESSAGE = "Connection interrupted. Reconnecting…";
+const SOURCE_PROFILE_POLL_INTERVAL_MS = 500;
 
 interface ActiveSelection {
   token: string;
@@ -60,6 +62,15 @@ interface ActiveSelection {
 
 type RatedGameState = GameState & { eloRatings?: DisplayedEloRatings };
 type GameTransferAction = "exporting" | "importing" | "resetting";
+type SourceProfileResponse =
+  | { status: "analyzing"; jobId: string }
+  | {
+      status: "completed";
+      jobId: string;
+      profile: PreferenceRevision;
+      reasoningSummary: string;
+    }
+  | { status: "failed"; jobId: string; message: string };
 
 const MAX_GAME_SAVE_BYTES = 25 * 1024 * 1024;
 
@@ -68,6 +79,21 @@ function reconnectDelay(attempt: number): number {
     POLL_INTERVAL_MS * 2 ** Math.min(attempt, 8),
     MAX_RECONNECT_DELAY_MS,
   );
+}
+
+function waitForSourceProfilePoll(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Source analysis cancelled", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, SOURCE_PROFILE_POLL_INTERVAL_MS);
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function preload(url: string, signal: AbortSignal): Promise<void> {
@@ -250,6 +276,13 @@ export function GameScreen() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferenceSaveQueued, setPreferenceSaveQueued] = useState(false);
+  const [sourceProfileAnalyzing, setSourceProfileAnalyzing] = useState(false);
+  const [sourceProfileError, setSourceProfileError] = useState<string | null>(
+    null,
+  );
+  const [sourceProfileSummary, setSourceProfileSummary] = useState<
+    string | null
+  >(null);
   const [newGameOpen, setNewGameOpen] = useState(false);
   const [loadGameOpen, setLoadGameOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -299,6 +332,8 @@ export function GameScreen() {
   );
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const sourceProfileInputRef = useRef<HTMLInputElement | null>(null);
+  const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
   const queuedPreferenceSaveStartedRef = useRef(false);
 
@@ -557,6 +592,7 @@ export function GameScreen() {
   }, [commitStartState, startState?.status]);
 
   useEffect(() => cancelActiveSelection, [cancelActiveSelection]);
+  useEffect(() => () => sourceProfileControllerRef.current?.abort(), []);
 
   useEffect(() => {
     if (!healthPollingEnabled) return;
@@ -1258,8 +1294,74 @@ export function GameScreen() {
     await persistPreferences(preferenceDraft, preferenceDraftBaseProfile);
   };
 
+  const analyzeSourceImage = async (image: File) => {
+    if (sourceProfileAnalyzing || preferencesSaving) return;
+    const controller = new AbortController();
+    sourceProfileControllerRef.current?.abort();
+    sourceProfileControllerRef.current = controller;
+    setSourceProfileAnalyzing(true);
+    setSourceProfileError(null);
+    setSourceProfileSummary(null);
+    try {
+      const form = new FormData();
+      form.set("image", image);
+      let result = await readJson<SourceProfileResponse>(
+        await fetch("/api/game/preferences/source", {
+          method: "POST",
+          body: form,
+          signal: controller.signal,
+        }),
+      );
+      while (result.status === "analyzing") {
+        await waitForSourceProfilePoll(controller.signal);
+        result = await readJson<SourceProfileResponse>(
+          await fetch(
+            `/api/game/preferences/source?jobId=${encodeURIComponent(result.jobId)}`,
+            { cache: "no-store", signal: controller.signal },
+          ),
+        );
+      }
+      if (result.status === "failed") throw new Error(result.message);
+      setPreferenceDraft((current) => ({
+        ...current,
+        ...result.profile,
+        adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
+      }));
+      setSourceProfileSummary(result.reasoningSummary);
+      const acknowledged = await fetch(
+        `/api/game/preferences/source?jobId=${encodeURIComponent(result.jobId)}`,
+        { method: "DELETE", signal: controller.signal },
+      );
+      if (!acknowledged.ok) {
+        throw new Error(
+          "The profile was populated, but its analysis job could not be archived.",
+        );
+      }
+    } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        !(error instanceof DOMException && error.name === "AbortError")
+      ) {
+        setSourceProfileError(
+          error instanceof Error
+            ? error.message
+            : "Could not analyze the source image",
+        );
+      }
+    } finally {
+      if (sourceProfileControllerRef.current === controller) {
+        sourceProfileControllerRef.current = null;
+        setSourceProfileAnalyzing(false);
+      }
+      if (sourceProfileInputRef.current) {
+        sourceProfileInputRef.current.value = "";
+      }
+    }
+  };
+
   const closePreferences = () => {
-    if (preferencesSaving) return;
+    if (preferencesSaving || sourceProfileAnalyzing) return;
     setPreferencesOpen(false);
   };
 
@@ -1271,6 +1373,8 @@ export function GameScreen() {
     queuedPreferenceSaveStartedRef.current = false;
     setPreferenceSaveQueued(false);
     setPreferencesSaving(false);
+    setSourceProfileError(null);
+    setSourceProfileSummary(null);
     setPreferenceDraft(currentProfile);
     setPreferenceDraftBaseProfile(currentProfile);
     setPreferencesOpen(true);
@@ -1317,6 +1421,7 @@ export function GameScreen() {
 
   const retryAvailable =
     game?.round.status === "error" && Boolean(game.pendingSelection);
+  const preferencesBusy = preferencesSaving || sourceProfileAnalyzing;
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
   const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
@@ -2190,7 +2295,7 @@ export function GameScreen() {
             className={styles.preferencesModal}
             role="dialog"
             aria-modal="true"
-            aria-busy={preferencesSaving}
+            aria-busy={preferencesBusy}
             aria-labelledby="preferences-title"
             aria-describedby={
               selectionBoundWait
@@ -2210,7 +2315,7 @@ export function GameScreen() {
                     type="radio"
                     name="adaptation-mode"
                     value="static"
-                    disabled={preferencesSaving}
+                    disabled={preferencesBusy}
                     checked={preferenceDraft.adaptationMode === "static"}
                     onChange={() => setAdaptationMode("static")}
                   />
@@ -2221,7 +2326,7 @@ export function GameScreen() {
                     type="radio"
                     name="adaptation-mode"
                     value="adaptive"
-                    disabled={preferencesSaving}
+                    disabled={preferencesBusy}
                     checked={preferenceDraft.adaptationMode === "adaptive"}
                     onChange={() => setAdaptationMode("adaptive")}
                   />
@@ -2239,6 +2344,35 @@ export function GameScreen() {
                   : "Adaptive lets the model revise this profile from winning and rejected generated images."}{" "}
               Novelty rules still take priority.
             </p>
+            <div className={styles.sourceProfileImport}>
+              <span>
+                <strong>Start from an image</strong>
+                <small>
+                  Infer transferable content and style, then review every field
+                  before saving.
+                </small>
+              </span>
+              <input
+                ref={sourceProfileInputRef}
+                className={styles.hiddenFileInput}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                aria-label="Choose source image"
+                disabled={preferencesBusy}
+                onChange={(event) => {
+                  const image = event.target.files?.[0];
+                  if (image) void analyzeSourceImage(image);
+                }}
+              />
+              <button
+                type="button"
+                className={styles.utilityButton}
+                disabled={preferencesBusy}
+                onClick={() => sourceProfileInputRef.current?.click()}
+              >
+                Analyze image
+              </button>
+            </div>
             <div className={styles.preferenceGrid}>
               <div className={styles.fieldWide}>
                 <label htmlFor="preference-themes">
@@ -2247,7 +2381,7 @@ export function GameScreen() {
                 <textarea
                   id="preference-themes"
                   value={preferenceDraft.themes}
-                  disabled={preferencesSaving}
+                  disabled={preferencesBusy}
                   onChange={(event) =>
                     setPreferenceField("themes", event.target.value)
                   }
@@ -2267,7 +2401,7 @@ export function GameScreen() {
                 <textarea
                   id="preference-inspiration"
                   value={preferenceDraft.inspiration}
-                  disabled={preferencesSaving}
+                  disabled={preferencesBusy}
                   onChange={(event) =>
                     setPreferenceField("inspiration", event.target.value)
                   }
@@ -2284,7 +2418,7 @@ export function GameScreen() {
                 <span>Preferred media</span>
                 <input
                   value={preferenceDraft.mediaTypes}
-                  disabled={preferencesSaving}
+                  disabled={preferencesBusy}
                   maxLength={500}
                   onChange={(event) =>
                     setPreferenceField("mediaTypes", event.target.value)
@@ -2296,7 +2430,7 @@ export function GameScreen() {
                 <span>Visual style &amp; mood</span>
                 <input
                   value={preferenceDraft.visualStyle}
-                  disabled={preferencesSaving}
+                  disabled={preferencesBusy}
                   maxLength={500}
                   onChange={(event) =>
                     setPreferenceField("visualStyle", event.target.value)
@@ -2308,7 +2442,7 @@ export function GameScreen() {
                 <span>Color palette</span>
                 <input
                   value={preferenceDraft.colorPalette}
-                  disabled={preferencesSaving}
+                  disabled={preferencesBusy}
                   maxLength={500}
                   onChange={(event) =>
                     setPreferenceField("colorPalette", event.target.value)
@@ -2324,7 +2458,7 @@ export function GameScreen() {
                       type="radio"
                       name="content-range"
                       value="family-friendly"
-                      disabled={preferencesSaving}
+                      disabled={preferencesBusy}
                       checked={
                         preferenceDraft.contentLevel === "family-friendly"
                       }
@@ -2342,7 +2476,7 @@ export function GameScreen() {
                       type="radio"
                       name="content-range"
                       value="adult-allowed"
-                      disabled={preferencesSaving}
+                      disabled={preferencesBusy}
                       checked={preferenceDraft.contentLevel === "adult-allowed"}
                       onChange={() =>
                         setPreferenceField("contentLevel", "adult-allowed")
@@ -2359,7 +2493,7 @@ export function GameScreen() {
                 <span>Avoid or de-emphasize</span>
                 <textarea
                   value={preferenceDraft.avoid}
-                  disabled={preferencesSaving}
+                  disabled={preferencesBusy}
                   maxLength={800}
                   onChange={(event) =>
                     setPreferenceField("avoid", event.target.value)
@@ -2369,6 +2503,34 @@ export function GameScreen() {
                 />
               </label>
             </div>
+            {sourceProfileAnalyzing ? (
+              <div
+                className={styles.preferenceSaveProgress}
+                role="status"
+                aria-live="polite"
+              >
+                <span
+                  className={styles.preferenceSaveSpinner}
+                  data-testid="source-profile-spinner"
+                  aria-hidden="true"
+                />
+                <span>
+                  <strong>Analyzing source image</strong>
+                  <small>
+                    Extracting transferable themes, composition, style, and
+                    palette…
+                  </small>
+                </span>
+              </div>
+            ) : sourceProfileError ? (
+              <p className={styles.sourceProfileError} role="alert">
+                {sourceProfileError}
+              </p>
+            ) : sourceProfileSummary ? (
+              <p className={styles.sourceProfileSummary} role="status">
+                Profile populated for review. {sourceProfileSummary}
+              </p>
+            ) : null}
             {preferencesSaving ? (
               <div
                 id={selectionBoundWait ? "preferences-wait-note" : undefined}
@@ -2407,7 +2569,7 @@ export function GameScreen() {
               <button
                 type="button"
                 className={styles.utilityButton}
-                disabled={preferencesSaving}
+                disabled={preferencesBusy}
                 onClick={closePreferences}
               >
                 Cancel
@@ -2416,7 +2578,7 @@ export function GameScreen() {
                 type="button"
                 className={styles.newGameButton}
                 disabled={
-                  preferencesSaving || preferenceDraft.themes.trim().length < 20
+                  preferencesBusy || preferenceDraft.themes.trim().length < 20
                 }
                 onClick={() => void savePreferences()}
               >

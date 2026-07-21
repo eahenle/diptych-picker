@@ -53,6 +53,11 @@ const root = dataDirectory();
 const mailbox = join(root, "agent-mailbox");
 
 const activeJob = await assertActiveJob(mailbox, jobId);
+if (activeJob.kind === "source-profile") {
+  throw new Error(
+    "Source-profile jobs must use npm run agent:complete-profile",
+  );
+}
 const adaptationMode =
   activeJob.preferenceProfile?.adaptationMode ??
   activeJob.preferenceProfile?.inspirationMode ??

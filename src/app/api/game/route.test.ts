@@ -13,6 +13,9 @@ const tie = vi.fn();
 const bothLose = vi.fn();
 const updatePreferenceSeed = vi.fn();
 const dismissGenerationNotice = vi.fn();
+const requestSourceProfile = vi.fn();
+const getSourceProfileStatus = vi.fn();
+const acknowledgeSourceProfile = vi.fn();
 
 vi.mock("@/server/runtime", () => ({
   generationProvider: "mock",
@@ -27,6 +30,9 @@ vi.mock("@/server/runtime", () => ({
   gameService: { select, tie, bothLose },
   updatePreferenceSeed,
   dismissGenerationNotice,
+  requestSourceProfile,
+  getSourceProfileStatus,
+  acknowledgeSourceProfile,
 }));
 
 beforeEach(() => {
@@ -311,6 +317,71 @@ describe("DELETE /api/game/notice", () => {
     expect(response.status).toBe(200);
     expect(dismissGenerationNotice).toHaveBeenCalledOnce();
     expect(await response.json()).toEqual({ round: { status: "idle" } });
+  });
+});
+
+describe("source-image preference profile analysis", () => {
+  beforeEach(() => {
+    requestSourceProfile.mockReset();
+    getSourceProfileStatus.mockReset();
+    acknowledgeSourceProfile.mockReset();
+  });
+
+  it("uploads one image and starts a durable analysis job", async () => {
+    requestSourceProfile.mockResolvedValue({
+      status: "analyzing",
+      jobId: "source-job-1",
+    });
+    const form = new FormData();
+    form.set(
+      "image",
+      new File([new Uint8Array([1, 2, 3])], "reference.png", {
+        type: "image/png",
+      }),
+    );
+    const { POST } = await import("./preferences/source/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/game/preferences/source", {
+        method: "POST",
+        body: form,
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(requestSourceProfile).toHaveBeenCalledWith(
+      new Uint8Array([1, 2, 3]),
+      "image/png",
+    );
+    expect(await response.json()).toEqual({
+      status: "analyzing",
+      jobId: "source-job-1",
+    });
+  });
+
+  it("returns and acknowledges a completed editable profile", async () => {
+    getSourceProfileStatus.mockResolvedValue({
+      status: "completed",
+      jobId: "source-job-1",
+      profile: {
+        themes: "source-derived architectural portrait studies",
+      },
+      reasoningSummary: "Transfers composition without identity.",
+    });
+    const { GET, DELETE } = await import("./preferences/source/route");
+    const url =
+      "http://localhost/api/game/preferences/source?jobId=source-job-1";
+
+    const response = await GET(new Request(url));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "completed",
+      profile: { themes: "source-derived architectural portrait studies" },
+    });
+
+    const acknowledged = await DELETE(new Request(url, { method: "DELETE" }));
+    expect(acknowledged.status).toBe(204);
+    expect(acknowledgeSourceProfile).toHaveBeenCalledWith("source-job-1");
   });
 });
 

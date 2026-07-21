@@ -27,9 +27,14 @@ import {
   initialCandidateContext,
   loadCuratedCandidates,
 } from "./initial-state";
-import { MockAgentWorker, MockGenerationMailbox } from "./mock-agent";
+import {
+  MockAgentWorker,
+  MockGenerationMailbox,
+  MockSourceProfileMailbox,
+} from "./mock-agent";
 import { JsonGameRepository } from "./repository";
 import { challengerConfig } from "./challenger-config";
+import { SourceProfileService } from "./source-profile-service";
 import {
   CoProcGenerationTransport,
   TransportNotifyingGenerationMailbox,
@@ -106,6 +111,13 @@ export const generationMailbox =
         },
       )
     : durableGenerationMailbox;
+const sourceProfileMailbox = mockAgent
+  ? new MockSourceProfileMailbox(fileGenerationMailbox, mockAgent)
+  : fileGenerationMailbox;
+const sourceProfileService = new SourceProfileService({
+  mailbox: sourceProfileMailbox,
+  sourceDirectory: join(dataDirectory, "profile-sources"),
+});
 export const gameService = new GameService(
   repository,
   challengerRepository,
@@ -284,4 +296,19 @@ export async function updatePreferenceSeed(
 
 export async function dismissGenerationNotice(): Promise<GameState> {
   return gameService.dismissGenerationNotice();
+}
+
+export async function requestSourceProfile(
+  contents: Uint8Array,
+  contentType: string,
+) {
+  return sourceProfileService.request(contents, contentType);
+}
+
+export async function getSourceProfileStatus(jobId: string) {
+  return sourceProfileService.status(jobId);
+}
+
+export async function acknowledgeSourceProfile(jobId: string) {
+  await sourceProfileService.acknowledge(jobId);
 }
