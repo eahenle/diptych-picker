@@ -857,8 +857,22 @@ describe("GameScreen challenger reconciliation", () => {
         favorite: true,
       }),
     });
-    fireEvent.click(screen.getByRole("button", { name: "Close history" }));
+    expect(
+      screen.queryByRole("button", { name: "View Older rejected larger" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Latest winner larger" }),
+    );
     expect(dialog).not.toBeInTheDocument();
+    const imageDialog = screen.getByRole("dialog", {
+      name: "Expanded image: Latest winner",
+    });
+    expect(imageDialog.getElementsByTagName("img")[0]).toHaveAttribute(
+      "src",
+      "/api/assets/latest-winner.png",
+    );
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(imageDialog).not.toBeInTheDocument();
   });
 
   it("commits an instant buffered round after preloading only the losing asset", async () => {

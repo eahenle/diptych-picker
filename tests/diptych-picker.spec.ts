@@ -379,6 +379,24 @@ test("opens a display-safe newest-first comparison history", async ({
   expect(body.total).toBe(1);
   expect(body.entries).toHaveLength(1);
   expect(JSON.stringify(body)).not.toContain('"prompt"');
+
+  const winner = body.entries[0].winner as {
+    concept: string;
+    imageUrl: string;
+  };
+  await dialog
+    .getByRole("button", { name: `View ${winner.concept} larger` })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  const imageDialog = page.getByRole("dialog", {
+    name: `Expanded image: ${winner.concept}`,
+  });
+  await expect(imageDialog.getByRole("img")).toHaveAttribute(
+    "src",
+    winner.imageUrl,
+  );
+  await page.keyboard.press("Escape");
+  await expect(imageDialog).toHaveCount(0);
 });
 
 test("favorites a candidate across history, pool, refresh, and export", async ({

@@ -29,6 +29,7 @@ import {
   type Side,
 } from "@/domain/game";
 import type {
+  ComparisonHistoryCandidate,
   ComparisonHistoryEntry,
   PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
@@ -1047,6 +1048,15 @@ export function GameScreen() {
     setInspectedCandidate(candidate);
   };
 
+  const inspectHistoryCandidate = (candidate: ComparisonHistoryCandidate) => {
+    if (!candidate.imageUrl) return;
+    setHistoryOpen(false);
+    setInspectedCandidate({
+      imageUrl: candidate.imageUrl,
+      concept: candidate.concept,
+    });
+  };
+
   const openPoolLeaderboard = async () => {
     setLeaderboardOpen(true);
     setLeaderboardLoading(true);
@@ -1855,12 +1865,20 @@ export function GameScreen() {
                         </span>
                         <span className={styles.historyCandidate}>
                           {primary.imageUrl ? (
-                            <img
-                              src={primary.imageUrl}
-                              alt=""
-                              width={64}
-                              height={64}
-                            />
+                            <button
+                              type="button"
+                              className={styles.historyImageButton}
+                              aria-label={`View ${primary.concept} larger`}
+                              title="View larger"
+                              onClick={() => inspectHistoryCandidate(primary)}
+                            >
+                              <img
+                                src={primary.imageUrl}
+                                alt=""
+                                width={64}
+                                height={64}
+                              />
+                            </button>
                           ) : (
                             <span
                               className={styles.historyImagePlaceholder}
@@ -1919,12 +1937,20 @@ export function GameScreen() {
                         </span>
                         <span className={styles.historyCandidate}>
                           {secondary.imageUrl ? (
-                            <img
-                              src={secondary.imageUrl}
-                              alt=""
-                              width={64}
-                              height={64}
-                            />
+                            <button
+                              type="button"
+                              className={styles.historyImageButton}
+                              aria-label={`View ${secondary.concept} larger`}
+                              title="View larger"
+                              onClick={() => inspectHistoryCandidate(secondary)}
+                            >
+                              <img
+                                src={secondary.imageUrl}
+                                alt=""
+                                width={64}
+                                height={64}
+                              />
+                            </button>
                           ) : (
                             <span
                               className={styles.historyImagePlaceholder}
