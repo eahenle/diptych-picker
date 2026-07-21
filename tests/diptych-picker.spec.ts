@@ -502,8 +502,10 @@ test("persists a fine-grained preference profile and composes generation context
   request,
 }) => {
   await page.getByRole("button", { name: "Preferences" }).click();
-  await expect(page.getByRole("radio", { name: "Static" })).toBeChecked();
-  await expect(page.getByText(/Static preserves every field/)).toBeVisible();
+  const freedom = page.getByRole("slider", { name: "Model rewrite freedom" });
+  await expect(freedom).toHaveValue("0");
+  await expect(freedom).toHaveAttribute("aria-valuetext", "Frozen");
+  await expect(page.getByText(/Frozen preserves every field/)).toBeVisible();
   await page
     .getByLabel("Themes & subjects")
     .fill("mythic engineering and strange nocturnal ecosystems");
@@ -541,7 +543,9 @@ test("persists a fine-grained preference profile and composes generation context
   await expect(page.getByLabel("Inspiration")).toHaveValue(
     "  severe off-axis framing and quiet tension  ",
   );
-  await expect(page.getByRole("radio", { name: "Static" })).toBeChecked();
+  await expect(
+    page.getByRole("slider", { name: "Model rewrite freedom" }),
+  ).toHaveValue("0");
   await expect(
     page.getByRole("radio", { name: /adult themes/i }),
   ).toBeChecked();
@@ -588,7 +592,9 @@ test("derives an editable preference profile from a private source image", async
   await expect(page.getByLabel("Preferred media")).toHaveValue(
     "digital illustration and photography",
   );
-  await expect(page.getByRole("radio", { name: "Static" })).toBeChecked();
+  await expect(
+    page.getByRole("slider", { name: "Model rewrite freedom" }),
+  ).toHaveValue("0");
 
   const saveResponse = page.waitForResponse(
     (response) =>
@@ -612,7 +618,7 @@ test("derives an editable preference profile from a private source image", async
   ]);
 });
 
-test("adopts a complete model-authored profile only after an adaptive candidate wins", async ({
+test("adopts a complete model-authored profile at the unfettered cadence", async ({
   page,
   request,
 }) => {
@@ -621,9 +627,9 @@ test("adopts a complete model-authored profile only after an adaptive candidate 
     .getByLabel("Themes & subjects")
     .fill("mythic engineering and strange nocturnal ecosystems");
   await page.getByLabel("Inspiration").fill("start with stark lighting");
-  await page.getByRole("radio", { name: "Adaptive" }).check();
+  await page.getByRole("slider", { name: "Model rewrite freedom" }).fill("2");
   await expect(
-    page.getByText(/Adaptive lets the model revise this profile/),
+    page.getByText(/Unfettered lets the model rewrite every preference field/),
   ).toBeVisible();
   await page.getByRole("button", { name: "Save profile" }).click();
 
@@ -638,23 +644,26 @@ test("adopts a complete model-authored profile only after an adaptive candidate 
     .getAttribute("data-candidate-id");
   expect(adaptiveCandidateId).toBeTruthy();
   await select(page, "right", 4);
+  await select(page, "right", 5);
+  await select(page, "right", 6);
 
   const state = await (await request.get("/api/game")).json();
   expect(state.game.preferenceProfile).toMatchObject({
     themes: "mythic engineering and strange nocturnal ecosystems",
     adaptationMode: "adaptive",
+    adaptationStrength: "unfettered",
+    adaptationLastDecision: 5,
     adaptationSourceWinnerIds: [adaptiveCandidateId],
-    adaptationSourceRejectedIds: [],
   });
   expect(state.game.preferenceProfile.inspiration).toContain("Favor");
   expect(state.game.preferenceProfile.visualStyle).not.toBe("");
 
   await page.getByRole("button", { name: "Preferences" }).click();
-  await expect(page.getByRole("radio", { name: "Adaptive" })).toBeChecked();
   await expect(
-    page.getByText(
-      /Adaptive evidence from generated images — winners: 1; rejected: 0/,
-    ),
+    page.getByRole("slider", { name: "Model rewrite freedom" }),
+  ).toHaveValue("2");
+  await expect(
+    page.getByText(/Evidence — winners: 1; rejected: \d+/),
   ).toBeVisible();
 });
 

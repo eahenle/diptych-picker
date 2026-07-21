@@ -12,6 +12,7 @@ import {
   completeTie,
   composePreferenceSeed,
   failSelection,
+  isPreferenceAdaptationDue,
   isSelectionBoundWait,
   mergeServerResult,
   migrateGameState,
@@ -61,6 +62,8 @@ describe("round transitions", () => {
       contentLevel: "family-friendly",
       avoid: "",
       adaptationMode: "static",
+      adaptationStrength: "guided",
+      adaptationLastDecision: 0,
       adaptationSourceWinnerIds: [],
       adaptationSourceRejectedIds: [],
     });
@@ -93,7 +96,7 @@ describe("round transitions", () => {
     );
   });
 
-  it("only adopts a model-authored winner profile in adaptive mode", () => {
+  it("adopts model-authored winner profiles only when their cadence is due", () => {
     const profile = preferenceProfileFromSeed(
       "prefer strange crafted landscapes",
     );
@@ -110,19 +113,37 @@ describe("round transitions", () => {
       },
     };
 
-    expect(applyWinnerPreferenceRevision(profile, winner)).toBe(profile);
-    expect(
-      applyWinnerPreferenceRevision(
-        { ...profile, adaptationMode: "adaptive" },
-        winner,
-      ),
-    ).toMatchObject({
+    expect(applyWinnerPreferenceRevision(profile, winner, 15)).toBe(profile);
+    const guided = {
+      ...profile,
+      adaptationMode: "adaptive" as const,
+      adaptationStrength: "guided" as const,
+      adaptationLastDecision: 0,
+    };
+    expect(applyWinnerPreferenceRevision(guided, winner, 14)).toBe(guided);
+    expect(applyWinnerPreferenceRevision(guided, winner, 15)).toMatchObject({
       themes: "prefer severe architectural portraits",
       inspiration: "Favor low-key lighting and asymmetrical framing.",
       mediaTypes: "large-format photography",
       adaptationMode: "adaptive",
+      adaptationStrength: "guided",
+      adaptationLastDecision: 15,
       adaptationSourceWinnerIds: ["winner"],
       adaptationSourceRejectedIds: [],
+    });
+
+    const unfettered = {
+      ...profile,
+      adaptationMode: "adaptive" as const,
+      adaptationStrength: "unfettered" as const,
+      adaptationLastDecision: 0,
+    };
+    expect(isPreferenceAdaptationDue(unfettered, 4)).toBe(false);
+    expect(applyWinnerPreferenceRevision(unfettered, winner, 5)).toMatchObject({
+      themes: "prefer severe architectural portraits",
+      adaptationStrength: "unfettered",
+      adaptationLastDecision: 5,
+      adaptationSourceWinnerIds: ["winner"],
     });
   });
 
@@ -175,6 +196,8 @@ describe("round transitions", () => {
       contentLevel: "family-friendly",
       avoid: "readable text",
       adaptationMode: "adaptive",
+      adaptationStrength: "guided",
+      adaptationLastDecision: 0,
       adaptationSourceWinnerIds: ["winner"],
       adaptationSourceRejectedIds: [],
     });

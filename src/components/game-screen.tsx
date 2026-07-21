@@ -16,6 +16,7 @@ import {
   beginTie,
   isSelectionBoundWait,
   mergeServerResult,
+  preferenceAdaptationFreedom,
   preferenceProfileFromSeed,
   willRetireChampion,
   type BufferHealth,
@@ -1333,6 +1334,8 @@ export function GameScreen() {
       setPreferenceDraft((current) => ({
         ...current,
         ...result.profile,
+        adaptationLastDecision:
+          game?.history.length ?? current.adaptationLastDecision ?? 0,
         adaptationSourceWinnerIds: [],
         adaptationSourceRejectedIds: [],
       }));
@@ -1411,25 +1414,37 @@ export function GameScreen() {
     setPreferenceDraft((current) => ({
       ...current,
       [key]: value,
+      adaptationLastDecision:
+        game?.history.length ?? current.adaptationLastDecision ?? 0,
       adaptationSourceWinnerIds: [],
       adaptationSourceRejectedIds: [],
     }));
   };
 
-  const setAdaptationMode = (mode: PreferenceProfile["adaptationMode"]) => {
+  const setAdaptationFreedom = (
+    freedom: "frozen" | "guided" | "unfettered",
+  ) => {
     setPreferenceDraft((current) => ({
       ...current,
-      adaptationMode: mode,
+      adaptationMode: freedom === "frozen" ? "static" : "adaptive",
+      adaptationStrength: freedom === "unfettered" ? "unfettered" : "guided",
+      adaptationLastDecision: game?.history.length ?? 0,
       adaptationSourceWinnerIds:
-        mode === "static" ? [] : current.adaptationSourceWinnerIds,
+        freedom === "frozen" ? [] : current.adaptationSourceWinnerIds,
       adaptationSourceRejectedIds:
-        mode === "static" ? [] : current.adaptationSourceRejectedIds,
+        freedom === "frozen" ? [] : current.adaptationSourceRejectedIds,
     }));
   };
 
   const retryAvailable =
     game?.round.status === "error" && Boolean(game.pendingSelection);
   const preferencesBusy = preferencesSaving || sourceProfileAnalyzing;
+  const adaptationFreedom = preferenceAdaptationFreedom(preferenceDraft);
+  const adaptationFreedomValue = {
+    frozen: 0,
+    guided: 1,
+    unfettered: 2,
+  }[adaptationFreedom];
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
   const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
@@ -2327,42 +2342,52 @@ export function GameScreen() {
           >
             <div className={styles.preferenceTitleRow}>
               <h2 id="preferences-title">Preference profile</h2>
-              <fieldset
-                className={styles.adaptationMode}
-                aria-label="Preference behavior"
-              >
-                <label>
-                  <input
-                    type="radio"
-                    name="adaptation-mode"
-                    value="static"
-                    disabled={preferencesBusy}
-                    checked={preferenceDraft.adaptationMode === "static"}
-                    onChange={() => setAdaptationMode("static")}
-                  />
-                  <span>Static</span>
+              <div className={styles.adaptationFreedom}>
+                <label htmlFor="adaptation-freedom">
+                  Model freedom <strong>{adaptationFreedom}</strong>
                 </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="adaptation-mode"
-                    value="adaptive"
-                    disabled={preferencesBusy}
-                    checked={preferenceDraft.adaptationMode === "adaptive"}
-                    onChange={() => setAdaptationMode("adaptive")}
-                  />
-                  <span>Adaptive</span>
-                </label>
-              </fieldset>
+                <input
+                  id="adaptation-freedom"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="1"
+                  value={adaptationFreedomValue}
+                  disabled={preferencesBusy}
+                  aria-label="Model rewrite freedom"
+                  aria-valuetext={
+                    adaptationFreedom === "frozen"
+                      ? "Frozen"
+                      : adaptationFreedom === "guided"
+                        ? "Guided, every 15 rounds"
+                        : "Unfettered, every 5 rounds"
+                  }
+                  onChange={(event) => {
+                    const freedom = ["frozen", "guided", "unfettered"] as const;
+                    setAdaptationFreedom(
+                      freedom[Number(event.target.value)] ?? "guided",
+                    );
+                  }}
+                />
+                <span className={styles.adaptationFreedomTicks}>
+                  <small>Frozen</small>
+                  <small>Guided</small>
+                  <small>Unfettered</small>
+                </span>
+              </div>
             </div>
             <p id="preferences-description">
-              {preferenceDraft.adaptationMode === "static"
-                ? "Static preserves every field as entered."
-                : preferenceDraft.adaptationSourceWinnerIds.length +
-                      preferenceDraft.adaptationSourceRejectedIds.length >
-                    0
-                  ? `Adaptive evidence from generated images — winners: ${preferenceDraft.adaptationSourceWinnerIds.length}; rejected: ${preferenceDraft.adaptationSourceRejectedIds.length}.`
-                  : "Adaptive lets the model revise this profile from winning and rejected generated images."}{" "}
+              {adaptationFreedom === "frozen"
+                ? "Frozen preserves every field exactly as saved."
+                : adaptationFreedom === "guided"
+                  ? "Guided allows restrained, leaderboard-driven refinements across the profile after every 15 completed rounds."
+                  : "Unfettered lets the model rewrite every preference field after every 5 completed rounds."}{" "}
+              {adaptationFreedom !== "frozen" &&
+              preferenceDraft.adaptationSourceWinnerIds.length +
+                preferenceDraft.adaptationSourceRejectedIds.length >
+                0
+                ? `Evidence — winners: ${preferenceDraft.adaptationSourceWinnerIds.length}; rejected: ${preferenceDraft.adaptationSourceRejectedIds.length}. `
+                : null}
               Novelty rules still take priority.
             </p>
             <div className={styles.sourceProfileImport}>

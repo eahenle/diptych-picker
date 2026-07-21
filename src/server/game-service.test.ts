@@ -385,9 +385,21 @@ describe("GameService challenger buffer", () => {
         ...baseProfile,
         inspiration: "Keep the lighting stark.",
         adaptationMode: "adaptive",
+        adaptationStrength: "unfettered",
+        adaptationLastDecision: 0,
       },
+      history: Array.from({ length: 4 }, (_, index) => ({
+        winnerId: `prior-winner-${index}`,
+        loserId: `prior-loser-${index}`,
+        winnerPrompt: `prior winner prompt ${index}`,
+        loserPrompt: `prior loser prompt ${index}`,
+        winnerConcept: `prior winner concept ${index}`,
+        loserConcept: `prior loser concept ${index}`,
+        selectedAt: `2026-07-1${index + 1}T00:00:00.000Z`,
+      })),
       round: {
         ...gameState().round,
+        roundNumber: 5,
         leftCandidate: {
           ...candidate("left"),
           preferenceRevision: {
@@ -410,13 +422,15 @@ describe("GameService challenger buffer", () => {
       createId: ids("adaptive-refill-1", "adaptive-refill-2"),
     });
 
-    const updated = await context.service.select("left", 3);
+    const updated = await context.service.select("left", 5);
 
     expect(updated.preferenceProfile).toMatchObject({
       themes: "Clearly adult alternative portrait studies",
       inspiration: "Favor ultraviolet rim light and severe off-axis framing.",
       mediaTypes: "large-format photography",
       adaptationMode: "adaptive",
+      adaptationStrength: "unfettered",
+      adaptationLastDecision: 5,
       adaptationSourceWinnerIds: ["left"],
       adaptationSourceRejectedIds: [],
     });
@@ -542,7 +556,7 @@ describe("GameService challenger buffer", () => {
     );
   });
 
-  it("replaces buffered capacity when only inspiration mode changes", async () => {
+  it("replaces buffered capacity when only adaptation freedom changes", async () => {
     const profile = preferenceProfileFromSeed(
       "industrial, gothic, natural, and surprising",
     );
@@ -564,6 +578,7 @@ describe("GameService challenger buffer", () => {
     await context.service.updatePreferenceSeed(game.preferenceSeed, {
       ...profile,
       adaptationMode: "adaptive",
+      adaptationStrength: "unfettered",
     });
 
     expect((await context.challengerRepository.load())?.ready).toEqual([]);

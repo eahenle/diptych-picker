@@ -23,6 +23,8 @@ const preferenceProfileSchema = z
       .refine((value) => value.trim().length >= 20),
     inspiration: z.string().max(1_000).default(""),
     adaptationMode: z.enum(["static", "adaptive"]).default("static"),
+    adaptationStrength: z.enum(["guided", "unfettered"]).default("guided"),
+    adaptationLastDecision: z.number().int().nonnegative().default(0),
     adaptationSourceWinnerIds: z
       .array(z.string().trim().min(1).max(200))
       .max(12)

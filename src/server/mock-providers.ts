@@ -83,6 +83,8 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
       ({ rank }) => rank === 1,
     );
     const visual = input.leaderboardVisualProfile?.profile;
+    const unfettered =
+      (input.preferenceProfile.adaptationStrength ?? "guided") === "unfettered";
     const fields = {
       themes: input.preferenceProfile.themes,
       inspiration: input.preferenceProfile.inspiration,
@@ -96,6 +98,7 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
       ...proposal,
       preferenceRevision: {
         ...fields,
+        themes: unfettered && visual?.themes ? visual.themes : fields.themes,
         inspiration: visual
           ? [fields.inspiration, visual.inspiration].filter(Boolean).join("; ")
           : leader
@@ -114,9 +117,18 @@ export class MockChallengerPromptProvider implements ChallengerPromptProvider {
               .filter(Boolean)
               .join(", ")
           : fields.colorPalette,
-        avoid: visual
-          ? [fields.avoid, visual.avoid].filter(Boolean).join(", ")
-          : fields.avoid,
+        mediaTypes:
+          unfettered && visual?.mediaTypes
+            ? visual.mediaTypes
+            : fields.mediaTypes,
+        contentLevel:
+          unfettered && visual?.contentLevel
+            ? visual.contentLevel
+            : fields.contentLevel,
+        avoid:
+          unfettered && visual
+            ? [fields.avoid, visual.avoid].filter(Boolean).join(", ")
+            : fields.avoid,
       },
     };
   }

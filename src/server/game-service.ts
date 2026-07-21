@@ -163,7 +163,9 @@ export class GameService {
       const generationPreferencesChanged =
         current.preferenceSeed !== preferenceSeed ||
         (current.preferenceProfile?.adaptationMode ?? "static") !==
-          preferenceProfile.adaptationMode;
+          preferenceProfile.adaptationMode ||
+        (current.preferenceProfile?.adaptationStrength ?? "guided") !==
+          (preferenceProfile.adaptationStrength ?? "guided");
       if (!challengers || !generationPreferencesChanged) {
         return updated;
       }
@@ -1373,7 +1375,11 @@ export class GameService {
         ({ candidate }) => candidate.id === selection.loserId,
       );
       nextProfile = winner
-        ? applyWinnerPreferenceRevision(profile, winner.candidate)
+        ? applyWinnerPreferenceRevision(
+            profile,
+            winner.candidate,
+            game.history.length,
+          )
         : profile;
       if (rejected?.source === "generated") {
         nextProfile = recordRejectedPreferenceEvidence(
@@ -1634,7 +1640,9 @@ export class GameService {
     return (
       job.preferenceSeed === game.preferenceSeed &&
       (job.preferenceProfile?.adaptationMode ?? "static") ===
-        (game.preferenceProfile?.adaptationMode ?? "static")
+        (game.preferenceProfile?.adaptationMode ?? "static") &&
+      (job.preferenceProfile?.adaptationStrength ?? "guided") ===
+        (game.preferenceProfile?.adaptationStrength ?? "guided")
     );
   }
 

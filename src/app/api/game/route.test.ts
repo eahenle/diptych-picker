@@ -225,6 +225,8 @@ describe("PATCH /api/game", () => {
       themes: "mythic engineering and strange ecosystems",
       inspiration: "  sharp off-axis lighting  ",
       adaptationMode: "adaptive" as const,
+      adaptationStrength: "guided" as const,
+      adaptationLastDecision: 0,
       adaptationSourceWinnerIds: [],
       adaptationSourceRejectedIds: [],
       mediaTypes: "large-format photography",

@@ -655,7 +655,12 @@ describe("GameScreen challenger reconciliation", () => {
     expect(
       screen.getByDisplayValue("violet, charcoal, and pale gold"),
     ).toBeVisible();
-    expect(screen.getByRole("radio", { name: "Adaptive" })).toBeChecked();
+    expect(
+      screen.getByRole("slider", { name: "Model rewrite freedom" }),
+    ).toHaveValue("1");
+    expect(
+      screen.getByRole("slider", { name: "Model rewrite freedom" }),
+    ).toHaveAttribute("aria-valuetext", "Guided, every 15 rounds");
     expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
     expect(
       fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
@@ -1151,6 +1156,11 @@ describe("GameScreen challenger reconciliation", () => {
 
     expect(await screen.findByText("Saving profile")).toBeVisible();
     expect(screen.getByText("Applying your preferences…")).toBeVisible();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+      ).toBe(true),
+    );
     const patchCall = fetchMock.mock.calls.find(
       ([, init]) => init?.method === "PATCH",
     );
@@ -1276,9 +1286,7 @@ describe("GameScreen challenger reconciliation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
 
     expect(
-      screen.getByText(
-        /Adaptive evidence from generated images — winners: 2; rejected: 1/,
-      ),
+      screen.getByText(/Evidence — winners: 2; rejected: 1/),
     ).toBeVisible();
   });
 
@@ -1340,11 +1348,19 @@ describe("GameScreen challenger reconciliation", () => {
     expect(screen.getByLabelText("Themes & subjects")).toHaveValue(
       initializedGame.preferenceSeed,
     );
-    expect(screen.getByRole("radio", { name: "Static" })).toBeChecked();
+    const freedom = screen.getByRole("slider", {
+      name: "Model rewrite freedom",
+    });
+    expect(freedom).toHaveValue("0");
+    expect(freedom).toHaveAttribute("aria-valuetext", "Frozen");
     fireEvent.change(screen.getByLabelText("Inspiration"), {
       target: { value: "high-contrast portrait lighting" },
     });
-    fireEvent.click(screen.getByRole("radio", { name: "Adaptive" }));
+    fireEvent.change(freedom, { target: { value: "1" } });
+    expect(freedom).toHaveAttribute(
+      "aria-valuetext",
+      "Guided, every 15 rounds",
+    );
     fireEvent.change(screen.getByLabelText("Preferred media"), {
       target: { value: "linocut and large-format photography" },
     });
@@ -1374,6 +1390,8 @@ describe("GameScreen challenger reconciliation", () => {
         themes: initializedGame.preferenceSeed,
         inspiration: "",
         adaptationMode: "static",
+        adaptationStrength: "guided",
+        adaptationLastDecision: 0,
         adaptationSourceWinnerIds: [],
         adaptationSourceRejectedIds: [],
         mediaTypes: "",
@@ -1386,6 +1404,8 @@ describe("GameScreen challenger reconciliation", () => {
         themes: initializedGame.preferenceSeed,
         inspiration: "high-contrast portrait lighting",
         adaptationMode: "adaptive",
+        adaptationStrength: "guided",
+        adaptationLastDecision: 0,
         adaptationSourceWinnerIds: [],
         adaptationSourceRejectedIds: [],
         mediaTypes: "linocut and large-format photography",
