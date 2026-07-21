@@ -261,6 +261,10 @@ test("loads a distinct pair from the pool after tying with an empty queue", asyn
   expect((await responsePromise).status()).toBe(202);
   await expect(page.getByTestId("loading-left")).toBeVisible();
   await expect(page.getByTestId("loading-right")).toBeVisible();
+  await expect(page.getByRole("button", { name: /declare tie/i })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("button", { name: /both lose/i })).toHaveCount(0);
   await expect(page.getByText("Round 2", { exact: true })).toBeVisible({
     timeout: 5_000,
   });

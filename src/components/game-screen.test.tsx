@@ -994,6 +994,12 @@ describe("GameScreen challenger reconciliation", () => {
     expect(
       screen.getByText("Tie recorded — preparing a fresh matchup…"),
     ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /declare tie/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /both lose/i }),
+    ).not.toBeInTheDocument();
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       outcome: "tie",
       roundNumber: 1,
@@ -1052,6 +1058,12 @@ describe("GameScreen challenger reconciliation", () => {
     expect(
       screen.getByText("Both rejected — preparing a fresh matchup…"),
     ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /declare tie/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /both lose/i }),
+    ).not.toBeInTheDocument();
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       outcome: "both-lose",
       roundNumber: 1,
