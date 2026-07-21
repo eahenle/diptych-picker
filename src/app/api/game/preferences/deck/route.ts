@@ -30,6 +30,13 @@ const updateDeckSchema = z.discriminatedUnion("kind", [
       (value) => value.active !== undefined || value.weight !== undefined,
       "A card update is required",
     ),
+  z
+    .object({
+      kind: z.literal("suggestion"),
+      suggestionId: z.string().trim().min(1),
+      action: z.enum(["accept", "discard"]),
+    })
+    .strict(),
 ]);
 
 function errorResponse(error: unknown) {

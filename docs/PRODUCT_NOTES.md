@@ -95,7 +95,11 @@ card title. A selected card-backed candidate multiplies its card weight by 1.1;
 wins, rejections, and bounded attributable verdicts persist in the exported
 game. Ties are neutral, while **Both lose** records both card-backed candidates
 as rejected. Existing games and deck-free jobs continue through the prior
-freeform path unchanged. Automated editor suggestions remain staged.
+freeform path unchanged. When an active card accumulates four new rejects and
+at least four remain in the latest twelve deck verdicts, the app automatically
+requests two editor alternatives. The original card stays immutable; each
+proposal remains approval-gated until the player accepts it as a new child card
+or discards it.
 
 ## 2026-07-20
 

@@ -432,6 +432,23 @@ describe("prompt deck", () => {
       kind: "deck",
       enabled: true,
     });
+
+    const suggestionResponse = await PATCH(
+      new Request("http://localhost/api/game/preferences/deck", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "suggestion",
+          suggestionId: "suggestion-1",
+          action: "accept",
+        }),
+      }),
+    );
+    expect(suggestionResponse.status).toBe(200);
+    expect(updatePromptDeck).toHaveBeenLastCalledWith({
+      kind: "suggestion",
+      suggestionId: "suggestion-1",
+      action: "accept",
+    });
   });
 });
 

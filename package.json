@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && npm run test:agent-protocol && npm run test:scripts",
-    "test:agent-protocol": "node --test .agents/skills/run-diptych-picker/scripts/next-job.test.mjs",
+    "test:agent-protocol": "node --test .agents/skills/run-diptych-picker/scripts/*.test.mjs",
     "test:scripts": "bash -n run-only dev-and-play test-e2e && ./run-only --print-command >/dev/null && ./dev-and-play --print-command 8 >/dev/null",
     "test:watch": "vitest",
     "test:e2e": "./test-e2e",
@@ -22,6 +22,7 @@
     "agent:next": "node .agents/skills/run-diptych-picker/scripts/next-job.mjs",
     "agent:complete": "node .agents/skills/run-diptych-picker/scripts/complete-job.mjs",
     "agent:complete-profile": "node .agents/skills/run-diptych-picker/scripts/complete-source-profile.mjs",
+    "agent:complete-card-editor": "node .agents/skills/run-diptych-picker/scripts/complete-prompt-card-editor.mjs",
     "agent:fail": "node .agents/skills/run-diptych-picker/scripts/fail-job.mjs",
     "agent:heartbeat": "node .agents/skills/run-diptych-picker/scripts/heartbeat.mjs"
   },

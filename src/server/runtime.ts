@@ -35,6 +35,7 @@ import {
   MockAgentWorker,
   MockGenerationMailbox,
   MockLeaderboardProfileMailbox,
+  MockPromptCardEditorMailbox,
   MockSourceProfileMailbox,
 } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
@@ -166,6 +167,9 @@ const leaderboardProfileService = new LeaderboardProfileService({
     };
   },
 });
+const promptCardEditorMailbox = mockAgent
+  ? new MockPromptCardEditorMailbox(fileGenerationMailbox, mockAgent)
+  : fileGenerationMailbox;
 export const gameService = new GameService(
   repository,
   challengerRepository,
@@ -176,6 +180,7 @@ export const gameService = new GameService(
   undefined,
   undefined,
   leaderboardProfileService,
+  promptCardEditorMailbox,
 );
 const forceGeneratedInitial =
   process.env.GENERATE_INITIAL_CANDIDATES === "true";
@@ -392,7 +397,12 @@ export async function createPromptCard(
 export async function updatePromptDeck(
   update:
     | { kind: "deck"; enabled: boolean }
-    | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+    | { kind: "card"; cardId: string; active?: boolean; weight?: number }
+    | {
+        kind: "suggestion";
+        suggestionId: string;
+        action: "accept" | "discard";
+      },
 ): Promise<GameState> {
   return gameService.updatePromptDeck(update);
 }

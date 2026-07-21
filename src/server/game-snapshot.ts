@@ -211,6 +211,26 @@ export class GameSnapshotService {
           };
         }
 
+        const editorJob = stableGame.promptDeck?.editorJob;
+        if (editorJob && stableGame.promptDeck) {
+          stableGame = {
+            ...stableGame,
+            promptDeck: {
+              ...stableGame.promptDeck,
+              cards: stableGame.promptDeck.cards.map((card) =>
+                card.id === editorJob.cardId
+                  ? {
+                      ...card,
+                      editorRejectCheckpoint:
+                        editorJob.previousRejectCheckpoint,
+                    }
+                  : card,
+              ),
+              editorJob: null,
+            },
+          };
+        }
+
         return parseGameSnapshot({
           format: GAME_SNAPSHOT_FORMAT,
           version: GAME_SNAPSHOT_VERSION,
@@ -260,6 +280,13 @@ export class GameSnapshotService {
           ...(bootstrap?.jobs.map(({ id }) =>
             this.options.mailbox.archive(id),
           ) ?? []),
+          ...(currentGame?.promptDeck?.editorJob
+            ? [
+                this.options.mailbox.archive(
+                  currentGame.promptDeck.editorJob.jobId,
+                ),
+              ]
+            : []),
         ]);
         await this.options.bootstrapRepository.clear();
 

@@ -15,6 +15,9 @@ import type {
   GenerationResult,
   LeaderboardProfileJob,
   LeaderboardProfileResult,
+  PromptCardEditorJob,
+  PromptCardEditorMailbox,
+  PromptCardEditorResult,
 } from "./agent-mailbox";
 import {
   MemoryChallengerRepository,
@@ -220,6 +223,41 @@ function leaderboardProfiles() {
   };
 }
 
+function promptCardEditor() {
+  const work = new Map<string, PromptCardEditorJob>();
+  const results = new Map<string, PromptCardEditorResult>();
+  const enqueuePromptCardEditor = vi.fn<
+    PromptCardEditorMailbox["enqueuePromptCardEditor"]
+  >(async (job) => {
+    work.set(job.id, job);
+  });
+  const readPromptCardEditorWork = vi.fn<
+    PromptCardEditorMailbox["readPromptCardEditorWork"]
+  >(async (jobId) => work.get(jobId) ?? null);
+  const readPromptCardEditorResult = vi.fn<
+    PromptCardEditorMailbox["readPromptCardEditorResult"]
+  >(async (jobId) => results.get(jobId) ?? null);
+  const archivePromptCardEditor = vi.fn<
+    PromptCardEditorMailbox["archivePromptCardEditor"]
+  >(async (jobId) => {
+    work.delete(jobId);
+    results.delete(jobId);
+  });
+  const mailbox: PromptCardEditorMailbox = {
+    enqueuePromptCardEditor,
+    readPromptCardEditorWork,
+    readPromptCardEditorResult,
+    archivePromptCardEditor,
+  };
+  return {
+    mailbox,
+    enqueuePromptCardEditor,
+    setResult(result: PromptCardEditorResult) {
+      results.set(result.jobId, result);
+    },
+  };
+}
+
 function completedResult(
   jobId: string,
   completedAt = "2026-07-16T01:01:40.000Z",
@@ -268,6 +306,7 @@ function serviceFor(options: {
   random?: () => number;
   bufferTarget?: number;
   leaderboardProfiles?: ReturnType<typeof leaderboardProfiles>;
+  promptCardEditor?: ReturnType<typeof promptCardEditor>;
 }) {
   const game = options.game ?? gameState();
   const gameRepository =
@@ -294,6 +333,7 @@ function serviceFor(options: {
       ids("refill-1", "refill-2", "refill-3", "refill-4", "refill-5"),
     options.random ?? (() => 0),
     options.leaderboardProfiles?.coordinator,
+    options.promptCardEditor?.mailbox,
   );
   return {
     service,
@@ -305,6 +345,93 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("queues two approval-gated editor suggestions after four recent card rejections", async () => {
+    const card = {
+      id: "card-1",
+      title: "Copper nocturne",
+      prompt: "A severe copper-lit industrial editorial portrait.",
+      negativePrompt: "readable text",
+      weight: 1,
+      tags: ["portrait", "copper"],
+      parents: [],
+      active: true,
+      createdAt: NOW,
+      stats: { wins: 0, rejects: 4 },
+    };
+    const game = gameState({
+      promptDeck: {
+        enabled: true,
+        cards: [card],
+        verdicts: Array.from({ length: 4 }, (_, index) => ({
+          cardId: card.id,
+          resultId: `rejected-${index + 1}`,
+          verdict: "reject" as const,
+          reason: "Selected comparison winner",
+          recordedAt: `2026-07-16T00:00:0${index}.000Z`,
+        })),
+      },
+    });
+    const editor = promptCardEditor();
+    const context = serviceFor({
+      game,
+      promptCardEditor: editor,
+      createId: ids("editor-1", "suggestion-1", "suggestion-2", "child-1"),
+    });
+
+    const requested = await context.service.reconcile();
+    expect(editor.enqueuePromptCardEditor).toHaveBeenCalledOnce();
+    expect(requested?.promptDeck?.editorJob).toMatchObject({
+      jobId: "editor-1",
+      cardId: "card-1",
+    });
+    expect(requested?.promptDeck?.cards[0]).toMatchObject({
+      editorRejectCheckpoint: 4,
+    });
+
+    editor.setResult({
+      jobId: "editor-1",
+      kind: "prompt-card-editor",
+      status: "completed",
+      completedAt: NOW,
+      cardId: "card-1",
+      proposals: [
+        {
+          title: "Copper nocturne — focused",
+          prompt:
+            "A focused copper-lit portrait with a quieter industrial background.",
+          negativePrompt: "readable text",
+          tags: ["portrait", "copper"],
+          reasoningSummary: "Simplifies competing background detail.",
+        },
+        {
+          title: "Copper nocturne — oblique",
+          prompt:
+            "An oblique copper-lit portrait with deliberate negative space.",
+          negativePrompt: "readable text",
+          tags: ["portrait", "copper"],
+          reasoningSummary: "Changes camera angle while preserving the mood.",
+        },
+      ],
+    });
+    const suggested = await context.service.reconcile();
+    expect(suggested?.promptDeck?.editorJob).toBeNull();
+    expect(suggested?.promptDeck?.suggestions).toHaveLength(2);
+
+    const accepted = await context.service.updatePromptDeck({
+      kind: "suggestion",
+      suggestionId: "suggestion-1",
+      action: "accept",
+    });
+    expect(accepted.promptDeck?.cards).toHaveLength(2);
+    expect(accepted.promptDeck?.cards[1]).toMatchObject({
+      id: "child-1",
+      title: "Copper nocturne — focused",
+      parents: ["card-1"],
+      stats: { wins: 0, rejects: 0 },
+    });
+    expect(accepted.promptDeck?.suggestions).toHaveLength(1);
+  });
+
   it("saves, replaces, and deletes named preference presets without changing the active profile", async () => {
     const game = gameState();
     const context = serviceFor({ game, createId: ids("preset-1") });

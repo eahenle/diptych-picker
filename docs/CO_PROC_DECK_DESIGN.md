@@ -3,8 +3,8 @@
 Status: co-proc attachable transport and the opt-in durable-notification adapter
 are merged into their repositories' main branches. Prompt-card persistence,
 weighted draws, candidate attribution, and win/reject statistics are now
-implemented; persistent channel workers and editor suggestions remain staged
-follow-ups.
+implemented, including approval-gated editor suggestions after repeated card
+rejections; persistent channel workers remain staged follow-ups.
 
 ## Objective
 
@@ -111,6 +111,6 @@ The Preference profile modal has a top-line **Frozen / Guided / Unfettered** fre
 1. Extend `co-proc` with attachable, buffered, cross-process IPC and its own tests. Merged in `co-proc` PR #4.
 2. Add a Diptych transport adapter behind the existing generation interface while retaining durable job reconciliation. Merged in Diptych Picker PR #8 as an opt-in notification adapter.
 3. Move generation workers to persistent named channels and remove mailbox polling only after parity tests pass.
-4. Add deck persistence, weighted draw, winner updates, verdict tracking, and editor suggestions. Persistence, draws, attribution, and verdict statistics are implemented; editor suggestions remain staged.
+4. Add deck persistence, weighted draw, winner updates, verdict tracking, and editor suggestions. Implemented.
 5. Add blend, write-from-set, lineage UI, and winner-driven inspiration controls.
 6. Fix export responsiveness during loading and add ten-win champion retirement with focused regression tests.

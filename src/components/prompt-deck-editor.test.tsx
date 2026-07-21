@@ -31,6 +31,19 @@ const deck: PromptDeck = {
     },
   ],
   verdicts: [],
+  suggestions: [
+    {
+      id: "suggestion-1",
+      parentCardId: "card-1",
+      title: "Copper nocturne — focused",
+      prompt:
+        "A focused copper-lit portrait with a quieter industrial background.",
+      negativePrompt: "readable text",
+      tags: ["portrait", "copper"],
+      reasoningSummary: "Simplifies the competing background detail.",
+      createdAt: "2026-07-21T11:00:00.000Z",
+    },
+  ],
 };
 
 describe("PromptDeckEditor", () => {
@@ -58,6 +71,12 @@ describe("PromptDeckEditor", () => {
       kind: "card",
       cardId: "card-1",
       weight: 1.2100000000000002,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Accept as new card" }));
+    expect(onUpdate).toHaveBeenCalledWith({
+      kind: "suggestion",
+      suggestionId: "suggestion-1",
+      action: "accept",
     });
 
     fireEvent.change(screen.getByLabelText("Title"), {

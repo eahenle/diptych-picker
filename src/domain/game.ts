@@ -68,6 +68,7 @@ export interface PromptCard {
   active: boolean;
   createdAt: string;
   stats: PromptCardStats;
+  editorRejectCheckpoint?: number;
 }
 
 export interface PromptCardVerdict {
@@ -78,10 +79,45 @@ export interface PromptCardVerdict {
   recordedAt: string;
 }
 
+export interface PromptCardEditorEvidence {
+  resultId: string;
+  reason: string;
+  recordedAt: string;
+}
+
+export interface PromptCardEditorRequest {
+  id: string;
+  kind: "prompt-card-editor";
+  createdAt: string;
+  card: GenerationPromptCard;
+  recentRejections: PromptCardEditorEvidence[];
+}
+
+export interface PromptCardEditorJobRecord {
+  jobId: string;
+  cardId: string;
+  enqueuedAt: string;
+  previousRejectCheckpoint: number;
+  expectedJob: PromptCardEditorRequest;
+}
+
+export interface PromptCardSuggestion {
+  id: string;
+  parentCardId: string;
+  title: string;
+  prompt: string;
+  negativePrompt: string;
+  tags: string[];
+  reasoningSummary: string;
+  createdAt: string;
+}
+
 export interface PromptDeck {
   enabled: boolean;
   cards: PromptCard[];
   verdicts: PromptCardVerdict[];
+  editorJob?: PromptCardEditorJobRecord | null;
+  suggestions?: PromptCardSuggestion[];
 }
 
 export interface GenerationPromptCard {

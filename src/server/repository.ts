@@ -190,6 +190,11 @@ const gameStateSchema: z.ZodType<GameState> = z
                     rejects: z.number().int().nonnegative(),
                   })
                   .strict(),
+                editorRejectCheckpoint: z
+                  .number()
+                  .int()
+                  .nonnegative()
+                  .optional(),
               })
               .strict(),
           )
@@ -207,6 +212,61 @@ const gameStateSchema: z.ZodType<GameState> = z
               .strict(),
           )
           .max(200),
+        editorJob: z
+          .object({
+            jobId: z.string().trim().min(1),
+            cardId: z.string().trim().min(1),
+            enqueuedAt: z.string().trim().min(1),
+            previousRejectCheckpoint: z.number().int().nonnegative(),
+            expectedJob: z
+              .object({
+                id: z.string().trim().min(1),
+                kind: z.literal("prompt-card-editor"),
+                createdAt: z.string().trim().min(1),
+                card: z
+                  .object({
+                    id: z.string().trim().min(1),
+                    title: z.string().trim().min(1).max(80),
+                    prompt: z.string().trim().min(20).max(1_000),
+                    negativePrompt: z.string().max(500),
+                    tags: z.array(z.string().trim().min(1).max(40)).max(8),
+                  })
+                  .strict(),
+                recentRejections: z
+                  .array(
+                    z
+                      .object({
+                        resultId: z.string().trim().min(1),
+                        reason: z.string().trim().min(1).max(240),
+                        recordedAt: z.string().trim().min(1),
+                      })
+                      .strict(),
+                  )
+                  .min(4)
+                  .max(12),
+              })
+              .strict(),
+          })
+          .strict()
+          .nullable()
+          .optional(),
+        suggestions: z
+          .array(
+            z
+              .object({
+                id: z.string().trim().min(1),
+                parentCardId: z.string().trim().min(1),
+                title: z.string().trim().min(1).max(80),
+                prompt: z.string().trim().min(20).max(1_000),
+                negativePrompt: z.string().max(500),
+                tags: z.array(z.string().trim().min(1).max(40)).max(8),
+                reasoningSummary: z.string().trim().min(1).max(1_000),
+                createdAt: z.string().trim().min(1),
+              })
+              .strict(),
+          )
+          .max(10)
+          .optional(),
       })
       .strict()
       .superRefine((deck, context) => {
@@ -217,6 +277,16 @@ const gameStateSchema: z.ZodType<GameState> = z
               code: "custom",
               path: ["cards", index, "id"],
               message: "Prompt card IDs must be unique",
+            });
+          }
+          if (
+            card.editorRejectCheckpoint !== undefined &&
+            card.editorRejectCheckpoint > card.stats.rejects
+          ) {
+            context.addIssue({
+              code: "custom",
+              path: ["cards", index, "editorRejectCheckpoint"],
+              message: "Prompt card editor checkpoint cannot exceed rejects",
             });
           }
           ids.add(card.id);
@@ -236,6 +306,36 @@ const gameStateSchema: z.ZodType<GameState> = z
               code: "custom",
               path: ["verdicts", index, "cardId"],
               message: "Prompt card verdicts must reference the deck",
+            });
+          }
+        }
+        if (
+          deck.editorJob &&
+          (!ids.has(deck.editorJob.cardId) ||
+            deck.editorJob.expectedJob.card.id !== deck.editorJob.cardId ||
+            deck.editorJob.expectedJob.id !== deck.editorJob.jobId)
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["editorJob"],
+            message: "Prompt card editor job must reference its deck card",
+          });
+        }
+        const suggestionIds = new Set<string>();
+        for (const [index, suggestion] of (deck.suggestions ?? []).entries()) {
+          if (suggestionIds.has(suggestion.id)) {
+            context.addIssue({
+              code: "custom",
+              path: ["suggestions", index, "id"],
+              message: "Prompt card suggestion IDs must be unique",
+            });
+          }
+          suggestionIds.add(suggestion.id);
+          if (!ids.has(suggestion.parentCardId)) {
+            context.addIssue({
+              code: "custom",
+              path: ["suggestions", index, "parentCardId"],
+              message: "Prompt card suggestions must reference the deck",
             });
           }
         }

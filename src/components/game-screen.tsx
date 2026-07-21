@@ -671,6 +671,36 @@ export function GameScreen() {
     };
   }, [healthPollingEnabled, healthRound]);
 
+  const promptCardEditorJobId = game?.promptDeck?.editorJob?.jobId;
+  useEffect(() => {
+    if (!promptCardEditorJobId) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const response = await readJson<GameStartState>(
+          await fetch("/api/game", { cache: "no-store" }),
+        );
+        if (!active || response.status !== "ready") return;
+        commitGame(response.game);
+        if (
+          response.game.promptDeck?.editorJob?.jobId === promptCardEditorJobId
+        ) {
+          timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+        }
+      } catch {
+        if (active) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+      }
+    };
+
+    timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [commitGame, promptCardEditorJobId]);
+
   useEffect(() => {
     if (
       game?.round.status !== "generating" ||
@@ -1466,7 +1496,12 @@ export function GameScreen() {
   const updatePromptDeck = async (
     update:
       | { kind: "deck"; enabled: boolean }
-      | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+      | { kind: "card"; cardId: string; active?: boolean; weight?: number }
+      | {
+          kind: "suggestion";
+          suggestionId: string;
+          action: "accept" | "discard";
+        },
   ) => {
     setPromptDeckSaving(true);
     setPromptDeckError(null);
