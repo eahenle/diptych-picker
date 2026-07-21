@@ -304,12 +304,29 @@ test("opens either active image in a larger inspection view", async ({
     .nth(1)
     .getAttribute("alt");
 
-  await page.getByRole("button", { name: "View image A larger" }).click();
+  const leftInspectButton = page.getByRole("button", {
+    name: "View image A larger",
+  });
+  await leftInspectButton.click();
   const leftDialog = page.getByRole("dialog", {
     name: /Expanded image:/,
   });
   await expect(leftDialog).toBeVisible();
   await expect(leftDialog.getByRole("img")).toHaveAttribute("src", leftSource!);
+  const closeInspector = leftDialog.getByRole("button", {
+    name: "Close expanded image",
+  });
+  await expect(closeInspector).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    leftDialog.getByRole("button", { name: "Previous expanded image" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    leftDialog.getByRole("button", { name: "Next expanded image" }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closeInspector).toBeFocused();
   await page.keyboard.press("a");
   await expect(page.getByText("Round 1", { exact: true })).toBeVisible();
   expect(selectionPosts).toBe(0);
@@ -323,6 +340,7 @@ test("opens either active image in a larger inspection view", async ({
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(leftDialog).toHaveCount(0);
+  await expect(leftInspectButton).toBeFocused();
 
   await page.getByRole("button", { name: "View image B larger" }).click();
   await expect(
