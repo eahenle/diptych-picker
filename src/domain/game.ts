@@ -52,6 +52,46 @@ export interface PreferencePreset {
   profile: PreferenceProfile;
 }
 
+export interface PromptCardStats {
+  wins: number;
+  rejects: number;
+}
+
+export interface PromptCard {
+  id: string;
+  title: string;
+  prompt: string;
+  negativePrompt: string;
+  weight: number;
+  tags: string[];
+  parents: string[];
+  active: boolean;
+  createdAt: string;
+  stats: PromptCardStats;
+}
+
+export interface PromptCardVerdict {
+  cardId: string;
+  resultId: string;
+  verdict: "win" | "reject";
+  reason: string;
+  recordedAt: string;
+}
+
+export interface PromptDeck {
+  enabled: boolean;
+  cards: PromptCard[];
+  verdicts: PromptCardVerdict[];
+}
+
+export interface GenerationPromptCard {
+  id: string;
+  title: string;
+  prompt: string;
+  negativePrompt: string;
+  tags: string[];
+}
+
 export interface CandidateLineage {
   kind: "variation";
   parentCandidateId: string;
@@ -69,6 +109,7 @@ export interface Candidate {
   winCount: number;
   reasoningSummary?: string;
   preferenceRevision?: PreferenceRevision;
+  promptCardId?: string;
   lineage?: CandidateLineage;
 }
 
@@ -137,6 +178,7 @@ export interface GameState {
   preferenceProfile?: PreferenceProfile;
   preferenceRevisions?: PreferenceProfileSnapshot[];
   preferencePresets?: PreferencePreset[];
+  promptDeck?: PromptDeck;
   variationSource?: VariationSource;
   pendingSelection?: PendingSelection;
   mailboxCleanupJobId?: string;

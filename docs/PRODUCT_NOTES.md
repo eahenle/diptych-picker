@@ -83,6 +83,20 @@ extends CI to cover a production build plus all Chromium game flows. Larger
 `GameScreen` and `GameService` decompositions remain explicitly staged as
 behavior-neutral follow-ups rather than being mixed into feature changes.
 
+### Weighted prompt-card deck
+
+The Preferences modal owns an additive prompt-card deck. Cards are immutable
+creative directions with optional negatives, tags, active state, and a positive
+weight; archiving or changing weight does not rewrite their authored content.
+When enabled, each future refill job draws one active card proportionally to its
+weight while the explicit preference profile remains authoritative. Generated
+candidates retain their card ID, and expanded image inspection resolves the
+card title. A selected card-backed candidate multiplies its card weight by 1.1;
+wins, rejections, and bounded attributable verdicts persist in the exported
+game. Ties are neutral, while **Both lose** records both card-backed candidates
+as rejected. Existing games and deck-free jobs continue through the prior
+freeform path unchanged. Automated editor suggestions remain staged.
+
 ## 2026-07-20
 
 ### Large image inspection

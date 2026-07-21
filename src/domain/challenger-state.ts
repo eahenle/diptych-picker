@@ -55,6 +55,7 @@ export interface RefillGenerationJobSnapshot {
   leaderboardVisualProfile?: LeaderboardVisualProfile;
   preferenceSeed: string;
   preferenceProfile?: PreferenceProfile;
+  promptCard?: import("./game").GenerationPromptCard;
   variationSource?: import("./game").VariationSource;
   sessionId: string;
   pinnedWinnerId: string;
@@ -177,7 +178,7 @@ export interface PoolLeaderboardEntry {
   rank: number;
   candidate: Pick<
     Candidate,
-    "id" | "imageUrl" | "concept" | "style" | "lineage"
+    "id" | "imageUrl" | "concept" | "style" | "lineage" | "promptCardId"
   >;
   rating: number;
   wins: number;
@@ -210,6 +211,7 @@ export interface ComparisonHistoryCandidate {
   style: string[];
   favorite: boolean | null;
   lineage?: Candidate["lineage"];
+  promptCardId?: string;
 }
 
 export interface WinningComparisonHistoryEntry {
@@ -406,6 +408,9 @@ export function summarizePoolLeaderboard(
         concept: candidate.concept,
         style: candidate.style,
         ...(candidate.lineage ? { lineage: candidate.lineage } : {}),
+        ...(candidate.promptCardId
+          ? { promptCardId: candidate.promptCardId }
+          : {}),
       },
       rating: Math.round(rating),
       wins,
@@ -470,6 +475,9 @@ export function summarizeComparisonHistory(
       style: candidate?.style ?? [],
       favorite: rating ? Boolean(rating.favorite) : null,
       ...(candidate?.lineage ? { lineage: candidate.lineage } : {}),
+      ...(candidate?.promptCardId
+        ? { promptCardId: candidate.promptCardId }
+        : {}),
     };
   };
 

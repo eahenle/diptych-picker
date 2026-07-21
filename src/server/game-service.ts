@@ -43,6 +43,13 @@ import {
   type PreferenceProfileSnapshot,
   type Side,
 } from "@/domain/game";
+import {
+  createPromptCard as createPromptCardRecord,
+  drawPromptCard,
+  emptyPromptDeck,
+  recordPromptCardDecision,
+  type CreatePromptCardInput,
+} from "@/domain/prompt-deck";
 import type {
   GenerationJob,
   GenerationMailbox,
@@ -57,6 +64,7 @@ import type { GameRepository } from "./repository";
 export class SelectionConflictError extends Error {}
 export class MissingGameError extends Error {}
 export class PreferencePresetLimitError extends Error {}
+export class PromptDeckError extends Error {}
 
 export interface GameServiceConfig {
   bufferTarget: number;
@@ -183,6 +191,98 @@ export class GameService {
         return current;
       }
       const updated: GameState = { ...current, preferencePresets };
+      await this.gameRepository.save(updated);
+      return updated;
+    });
+  }
+
+  async createPromptCard(input: CreatePromptCardInput): Promise<GameState> {
+    return this.gameRepository.withLock(async () => {
+      const current = await this.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError("Start a game before creating prompt cards");
+      }
+      const promptDeck = current.promptDeck ?? emptyPromptDeck();
+      if (promptDeck.cards.length >= 50) {
+        throw new PromptDeckError(
+          "Archive or reuse a prompt card before adding another (maximum 50).",
+        );
+      }
+      if (
+        input.parents?.some(
+          (parentId) => !promptDeck.cards.some((card) => card.id === parentId),
+        )
+      ) {
+        throw new PromptDeckError(
+          "Every prompt-card parent must exist in the current deck.",
+        );
+      }
+      const updated: GameState = {
+        ...current,
+        promptDeck: {
+          ...promptDeck,
+          cards: [
+            ...promptDeck.cards,
+            createPromptCardRecord(input, this.createId(), this.now()),
+          ],
+        },
+      };
+      await this.gameRepository.save(updated);
+      return updated;
+    });
+  }
+
+  async updatePromptDeck(
+    update:
+      | { kind: "deck"; enabled: boolean }
+      | { kind: "card"; cardId: string; active?: boolean; weight?: number },
+  ): Promise<GameState> {
+    return this.gameRepository.withLock(async () => {
+      const current = await this.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError(
+          "Start a game before editing the prompt deck",
+        );
+      }
+      const promptDeck = current.promptDeck ?? emptyPromptDeck();
+      if (update.kind === "deck") {
+        if (
+          update.enabled &&
+          !promptDeck.cards.some((card) => card.active && card.weight > 0)
+        ) {
+          throw new PromptDeckError(
+            "Activate at least one prompt card before enabling weighted draws.",
+          );
+        }
+        const updated = {
+          ...current,
+          promptDeck: { ...promptDeck, enabled: update.enabled },
+        };
+        await this.gameRepository.save(updated);
+        return updated;
+      }
+
+      let found = false;
+      const cards = promptDeck.cards.map((card) => {
+        if (card.id !== update.cardId) return card;
+        found = true;
+        return {
+          ...card,
+          ...(update.active !== undefined ? { active: update.active } : {}),
+          ...(update.weight !== undefined ? { weight: update.weight } : {}),
+        };
+      });
+      if (!found)
+        throw new PromptDeckError("That prompt card no longer exists.");
+      const hasActive = cards.some((card) => card.active && card.weight > 0);
+      const updated: GameState = {
+        ...current,
+        promptDeck: {
+          ...promptDeck,
+          enabled: promptDeck.enabled && hasActive,
+          cards,
+        },
+      };
       await this.gameRepository.save(updated);
       return updated;
     });
@@ -357,6 +457,13 @@ export class GameService {
         }
       }
 
+      nextGame = recordPromptCardDecision(
+        nextGame,
+        [retainedWinner],
+        [rejectedCandidate],
+        selectedAt,
+        "Selected comparison winner",
+      );
       const adapted = this.applyAdaptivePreferences(nextGame, nextChallengers);
       nextGame = adapted.game;
       nextChallengers = adapted.challengers;
@@ -376,7 +483,15 @@ export class GameService {
       // Persist a replayable selection before committing either side of the
       // cross-repository transition. A prepared FIFO head remains durable
       // until the completed game round is safely stored.
-      await this.gameRepository.save(inFlight);
+      await this.gameRepository.save(
+        recordPromptCardDecision(
+          inFlight,
+          [retainedWinner],
+          [rejectedCandidate],
+          selectedAt,
+          "Selected comparison winner",
+        ),
+      );
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
       if (nextGame.round.status === "idle") {
@@ -469,6 +584,16 @@ export class GameService {
             : completeBothLose(inFlight, ...replacements.candidates);
       }
 
+      if (outcome === "both-lose") {
+        nextGame = recordPromptCardDecision(
+          nextGame,
+          [],
+          [left, right],
+          selectedAt,
+          "Both images rejected",
+        );
+      }
+
       if (outcome === "both-lose" && nextGame.round.status === "idle") {
         const adapted = this.applyAdaptivePreferences(
           nextGame,
@@ -497,7 +622,17 @@ export class GameService {
               ready: [...preparedReadyHeads, ...capacity.state.ready],
             }
           : capacity.state;
-      await this.gameRepository.save(inFlight);
+      await this.gameRepository.save(
+        outcome === "both-lose"
+          ? recordPromptCardDecision(
+              inFlight,
+              [],
+              [left, right],
+              selectedAt,
+              "Both images rejected",
+            )
+          : inFlight,
+      );
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
       if (nextGame.round.status === "idle") {
@@ -977,6 +1112,7 @@ export class GameService {
         throw new Error(`Duplicate refill job ID ${id}`);
       }
       const createdAt = this.now();
+      const promptCard = drawPromptCard(context.game.promptDeck, this.random);
       const job: GenerationJob = {
         id,
         kind: "refill",
@@ -993,6 +1129,7 @@ export class GameService {
         preferenceProfile:
           context.game.preferenceProfile ??
           preferenceProfileFromSeed(context.game.preferenceSeed),
+        ...(promptCard ? { promptCard } : {}),
         ...(context.game.variationSource
           ? { variationSource: context.game.variationSource }
           : {}),
@@ -1633,7 +1770,10 @@ export class GameService {
 
   private candidateFromResult(
     result: Extract<GenerationResult, { status: "completed" }>,
-    expectedJob?: Pick<GenerationJob, "preferenceSeed" | "variationSource">,
+    expectedJob?: Pick<
+      GenerationJob,
+      "preferenceSeed" | "promptCard" | "variationSource"
+    >,
   ): Candidate | null {
     const expectedCandidateId = `challenger-${result.jobId}`;
     if (result.asset.candidateId !== expectedCandidateId) return null;
@@ -1645,6 +1785,9 @@ export class GameService {
       style: result.proposal.styleTags,
       reasoningSummary: result.proposal.reasoningSummary,
       preferenceRevision: result.proposal.preferenceRevision,
+      ...(expectedJob?.promptCard
+        ? { promptCardId: expectedJob.promptCard.id }
+        : {}),
       ...(expectedJob?.variationSource
         ? {
             lineage: {

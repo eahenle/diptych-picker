@@ -74,6 +74,13 @@ Only the helper scripts move or create mailbox artifacts. The app archives termi
     ]
   },
   "preferenceSeed": "editable preference profile",
+  "promptCard": {
+    "id": "card-1",
+    "title": "Industrial nocturne",
+    "prompt": "A severe industrial nocturne with tactile materials and off-axis cinematic light.",
+    "negativePrompt": "readable text, logos",
+    "tags": ["industrial", "nocturne"]
+  },
   "preferenceProfile": {
     "themes": "explicit subjects and themes",
     "inspiration": "optional aesthetic cues",

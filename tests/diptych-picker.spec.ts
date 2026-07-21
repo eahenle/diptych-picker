@@ -16,7 +16,7 @@ interface StoredChallengerState {
   }>;
   refillJobs: Array<{ jobId: string }>;
   ratings: Array<{
-    candidate: { id: string };
+    candidate: { id: string; promptCardId?: string };
     poolMember: boolean;
   }>;
   consecutiveFallbackDraws: number;
@@ -680,6 +680,51 @@ test("saves and applies named preference presets as drafts", async ({
   state = await (await request.get("/api/game")).json();
   expect(state.game.preferencePresets).toEqual([]);
   expect(state.game.preferenceProfile).toEqual(activeProfile);
+});
+
+test("uses an enabled weighted prompt card for future generation jobs", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByText("Prompt deck").click();
+  await page.getByLabel("Title").fill("Copper nocturne");
+  await page
+    .getByLabel("Prompt direction")
+    .fill("A severe copper-lit industrial editorial portrait.");
+  await page.getByLabel("Avoid for this card").fill("readable text");
+  await page.getByLabel("Tags").fill("portrait, copper");
+
+  const createResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Add card" }).click();
+  expect((await createResponse).status()).toBe(200);
+  await expect(page.getByText("Copper nocturne")).toBeVisible();
+
+  const enableResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck") &&
+      response.request().method() === "PATCH",
+  );
+  const deckToggle = page.getByRole("checkbox");
+  await deckToggle.click();
+  expect((await enableResponse).status()).toBe(200);
+  await expect(deckToggle).toBeChecked();
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  await select(page, "left", 2);
+  await reconcileAllRefills(request);
+  const game = await (await request.get("/api/game")).json();
+  const cardId = game.game.promptDeck.cards[0].id;
+  expect(game.game.promptDeck.enabled).toBe(true);
+  expect(
+    (await challengerState()).ratings.some(
+      ({ candidate }) => candidate.promptCardId === cardId,
+    ),
+  ).toBe(true);
 });
 
 test("derives an editable preference profile from a private source image", async ({

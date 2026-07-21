@@ -496,7 +496,7 @@
 }
 
 .dialog textarea,
-.dialog input:not([type="radio"]) {
+.dialog input:not([type="radio"]):not([type="checkbox"]) {
   width: 100%;
   min-height: 44px;
   padding: 11px 12px;
@@ -514,7 +514,7 @@
 }
 
 .dialog textarea:focus,
-.dialog input:not([type="radio"]):focus {
+.dialog input:not([type="radio"]):not([type="checkbox"]):focus {
   border-color: var(--ultraviolet);
   box-shadow: 0 0 0 2px rgba(167, 107, 239, 0.16);
 }

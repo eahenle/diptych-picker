@@ -364,6 +364,60 @@ describe("GameService challenger buffer", () => {
     expect(deleted.preferencePresets).toEqual([]);
   });
 
+  it("draws weighted prompt cards and records generated-card verdicts", async () => {
+    const base = gameState();
+    const game = gameState({
+      round: {
+        ...base.round,
+        leftCandidate: { ...base.round.leftCandidate, promptCardId: "card-1" },
+      },
+    });
+    const context = serviceFor({
+      game,
+      createId: ids("card-1", "refill-1"),
+      random: () => 0,
+    });
+
+    await context.service.createPromptCard({
+      title: "Copper nocturne",
+      prompt: "A severe copper-lit industrial editorial portrait.",
+      negativePrompt: "readable text",
+      weight: 1,
+      tags: ["portrait", "copper"],
+    });
+    await context.service.updatePromptDeck({ kind: "deck", enabled: true });
+    const updated = await context.service.select(
+      "left",
+      game.round.roundNumber,
+    );
+
+    expect(updated.promptDeck).toMatchObject({
+      enabled: true,
+      cards: [
+        {
+          id: "card-1",
+          weight: 1.1,
+          stats: { wins: 1, rejects: 0 },
+        },
+      ],
+      verdicts: [
+        {
+          cardId: "card-1",
+          resultId: game.round.leftCandidate.id,
+          verdict: "win",
+        },
+      ],
+    });
+    expect(context.queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptCard: expect.objectContaining({
+          id: "card-1",
+          title: "Copper nocturne",
+        }),
+      }),
+    );
+  });
+
   it("caches leaderboard image analysis and includes it in adaptive refills", async () => {
     const base = gameState();
     const game = gameState({
