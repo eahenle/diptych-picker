@@ -41,10 +41,12 @@ function renderPreferences(
     sourceError: null,
     sourceSummary: null,
     variationSource: null,
+    revisions: [],
     selectionBoundWait: false,
     onClose: vi.fn(),
     onSave: vi.fn(),
     onAnalyzeSource: vi.fn(async () => undefined),
+    onRestoreRevision: vi.fn(),
     onFieldChange: vi.fn(),
     onFreedomChange: vi.fn(),
     ...overrides,
@@ -66,6 +68,38 @@ describe("PreferenceProfileModal", () => {
       "Exploring variations of Copper parent",
     );
     expect(screen.getByRole("status")).toHaveTextContent("parent lineage");
+  });
+
+  it("summarizes changed fields and restores a prior revision as a draft", () => {
+    const props = renderPreferences({
+      revisions: [
+        {
+          createdAt: "2026-07-20T10:00:00.000Z",
+          source: "initial",
+          profile,
+        },
+        {
+          createdAt: "2026-07-21T10:00:00.000Z",
+          source: "adaptive",
+          profile: {
+            ...profile,
+            inspiration: "hard diagonal light",
+            colorPalette: "crimson and copper",
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByText("Revision history"));
+    expect(screen.getByText("Model adaptation")).toBeVisible();
+    expect(screen.getByText("Inspiration · Palette")).toBeVisible();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Restore frozen" })[0],
+    );
+    expect(props.onRestoreRevision).toHaveBeenCalledWith(
+      props.revisions[1],
+      true,
+    );
   });
 
   it("delegates profile fields, freedom, source analysis, and actions", async () => {

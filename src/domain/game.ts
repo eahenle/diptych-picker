@@ -37,6 +37,13 @@ export interface VariationSource {
   concept: string;
 }
 
+export interface PreferenceProfileSnapshot {
+  createdAt: string;
+  source: "initial" | "manual" | "variation" | "adaptive";
+  profile: PreferenceProfile;
+  variationSource?: VariationSource;
+}
+
 export interface CandidateLineage {
   kind: "variation";
   parentCandidateId: string;
@@ -120,6 +127,7 @@ export interface GameState {
   history: SelectionHistory[];
   preferenceSeed: string;
   preferenceProfile?: PreferenceProfile;
+  preferenceRevisions?: PreferenceProfileSnapshot[];
   variationSource?: VariationSource;
   pendingSelection?: PendingSelection;
   mailboxCleanupJobId?: string;

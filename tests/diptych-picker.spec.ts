@@ -562,9 +562,9 @@ test("persists a fine-grained preference profile and composes generation context
   await expect(freedom).toHaveValue("0");
   await expect(freedom).toHaveAttribute("aria-valuetext", "Frozen");
   await expect(page.getByText(/Frozen preserves every field/)).toBeVisible();
-  await page
-    .getByLabel("Themes & subjects")
-    .fill("mythic engineering and strange nocturnal ecosystems");
+  const themes = page.getByLabel("Themes & subjects");
+  const baselineThemes = await themes.inputValue();
+  await themes.fill("mythic engineering and strange nocturnal ecosystems");
   await page
     .getByLabel("Inspiration")
     .fill("  severe off-axis framing and quiet tension  ");
@@ -605,6 +605,15 @@ test("persists a fine-grained preference profile and composes generation context
   await expect(
     page.getByRole("radio", { name: /adult themes/i }),
   ).toBeChecked();
+  await page.getByText("Revision history").click();
+  await expect(page.getByText("Manual save")).toBeVisible();
+  await expect(page.getByText("Baseline")).toBeVisible();
+  await expect(page.getByText(/Themes.*Inspiration.*Media/)).toBeVisible();
+  await page.getByRole("button", { name: "Restore as draft" }).nth(1).click();
+  await expect(page.getByLabel("Themes & subjects")).toHaveValue(
+    baselineThemes,
+  );
+  await expect(page.getByText(/restored as an editable draft/i)).toBeVisible();
 
   const state = await (await request.get("/api/game")).json();
   expect(state.game.preferenceProfile).toMatchObject({
@@ -622,6 +631,7 @@ test("persists a fine-grained preference profile and composes generation context
   expect(state.game.preferenceSeed).toContain(
     "Content range: Adult themes may be used when relevant",
   );
+  expect(state.game.preferenceRevisions).toHaveLength(2);
 });
 
 test("derives an editable preference profile from a private source image", async ({

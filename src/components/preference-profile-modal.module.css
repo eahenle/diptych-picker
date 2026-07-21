@@ -168,6 +168,90 @@
   background: rgba(167, 107, 239, 0.08);
 }
 
+.revisionHistory {
+  margin: 14px 0 18px;
+  border: 1px solid #383337;
+  background: #090b0d;
+}
+
+.revisionHistory summary {
+  padding: 11px 12px;
+  color: #d9d2cb;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.revisionHistory summary strong {
+  margin-left: 6px;
+  color: var(--copper-bright);
+}
+
+.revisionHistory ol {
+  display: grid;
+  gap: 8px;
+  max-height: 310px;
+  margin: 0;
+  padding: 0 10px 10px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.revisionHistory li {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.revisionHistory li > span,
+.revisionHistory li > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.revisionHistory li > span strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.revisionHistory time,
+.revisionHistory li > small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.revisionHistory li > div {
+  justify-content: flex-start;
+}
+
+.revisionHistory button {
+  min-height: 30px;
+  padding: 0 9px;
+  color: #c9b8ec;
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid rgba(167, 107, 239, 0.35);
+  cursor: pointer;
+}
+
+.revisionHistory button:hover,
+.revisionHistory button:focus-visible {
+  color: #fff;
+  border-color: var(--ultraviolet);
+  outline: none;
+}
+
+.revisionHistory button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
 .sourceImport > span {
   min-width: 0;
   display: grid;

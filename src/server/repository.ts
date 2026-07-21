@@ -236,6 +236,25 @@ const gameStateSchema: z.ZodType<GameState> = z
     history: z.array(selectionHistorySchema),
     preferenceSeed: z.string().trim().min(1),
     preferenceProfile: preferenceProfileSchema.optional(),
+    preferenceRevisions: z
+      .array(
+        z
+          .object({
+            createdAt: z.string().trim().min(1),
+            source: z.enum(["initial", "manual", "variation", "adaptive"]),
+            profile: preferenceProfileSchema,
+            variationSource: z
+              .object({
+                candidateId: z.string().trim().min(1),
+                concept: z.string().trim().min(1),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      )
+      .max(25)
+      .optional(),
     variationSource: z
       .object({
         candidateId: z.string().trim().min(1),

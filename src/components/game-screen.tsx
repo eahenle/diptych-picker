@@ -21,6 +21,7 @@ import {
   type GameStartState,
   type GameState,
   type PreferenceProfile,
+  type PreferenceProfileSnapshot,
   type PreferenceRevision,
   type Side,
   type VariationSource,
@@ -1530,6 +1531,30 @@ export function GameScreen() {
     }));
   };
 
+  const restorePreferenceRevision = (
+    revision: PreferenceProfileSnapshot,
+    frozen: boolean,
+  ) => {
+    setPreferenceDraft(
+      frozen
+        ? {
+            ...revision.profile,
+            adaptationMode: "static",
+            adaptationStrength: "guided",
+            adaptationSourceWinnerIds: [],
+            adaptationSourceRejectedIds: [],
+          }
+        : revision.profile,
+    );
+    setPreferenceVariationSource(revision.variationSource ?? null);
+    setSourceProfileError(null);
+    setSourceProfileSummary(
+      frozen
+        ? "Revision restored as a frozen draft. Review it, then save to apply."
+        : "Revision restored as an editable draft. Review it, then save to apply.",
+    );
+  };
+
   const retryAvailable =
     game?.round.status === "error" && Boolean(game.pendingSelection);
   const status = game?.round.status;
@@ -1943,10 +1968,12 @@ export function GameScreen() {
           sourceError={sourceProfileError}
           sourceSummary={sourceProfileSummary}
           variationSource={preferenceVariationSource}
+          revisions={game.preferenceRevisions ?? []}
           selectionBoundWait={selectionBoundWait}
           onClose={closePreferences}
           onSave={() => void savePreferences()}
           onAnalyzeSource={analyzeSourceImage}
+          onRestoreRevision={restorePreferenceRevision}
           onFieldChange={setPreferenceField}
           onFreedomChange={setAdaptationFreedom}
         />

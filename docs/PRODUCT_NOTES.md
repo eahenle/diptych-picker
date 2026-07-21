@@ -51,6 +51,17 @@ candidates preserve the parent's ID and concept plus a SHA-256 fingerprint of
 the exact composed preference profile that produced them; the expanded view
 surfaces the parent concept without exposing prompt text.
 
+### Preference revision history
+
+Confirmed manual saves, candidate-derived variation profiles, and actual
+model-authored field rewrites append to a bounded, durable profile timeline. The
+first change also captures its preceding baseline, while provenance-only
+evidence updates do not create noisy revisions. The Preferences modal shows
+newest-first origin, time, changed fields, and variation source where relevant.
+A revision can be restored as an editable draft or as a Frozen draft; neither
+action changes the game until **Save profile** is confirmed. Named preset
+creation remains the final part of this roadmap item.
+
 ## 2026-07-20
 
 ### Large image inspection
