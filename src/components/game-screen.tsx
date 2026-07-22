@@ -29,6 +29,7 @@ import { PoolLeaderboard } from "./pool-leaderboard";
 import { QueueDetails } from "./queue-details";
 import { PreferenceProfileModal } from "./preference-profile-modal";
 import { useCandidateBrowser } from "./use-candidate-browser";
+import { useGameSessionPolling } from "./use-game-session-polling";
 import { useGameTransfer } from "./use-game-transfer";
 import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
 import { usePreferenceDraft } from "./use-preference-draft";
@@ -37,10 +38,6 @@ import { usePromptDeck } from "./use-prompt-deck";
 import { useSelectionController } from "./use-selection-controller";
 import styles from "./game-screen.module.css";
 
-const POLL_INTERVAL_MS = 150;
-const HEALTH_POLL_INTERVAL_MS = 2_000;
-const MAX_RECONNECT_DELAY_MS = 2_400;
-const RECONNECT_MESSAGE = "Connection interrupted. Reconnecting…";
 const SOURCE_PROFILE_POLL_INTERVAL_MS = 500;
 
 type SourceProfileResponse =
@@ -52,13 +49,6 @@ type SourceProfileResponse =
       reasoningSummary: string;
     }
   | { status: "failed"; jobId: string; message: string };
-
-function reconnectDelay(attempt: number): number {
-  return Math.min(
-    POLL_INTERVAL_MS * 2 ** Math.min(attempt, 8),
-    MAX_RECONNECT_DELAY_MS,
-  );
-}
 
 function waitForSourceProfilePoll(signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -147,12 +137,7 @@ export function GameScreen() {
   const [eloRatings, setEloRatings] = useState<DisplayedEloRatings | null>(
     null,
   );
-  const healthPollingEnabled = game !== null && bufferHealth !== null;
-  const healthRound = game?.round.roundNumber ?? null;
   const gameRef = useRef<GameState | null>(null);
-  const initialPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
   const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
   const queuedPreferenceVariationSourceRef = useRef<VariationSource | null>(
@@ -214,6 +199,18 @@ export function GameScreen() {
     },
     [commitGame, replacePreferenceDraft],
   );
+
+  const { retryInitial } = useGameSessionPolling({
+    bufferHealth,
+    game,
+    startState,
+    commitGame,
+    commitStartState,
+    setBufferHealth,
+    setConnectionStatus,
+    setInitializing,
+    setLocalError,
+  });
 
   const {
     cancelActiveSelection,
@@ -281,151 +278,7 @@ export function GameScreen() {
     updateFavorite,
   } = useCandidateBrowser({ gameRef });
 
-  useEffect(() => {
-    let active = true;
-    let retryAttempt = 0;
-    const load = async (): Promise<void> => {
-      if (!active) return;
-      try {
-        const state = await readJson<GameStartState>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
-        if (!active) return;
-        commitStartState(state);
-        setInitializing(false);
-        setLocalError(null);
-        setConnectionStatus(null);
-      } catch {
-        if (!active) return;
-        setConnectionStatus(RECONNECT_MESSAGE);
-        initialPollTimerRef.current = setTimeout(
-          () => void load(),
-          reconnectDelay(retryAttempt),
-        );
-        retryAttempt += 1;
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-      if (initialPollTimerRef.current)
-        clearTimeout(initialPollTimerRef.current);
-      initialPollTimerRef.current = null;
-    };
-  }, [commitStartState]);
-
-  useEffect(() => {
-    if (startState?.status !== "initializing") return;
-    let active = true;
-    let retryAttempt = 0;
-
-    const poll = async (): Promise<void> => {
-      if (!active) return;
-      try {
-        const response = await readJson<GameStartState>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
-        if (!active) return;
-        if (response.status === "initializing") {
-          retryAttempt = 0;
-          setConnectionStatus(null);
-          initialPollTimerRef.current = setTimeout(
-            () => void poll(),
-            POLL_INTERVAL_MS,
-          );
-          return;
-        }
-        commitStartState(response);
-        setLocalError(null);
-        setConnectionStatus(null);
-      } catch {
-        if (!active) return;
-        setConnectionStatus(RECONNECT_MESSAGE);
-        initialPollTimerRef.current = setTimeout(
-          () => void poll(),
-          reconnectDelay(retryAttempt),
-        );
-        retryAttempt += 1;
-      }
-    };
-
-    initialPollTimerRef.current = setTimeout(
-      () => void poll(),
-      POLL_INTERVAL_MS,
-    );
-    return () => {
-      active = false;
-      if (initialPollTimerRef.current) {
-        clearTimeout(initialPollTimerRef.current);
-      }
-      initialPollTimerRef.current = null;
-    };
-  }, [commitStartState, startState?.status]);
-
   useEffect(() => () => sourceProfileControllerRef.current?.abort(), []);
-
-  useEffect(() => {
-    if (!healthPollingEnabled) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      try {
-        const health = await readJson<BufferHealth>(
-          await fetch("/api/game/health", { cache: "no-store" }),
-        );
-        if (active) setBufferHealth(health);
-      } catch {
-        // Health is supporting information; gameplay reconnects separately.
-      } finally {
-        if (active)
-          timer = setTimeout(() => void poll(), HEALTH_POLL_INTERVAL_MS);
-      }
-    };
-
-    timer = setTimeout(() => void poll(), HEALTH_POLL_INTERVAL_MS);
-    return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [healthPollingEnabled, healthRound]);
-
-  const promptCardBackgroundJobIds = [
-    game?.promptDeck?.editorJob?.jobId,
-    game?.promptDeck?.blendJob?.jobId,
-  ].filter((jobId): jobId is string => Boolean(jobId));
-  const promptCardBackgroundJobKey = promptCardBackgroundJobIds.join(":");
-  useEffect(() => {
-    if (!promptCardBackgroundJobKey) return;
-    const watchedJobIds = new Set(promptCardBackgroundJobKey.split(":"));
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      try {
-        const response = await readJson<GameStartState>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
-        if (!active || response.status !== "ready") return;
-        commitGame(response.game);
-        const activeJobIds = [
-          response.game.promptDeck?.editorJob?.jobId,
-          response.game.promptDeck?.blendJob?.jobId,
-        ];
-        if (activeJobIds.some((jobId) => jobId && watchedJobIds.has(jobId))) {
-          timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-        }
-      } catch {
-        if (active) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-      }
-    };
-
-    timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-    return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [commitGame, promptCardBackgroundJobKey]);
 
   useGameplayShortcuts({
     suspended:
@@ -440,25 +293,6 @@ export function GameScreen() {
     onTie: tie,
     onBothLose: bothLose,
   });
-
-  const retryInitial = async () => {
-    setInitializing(true);
-    try {
-      const state = await readJson<GameStartState>(
-        await fetch("/api/game/start", { method: "POST" }),
-      );
-      commitStartState(state);
-      setLocalError(null);
-    } catch (error) {
-      setLocalError(
-        error instanceof Error
-          ? error.message
-          : "Could not retry initial generation",
-      );
-    } finally {
-      setInitializing(false);
-    }
-  };
 
   const persistPreferences = useCallback(
     async (
