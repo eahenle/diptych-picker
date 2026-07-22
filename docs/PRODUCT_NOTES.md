@@ -86,6 +86,12 @@ reference-side choice, and durable comparison receipts into
 the comparison rules become a focused domain boundary shared by immediate and
 recovered selections.
 
+Refill planning now has the same boundary in `game-refill.ts`: retained/rejected
+context recovery, bounded capacity calculation, weighted-card job construction,
+leaderboard evidence attachment, durable work validation, and record removal
+are isolated from mailbox I/O. `GameService` still decides when to persist and
+enqueue each plan, preserving its existing recovery order.
+
 ## 2026-07-21
 
 ### Inspectable generation queue
