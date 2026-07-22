@@ -76,3 +76,14 @@ and a Next.js production build.
    Persistent co-proc workers remain staged, and transport work should retain
    the current durable mailbox as fallback until end-to-end result parity is
    proven.
+
+## Follow-up status — 2026-07-22
+
+- `GameScreen` is now split across transfer, candidate browsing, selection,
+  session polling, and preference-editor controllers.
+- `GameService` comparison recording and refill planning now live in focused
+  domain modules while the service retains lock, persistence, mailbox, and
+  reconciliation ownership.
+- The manifest's discovery ranges and lockfile authority are now governed by
+  [Dependency update policy](DEPENDENCY_POLICY.md), including isolated updates
+  and the full validation gate.
