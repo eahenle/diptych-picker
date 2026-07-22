@@ -59,6 +59,13 @@ adoption, preset application, and revision restoration live in
 approval-gated behavior while `GameScreen` no longer owns those transport and
 state-transition details.
 
+Comparison submission and recovery now live in `useSelectionController`. The
+controller owns the single-selection lock, optimistic winner/tie/both-lose
+transitions, challenger polling, reconnect backoff, asset preloading, pending
+selection recovery, and explicit retry reconciliation. `GameScreen` retains the
+rendered comparison and keyboard wiring while its core orchestration drops to a
+smaller feature-facing surface.
+
 ## 2026-07-21
 
 ### Inspectable generation queue
