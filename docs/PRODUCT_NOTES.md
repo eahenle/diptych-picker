@@ -50,6 +50,15 @@ leaderboard, and history inspection retain their existing navigation and
 variation-analysis behavior while the main screen no longer owns their API and
 modal state directly.
 
+The preference boundary is proceeding in smaller cohesive steps. Prompt-card
+creation, deck/card/suggestion updates, and two-card blend requests now live in
+`usePromptDeck`; durable preset save/delete operations live in
+`usePreferencePresets`; and draft field edits, freedom changes, analyzed-profile
+adoption, preset application, and revision restoration live in
+`usePreferenceDraft`. The Preferences modal keeps the same callbacks and
+approval-gated behavior while `GameScreen` no longer owns those transport and
+state-transition details.
+
 ## 2026-07-21
 
 ### Inspectable generation queue

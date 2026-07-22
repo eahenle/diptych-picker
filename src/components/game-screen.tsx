@@ -34,14 +34,14 @@ import { GameTransferModal } from "./game-transfer-modal";
 import { ImageInspector, type InspectableCandidate } from "./image-inspector";
 import { PoolLeaderboard } from "./pool-leaderboard";
 import { QueueDetails } from "./queue-details";
-import {
-  PreferenceProfileModal,
-  type PreferenceField,
-} from "./preference-profile-modal";
+import { PreferenceProfileModal } from "./preference-profile-modal";
 import { preloadChangedAssets, preloadImage } from "./image-preload";
 import { useCandidateBrowser } from "./use-candidate-browser";
 import { useGameTransfer } from "./use-game-transfer";
 import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
+import { usePreferenceDraft } from "./use-preference-draft";
+import { usePreferencePresets } from "./use-preference-presets";
+import { usePromptDeck } from "./use-prompt-deck";
 import styles from "./game-screen.module.css";
 
 const POLL_INTERVAL_MS = 150;
@@ -220,10 +220,6 @@ export function GameScreen() {
   const [initializing, setInitializing] = useState(true);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
-  const [presetSaving, setPresetSaving] = useState(false);
-  const [presetError, setPresetError] = useState<string | null>(null);
-  const [promptDeckSaving, setPromptDeckSaving] = useState(false);
-  const [promptDeckError, setPromptDeckError] = useState<string | null>(null);
   const [preferenceSaveQueued, setPreferenceSaveQueued] = useState(false);
   const [sourceProfileAnalyzing, setSourceProfileAnalyzing] = useState(false);
   const [sourceProfileError, setSourceProfileError] = useState<string | null>(
@@ -233,13 +229,6 @@ export function GameScreen() {
     string | null
   >(null);
   const [queueDetailsOpen, setQueueDetailsOpen] = useState(false);
-  const [preferenceDraft, setPreferenceDraft] = useState<PreferenceProfile>(
-    () => preferenceProfileFromSeed(""),
-  );
-  const [preferenceDraftBaseProfile, setPreferenceDraftBaseProfile] =
-    useState<PreferenceProfile>(() => preferenceProfileFromSeed(""));
-  const [preferenceVariationSource, setPreferenceVariationSource] =
-    useState<VariationSource | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [bufferHealth, setBufferHealth] = useState<BufferHealth | null>(null);
@@ -264,10 +253,39 @@ export function GameScreen() {
     null,
   );
   const queuedPreferenceSaveStartedRef = useRef(false);
+  const {
+    baseProfile: preferenceDraftBaseProfile,
+    profile: preferenceDraft,
+    variationSource: preferenceVariationSource,
+    applyAnalyzedProfile,
+    applyPreset: applyPresetDraft,
+    replaceProfile: replacePreferenceDraft,
+    resetDraft: resetPreferenceDraft,
+    restoreRevision: restorePreferenceDraftRevision,
+    setField: setPreferenceField,
+    setFreedom: setAdaptationFreedom,
+  } = usePreferenceDraft(game?.history.length ?? null);
   const commitGame = useCallback((next: GameState) => {
     gameRef.current = next;
     setGame(next);
   }, []);
+
+  const {
+    error: promptDeckError,
+    saving: promptDeckSaving,
+    blendPromptCards,
+    clearError: clearPromptDeckError,
+    createPromptCard,
+    updatePromptDeck,
+  } = usePromptDeck({ commitGame });
+
+  const {
+    error: presetError,
+    saving: presetSaving,
+    clearError: clearPresetError,
+    deletePreferencePreset,
+    savePreferencePreset: savePreset,
+  } = usePreferencePresets({ commitGame });
 
   const commitStartState = useCallback(
     (next: GameStartState) => {
@@ -276,7 +294,7 @@ export function GameScreen() {
         commitGame(next.game);
         setBufferHealth(next.bufferHealth ?? null);
         setEloRatings(next.eloRatings ?? null);
-        setPreferenceDraft(
+        replacePreferenceDraft(
           next.game.preferenceProfile ??
             preferenceProfileFromSeed(next.game.preferenceSeed),
         );
@@ -285,10 +303,10 @@ export function GameScreen() {
         setGame(null);
         setBufferHealth(null);
         setEloRatings(null);
-        setPreferenceDraft(preferenceProfileFromSeed(next.preferenceSeed));
+        replacePreferenceDraft(preferenceProfileFromSeed(next.preferenceSeed));
       }
     },
-    [commitGame],
+    [commitGame, replacePreferenceDraft],
   );
 
   const cancelActiveSelection = useCallback(() => {
@@ -1071,146 +1089,15 @@ export function GameScreen() {
     );
   };
 
-  const savePreferencePreset = async (name: string): Promise<boolean> => {
-    setPresetSaving(true);
-    setPresetError(null);
-    try {
-      const state = await readJson<GameState>(
-        await fetch("/api/game/preferences/presets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, profile: preferenceDraft }),
-        }),
-      );
-      commitGame(state);
-      return true;
-    } catch (error) {
-      setPresetError(
-        error instanceof Error ? error.message : "Could not save preset",
-      );
-      return false;
-    } finally {
-      setPresetSaving(false);
-    }
-  };
+  const savePreferencePreset = (name: string): Promise<boolean> =>
+    savePreset(name, preferenceDraft);
 
   const applyPreferencePreset = (preset: PreferencePreset) => {
-    setPreferenceDraft({
-      ...preset.profile,
-      adaptationLastDecision: game?.history.length ?? 0,
-      adaptationSourceWinnerIds: [],
-      adaptationSourceRejectedIds: [],
-    });
-    setPreferenceVariationSource(null);
+    applyPresetDraft(preset);
     setSourceProfileError(null);
     setSourceProfileSummary(
       `Preset “${preset.name}” applied to the draft. Review it, then save to apply.`,
     );
-  };
-
-  const deletePreferencePreset = async (presetId: string) => {
-    setPresetSaving(true);
-    setPresetError(null);
-    try {
-      const state = await readJson<GameState>(
-        await fetch("/api/game/preferences/presets", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ presetId }),
-        }),
-      );
-      commitGame(state);
-    } catch (error) {
-      setPresetError(
-        error instanceof Error ? error.message : "Could not delete preset",
-      );
-    } finally {
-      setPresetSaving(false);
-    }
-  };
-
-  const createPromptCard = async (input: {
-    title: string;
-    prompt: string;
-    negativePrompt: string;
-    weight: number;
-    tags: string[];
-  }): Promise<boolean> => {
-    setPromptDeckSaving(true);
-    setPromptDeckError(null);
-    try {
-      const state = await readJson<GameState>(
-        await fetch("/api/game/preferences/deck", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-        }),
-      );
-      commitGame(state);
-      return true;
-    } catch (error) {
-      setPromptDeckError(
-        error instanceof Error ? error.message : "Could not create prompt card",
-      );
-      return false;
-    } finally {
-      setPromptDeckSaving(false);
-    }
-  };
-
-  const updatePromptDeck = async (
-    update:
-      | { kind: "deck"; enabled: boolean }
-      | { kind: "card"; cardId: string; active?: boolean; weight?: number }
-      | {
-          kind: "suggestion";
-          suggestionId: string;
-          action: "accept" | "discard";
-        },
-  ) => {
-    setPromptDeckSaving(true);
-    setPromptDeckError(null);
-    try {
-      const state = await readJson<GameState>(
-        await fetch("/api/game/preferences/deck", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(update),
-        }),
-      );
-      commitGame(state);
-    } catch (error) {
-      setPromptDeckError(
-        error instanceof Error ? error.message : "Could not update prompt deck",
-      );
-    } finally {
-      setPromptDeckSaving(false);
-    }
-  };
-
-  const blendPromptCards = async (
-    cardIds: [string, string],
-  ): Promise<boolean> => {
-    setPromptDeckSaving(true);
-    setPromptDeckError(null);
-    try {
-      const state = await readJson<GameState>(
-        await fetch("/api/game/preferences/deck/blend", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cardIds, ratio: 0.5 }),
-        }),
-      );
-      commitGame(state);
-      return true;
-    } catch (error) {
-      setPromptDeckError(
-        error instanceof Error ? error.message : "Could not blend prompt cards",
-      );
-      return false;
-    } finally {
-      setPromptDeckSaving(false);
-    }
   };
 
   const analyzeSourceImage = async (
@@ -1244,16 +1131,8 @@ export function GameScreen() {
         );
       }
       if (result.status === "failed") throw new Error(result.message);
-      setPreferenceDraft((current) => ({
-        ...current,
-        ...result.profile,
-        adaptationLastDecision:
-          game?.history.length ?? current.adaptationLastDecision ?? 0,
-        adaptationSourceWinnerIds: [],
-        adaptationSourceRejectedIds: [],
-      }));
+      applyAnalyzedProfile(result.profile, variationSource);
       setSourceProfileSummary(result.reasoningSummary);
-      setPreferenceVariationSource(variationSource);
       const acknowledged = await fetch(
         `/api/game/preferences/source?jobId=${encodeURIComponent(result.jobId)}`,
         { method: "DELETE", signal: controller.signal },
@@ -1304,11 +1183,9 @@ export function GameScreen() {
     setPreferencesSaving(false);
     setSourceProfileError(null);
     setSourceProfileSummary(null);
-    setPresetError(null);
-    setPromptDeckError(null);
-    setPreferenceDraft(currentProfile);
-    setPreferenceDraftBaseProfile(currentProfile);
-    setPreferenceVariationSource(game.variationSource ?? null);
+    clearPresetError();
+    clearPromptDeckError();
+    resetPreferenceDraft(currentProfile, game.variationSource ?? null);
     setPreferencesOpen(true);
   };
 
@@ -1363,51 +1240,11 @@ export function GameScreen() {
     }
   };
 
-  const setPreferenceField = <Key extends PreferenceField>(
-    key: Key,
-    value: PreferenceProfile[Key],
-  ) => {
-    setPreferenceDraft((current) => ({
-      ...current,
-      [key]: value,
-      adaptationLastDecision:
-        game?.history.length ?? current.adaptationLastDecision ?? 0,
-      adaptationSourceWinnerIds: [],
-      adaptationSourceRejectedIds: [],
-    }));
-  };
-
-  const setAdaptationFreedom = (
-    freedom: "frozen" | "guided" | "unfettered",
-  ) => {
-    setPreferenceDraft((current) => ({
-      ...current,
-      adaptationMode: freedom === "frozen" ? "static" : "adaptive",
-      adaptationStrength: freedom === "unfettered" ? "unfettered" : "guided",
-      adaptationLastDecision: game?.history.length ?? 0,
-      adaptationSourceWinnerIds:
-        freedom === "frozen" ? [] : current.adaptationSourceWinnerIds,
-      adaptationSourceRejectedIds:
-        freedom === "frozen" ? [] : current.adaptationSourceRejectedIds,
-    }));
-  };
-
   const restorePreferenceRevision = (
     revision: PreferenceProfileSnapshot,
     frozen: boolean,
   ) => {
-    setPreferenceDraft(
-      frozen
-        ? {
-            ...revision.profile,
-            adaptationMode: "static",
-            adaptationStrength: "guided",
-            adaptationSourceWinnerIds: [],
-            adaptationSourceRejectedIds: [],
-          }
-        : revision.profile,
-    );
-    setPreferenceVariationSource(revision.variationSource ?? null);
+    restorePreferenceDraftRevision(revision, frozen);
     setSourceProfileError(null);
     setSourceProfileSummary(
       frozen
