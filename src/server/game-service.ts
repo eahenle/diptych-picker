@@ -4,14 +4,11 @@ import {
   drawFallback,
   drawFallbackBatch,
   popReady,
-  admitGeneratedCandidate,
   backfillGeneratedPool,
   recordGenerationTurnaround,
   refillJobMatchesGenerationPreferences,
   summarizeLeaderboardPreferenceEvidence,
-  updateElo,
   type BufferedCandidate,
-  type CandidateRating,
   type ChallengerState,
   type LeaderboardVisualProfile,
   type PendingComparisonReceipt,
@@ -61,6 +58,14 @@ import type {
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
+import {
+  comparisonReceipt,
+  createCandidateRating,
+  recordBothLose,
+  recordComparison,
+  recordTie,
+  tieReferenceSide,
+} from "./game-comparison";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import type { AssetStore } from "./providers";
 import type { GameRepository } from "./repository";
@@ -532,7 +537,7 @@ export class GameService {
         current.round,
         oppositeSide(winnerSide),
       );
-      let nextChallengers = this.recordComparison(
+      let nextChallengers = recordComparison(
         {
           ...challengerState,
           pendingSelectionBaseline:
@@ -540,7 +545,8 @@ export class GameService {
         },
         retainedWinner,
         rejectedCandidate,
-        this.comparisonReceipt(current, winnerSide, selectedAt),
+        comparisonReceipt(current, winnerSide, selectedAt),
+        this.config,
       );
       let preparedReadyHeads: BufferedCandidate[] = [];
       let nextGame = inFlight;
@@ -657,7 +663,11 @@ export class GameService {
       }
 
       const selectedAt = this.now();
-      const referenceSide = this.tieReferenceSide(current, challengerState);
+      const referenceSide = tieReferenceSide(
+        current,
+        challengerState,
+        this.config.initialRating,
+      );
       const inFlight =
         outcome === "tie"
           ? beginTie(current, referenceSide, selectedAt)
@@ -684,8 +694,14 @@ export class GameService {
       };
       let nextChallengers =
         outcome === "tie"
-          ? this.recordTie(baseline, left, right, receipt)
-          : this.recordBothLose(baseline, left, right, receipt);
+          ? recordTie(baseline, left, right, receipt, this.config)
+          : recordBothLose(
+              baseline,
+              left,
+              right,
+              receipt,
+              this.config.initialRating,
+            );
       let preparedReadyHeads: BufferedCandidate[] = [];
       let nextGame = inFlight;
       const replacements = this.drawPairReplacements(nextChallengers, current);
@@ -1043,7 +1059,12 @@ export class GameService {
         ],
         ratings: [
           ...challengers.ratings,
-          this.newRating(generated, "generated", false),
+          createCandidateRating(
+            generated,
+            "generated",
+            false,
+            this.config.initialRating,
+          ),
         ],
       },
       record.enqueuedAt,
@@ -1434,189 +1455,6 @@ export class GameService {
     };
   }
 
-  private recordComparison(
-    state: ChallengerState,
-    winner: Candidate,
-    loser: Candidate,
-    receipt: PendingComparisonReceipt,
-  ): ChallengerState {
-    let ratings = state.ratings;
-    const winnerItem = ratings.find(
-      ({ candidate }) => candidate.id === winner.id,
-    );
-    if (!winnerItem) {
-      const source = this.sourceOf(winner);
-      ratings = [
-        ...ratings,
-        this.newRating(winner, source, source === "curated"),
-      ];
-    }
-    const loserItem = ratings.find(
-      ({ candidate }) => candidate.id === loser.id,
-    );
-    if (!loserItem) {
-      const source = this.sourceOf(loser);
-      ratings = [
-        ...ratings,
-        this.newRating(loser, source, source === "curated"),
-      ];
-    }
-
-    const ratedWinner = ratings.find(
-      ({ candidate }) => candidate.id === winner.id,
-    )!;
-    const ratedLoser = ratings.find(
-      ({ candidate }) => candidate.id === loser.id,
-    )!;
-    const nextRatings = updateElo(
-      ratedWinner.rating,
-      ratedLoser.rating,
-      this.config.eloKFactor,
-    );
-    const updated: ChallengerState = {
-      ...state,
-      pendingComparison: receipt,
-      ratings: ratings.map((item) => {
-        if (item === ratedWinner) {
-          return {
-            ...item,
-            rating: nextRatings.winner,
-            wins: item.wins + 1,
-          };
-        }
-        if (item === ratedLoser) {
-          return {
-            ...item,
-            rating: nextRatings.loser,
-            losses: item.losses + 1,
-          };
-        }
-        return item;
-      }),
-    };
-    const withLoser = admitGeneratedCandidate(
-      updated,
-      loser.id,
-      this.config.poolMaximum,
-    );
-    return admitGeneratedCandidate(
-      withLoser,
-      winner.id,
-      this.config.poolMaximum,
-    );
-  }
-
-  private recordTie(
-    state: ChallengerState,
-    left: Candidate,
-    right: Candidate,
-    receipt: PendingComparisonReceipt,
-  ): ChallengerState {
-    let ratings = state.ratings;
-    for (const candidate of [left, right]) {
-      if (!ratings.some((item) => item.candidate.id === candidate.id)) {
-        const source = this.sourceOf(candidate);
-        ratings = [
-          ...ratings,
-          this.newRating(candidate, source, source === "curated"),
-        ];
-      }
-    }
-
-    const ratedLeft = ratings.find(
-      ({ candidate }) => candidate.id === left.id,
-    )!;
-    const ratedRight = ratings.find(
-      ({ candidate }) => candidate.id === right.id,
-    )!;
-    let lower: CandidateRating | null = null;
-    let higher: CandidateRating | null = null;
-    if (ratedLeft.rating < ratedRight.rating) {
-      lower = ratedLeft;
-      higher = ratedRight;
-    } else if (ratedRight.rating < ratedLeft.rating) {
-      lower = ratedRight;
-      higher = ratedLeft;
-    }
-    const lowerRating =
-      lower && higher
-        ? updateElo(lower.rating, higher.rating, this.config.eloKFactor).winner
-        : null;
-    const updated: ChallengerState = {
-      ...state,
-      pendingComparison: receipt,
-      ratings: ratings.map((item) =>
-        item === lower ? { ...item, rating: lowerRating! } : item,
-      ),
-    };
-    const withLeft = admitGeneratedCandidate(
-      updated,
-      left.id,
-      this.config.poolMaximum,
-    );
-    return admitGeneratedCandidate(withLeft, right.id, this.config.poolMaximum);
-  }
-
-  private recordBothLose(
-    state: ChallengerState,
-    left: Candidate,
-    right: Candidate,
-    receipt: PendingComparisonReceipt,
-  ): ChallengerState {
-    let ratings = state.ratings;
-    for (const candidate of [left, right]) {
-      if (!ratings.some((item) => item.candidate.id === candidate.id)) {
-        const source = this.sourceOf(candidate);
-        ratings = [
-          ...ratings,
-          this.newRating(candidate, source, source === "curated"),
-        ];
-      }
-    }
-
-    const rejectedIds = new Set([left.id, right.id]);
-    return {
-      ...state,
-      pendingComparison: receipt,
-      ratings: ratings.map((item) =>
-        rejectedIds.has(item.candidate.id)
-          ? {
-              ...item,
-              losses: item.losses + 1,
-              poolMember: false,
-              poolEligible: false,
-            }
-          : item,
-      ),
-    };
-  }
-
-  private tieReferenceSide(game: GameState, state: ChallengerState): Side {
-    const leftRating =
-      state.ratings.find(
-        ({ candidate }) => candidate.id === game.round.leftCandidate.id,
-      )?.rating ?? this.config.initialRating;
-    const rightRating =
-      state.ratings.find(
-        ({ candidate }) => candidate.id === game.round.rightCandidate.id,
-      )?.rating ?? this.config.initialRating;
-    return rightRating < leftRating ? "right" : "left";
-  }
-
-  private comparisonReceipt(
-    game: GameState,
-    winnerSide: Side,
-    selectedAt: string,
-  ): PendingComparisonReceipt {
-    return {
-      selectedAt,
-      roundNumber: game.round.roundNumber,
-      winnerSide,
-      winnerId: candidateAt(game.round, winnerSide).id,
-      loserId: candidateAt(game.round, oppositeSide(winnerSide)).id,
-    };
-  }
-
   private async prepareComparison(
     game: GameState,
     challengers: ChallengerState,
@@ -1654,7 +1492,7 @@ export class GameService {
             leftId: game.round.leftCandidate.id,
             rightId: game.round.rightCandidate.id,
           }
-        : this.comparisonReceipt(game, pending.winnerSide, pending.selectedAt);
+        : comparisonReceipt(game, pending.winnerSide, pending.selectedAt);
     if (isDeepStrictEqual(challengers.pendingComparison, receipt)) {
       return challengers;
     }
@@ -1672,24 +1510,27 @@ export class GameService {
         };
     const compared =
       pending.kind === "tie"
-        ? this.recordTie(
+        ? recordTie(
             baseline,
             game.round.leftCandidate,
             game.round.rightCandidate,
             receipt,
+            this.config,
           )
         : pending.kind === "both-lose"
-          ? this.recordBothLose(
+          ? recordBothLose(
               baseline,
               game.round.leftCandidate,
               game.round.rightCandidate,
               receipt,
+              this.config.initialRating,
             )
-          : this.recordComparison(
+          : recordComparison(
               baseline,
               candidateAt(game.round, pending.winnerSide),
               candidateAt(game.round, oppositeSide(pending.winnerSide)),
               receipt,
+              this.config,
             );
     await this.challengerRepository.save(compared);
     return compared;
@@ -2150,29 +1991,6 @@ export class GameService {
         ...(variationSource ? { variationSource } : {}),
       },
     ].slice(-25);
-  }
-
-  private newRating(
-    candidate: Candidate,
-    source: CandidateRating["source"],
-    poolMember: boolean,
-  ): CandidateRating {
-    return {
-      candidate,
-      rating: this.config.initialRating,
-      wins: 0,
-      losses: 0,
-      source,
-      poolMember,
-      poolEligible: true,
-      lastServedAt: null,
-    };
-  }
-
-  private sourceOf(candidate: Candidate): CandidateRating["source"] {
-    return candidate.imageUrl.startsWith("/seed-assets/")
-      ? "curated"
-      : "generated";
   }
 
   private validRefillWork(

@@ -79,6 +79,13 @@ restoration, and prompt-deck/preset controller composition. The screen provides
 the current durable game and renders the modal, while the controller owns its
 workflow state and cleanup.
 
+The first `GameService` extraction moves candidate rating creation, normal
+selection Elo updates, asymmetric tie scoring, dual-rejection recording,
+reference-side choice, and durable comparison receipts into
+`game-comparison.ts`. The service retains lock ordering and persistence while
+the comparison rules become a focused domain boundary shared by immediate and
+recovered selections.
+
 ## 2026-07-21
 
 ### Inspectable generation queue
