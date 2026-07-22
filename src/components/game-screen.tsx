@@ -27,36 +27,22 @@ import {
   type Side,
   type VariationSource,
 } from "@/domain/game";
-import type {
-  ComparisonHistoryCandidate,
-  ComparisonHistoryEntry,
-  PoolLeaderboardEntry,
-} from "@/domain/challenger-state";
 import { CandidateCard } from "./candidate-card";
 import { ComparisonHistory } from "./comparison-history";
-import {
-  GameTransferModal,
-  type GameTransferAction,
-} from "./game-transfer-modal";
-import {
-  ImageInspector,
-  type ImageInspectorState,
-  type InspectableCandidate,
-} from "./image-inspector";
+import { readJson } from "./game-api";
+import { GameTransferModal } from "./game-transfer-modal";
+import { ImageInspector, type InspectableCandidate } from "./image-inspector";
 import { PoolLeaderboard } from "./pool-leaderboard";
 import { QueueDetails } from "./queue-details";
 import {
   PreferenceProfileModal,
   type PreferenceField,
 } from "./preference-profile-modal";
+import { preloadChangedAssets, preloadImage } from "./image-preload";
+import { useCandidateBrowser } from "./use-candidate-browser";
+import { useGameTransfer } from "./use-game-transfer";
 import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
 import styles from "./game-screen.module.css";
-
-async function readJson<T>(response: Response): Promise<T> {
-  const data = (await response.json()) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error ?? "Request failed");
-  return data;
-}
 
 const POLL_INTERVAL_MS = 150;
 const HEALTH_POLL_INTERVAL_MS = 2_000;
@@ -89,8 +75,6 @@ type SourceProfileResponse =
     }
   | { status: "failed"; jobId: string; message: string };
 
-const MAX_GAME_SAVE_BYTES = 25 * 1024 * 1024;
-
 function reconnectDelay(attempt: number): number {
   return Math.min(
     POLL_INTERVAL_MS * 2 ** Math.min(attempt, 8),
@@ -111,53 +95,6 @@ function waitForSourceProfilePoll(signal: AbortSignal): Promise<void> {
     if (signal.aborted) return onAbort();
     signal.addEventListener("abort", onAbort, { once: true });
   });
-}
-
-function preload(url: string, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const image = new window.Image();
-    const cleanup = () => signal.removeEventListener("abort", onAbort);
-    const onAbort = () => {
-      image.src = "";
-      cleanup();
-      reject(new DOMException("Image preload was cancelled", "AbortError"));
-    };
-    image.onload = () => {
-      cleanup();
-      resolve();
-    };
-    image.onerror = () => {
-      cleanup();
-      reject(new Error("The new image could not be loaded"));
-    };
-    if (signal.aborted) {
-      onAbort();
-      return;
-    }
-    signal.addEventListener("abort", onAbort, { once: true });
-    image.src = url;
-  });
-}
-
-async function preloadChangedAssets(
-  current: GameState,
-  next: GameState,
-  signal: AbortSignal,
-): Promise<void> {
-  const currentCandidates = [
-    current.round.leftCandidate,
-    current.round.rightCandidate,
-  ];
-  const nextCandidates = [next.round.leftCandidate, next.round.rightCandidate];
-  await Promise.all(
-    nextCandidates.map((candidate, index) => {
-      const previous = currentCandidates[index];
-      return previous.id === candidate.id &&
-        previous.imageUrl === candidate.imageUrl
-        ? Promise.resolve()
-        : preload(candidate.imageUrl, signal);
-    }),
-  );
 }
 
 function matchingPendingSelection(
@@ -295,32 +232,7 @@ export function GameScreen() {
   const [sourceProfileSummary, setSourceProfileSummary] = useState<
     string | null
   >(null);
-  const [newGameOpen, setNewGameOpen] = useState(false);
-  const [loadGameOpen, setLoadGameOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [imageInspector, setImageInspector] =
-    useState<ImageInspectorState | null>(null);
-  const [historyEntries, setHistoryEntries] = useState<
-    ComparisonHistoryEntry[]
-  >([]);
-  const [historyTotal, setHistoryTotal] = useState(0);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [queueDetailsOpen, setQueueDetailsOpen] = useState(false);
-  const [leaderboardEntries, setLeaderboardEntries] = useState<
-    PoolLeaderboardEntry[]
-  >([]);
-  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
-  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
-  const [favoriteSaving, setFavoriteSaving] = useState<string | null>(null);
-  const [favoriteError, setFavoriteError] = useState<string | null>(null);
-  const [gameTransferAction, setGameTransferAction] =
-    useState<GameTransferAction | null>(null);
-  const [gameTransferError, setGameTransferError] = useState<string | null>(
-    null,
-  );
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [preferenceDraft, setPreferenceDraft] = useState<PreferenceProfile>(
     () => preferenceProfileFromSeed(""),
   );
@@ -352,42 +264,6 @@ export function GameScreen() {
     null,
   );
   const queuedPreferenceSaveStartedRef = useRef(false);
-  const openImageInspector = useCallback(
-    (
-      candidate: InspectableCandidate,
-      candidates: readonly InspectableCandidate[],
-      returnTarget: ImageInspectorState["returnTarget"] = null,
-    ) => {
-      const titledCandidates = candidates.map((item) => ({
-        ...item,
-        ...(item.promptCardId
-          ? {
-              promptCardTitle: gameRef.current?.promptDeck?.cards.find(
-                (card) => card.id === item.promptCardId,
-              )?.title,
-            }
-          : {}),
-      }));
-      const uniqueCandidates = titledCandidates.filter(
-        (item, index) =>
-          item.imageUrl &&
-          titledCandidates.findIndex(
-            (candidate) => candidate.id === item.id,
-          ) === index,
-      );
-      const index = uniqueCandidates.findIndex(
-        (item) => item.id === candidate.id,
-      );
-      setImageInspector({
-        candidates:
-          uniqueCandidates.length > 0 ? uniqueCandidates : [candidate],
-        index: index >= 0 ? index : 0,
-        returnTarget,
-      });
-    },
-    [],
-  );
-
   const commitGame = useCallback((next: GameState) => {
     gameRef.current = next;
     setGame(next);
@@ -427,6 +303,54 @@ export function GameScreen() {
     selectionLocked.current = false;
     setReconcilingRetry(false);
   }, []);
+
+  const {
+    action: gameTransferAction,
+    error: gameTransferError,
+    exportNotice,
+    loadGameOpen,
+    newGameOpen,
+    closeLoadGame,
+    closeNewGame,
+    exportCurrentGame,
+    importSavedGame,
+    openLoadGame,
+    openNewGame,
+    startFreshGame,
+  } = useGameTransfer({
+    gameRef,
+    selectionLockedRef: selectionLocked,
+    commitStartState,
+    cancelActiveSelection,
+    setInitializing,
+    setLocalError,
+  });
+
+  const {
+    favoriteError,
+    favoriteSaving,
+    historyEntries,
+    historyError,
+    historyLoading,
+    historyOpen,
+    historyTotal,
+    imageInspector,
+    leaderboardEntries,
+    leaderboardError,
+    leaderboardLoading,
+    leaderboardOpen,
+    closeComparisonHistory,
+    closeImageInspector,
+    closePoolLeaderboard,
+    dismissImageInspector,
+    inspectHistoryCandidate,
+    inspectLeaderboardCandidate,
+    navigateImageInspector,
+    openComparisonHistory,
+    openImageInspector,
+    openPoolLeaderboard,
+    updateFavorite,
+  } = useCandidateBrowser({ gameRef });
 
   const startPolling = useCallback(
     (selection: ActiveSelection, initialServer?: GameState) => {
@@ -520,7 +444,10 @@ export function GameScreen() {
               selection.winnerSide === "left"
                 ? server.round.rightCandidate
                 : server.round.leftCandidate;
-            await preload(challenger.imageUrl, selection.controller.signal);
+            await preloadImage(
+              challenger.imageUrl,
+              selection.controller.signal,
+            );
             if (!isCurrent()) return;
             commitGame(
               mergeServerResult(
@@ -815,7 +742,7 @@ export function GameScreen() {
             winnerSide === "left"
               ? server.round.rightCandidate
               : server.round.leftCandidate;
-          await preload(challenger.imageUrl, selection.controller.signal);
+          await preloadImage(challenger.imageUrl, selection.controller.signal);
           if (activeSelectionRef.current?.token !== selection.token) return;
           activeSelectionRef.current = null;
           selectionLocked.current = false;
@@ -1070,275 +997,6 @@ export function GameScreen() {
     onTie: tie,
     onBothLose: bothLose,
   });
-
-  const openComparisonHistory = async () => {
-    setHistoryOpen(true);
-    setHistoryLoading(true);
-    setHistoryError(null);
-    setFavoriteError(null);
-    try {
-      const response = await fetch("/api/game/history", {
-        cache: "no-store",
-      });
-      const data = await readJson<{
-        entries: ComparisonHistoryEntry[];
-        total: number;
-      }>(response);
-      setHistoryEntries(data.entries);
-      setHistoryTotal(data.total);
-    } catch (error) {
-      setHistoryError(
-        error instanceof Error ? error.message : "Could not load history",
-      );
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
-  const inspectLeaderboardCandidate = (
-    candidate: PoolLeaderboardEntry["candidate"],
-  ) => {
-    setLeaderboardOpen(false);
-    openImageInspector(
-      candidate,
-      leaderboardEntries.map((entry) => entry.candidate),
-      "leaderboard",
-    );
-  };
-
-  const closeImageInspector = () => {
-    const returnTarget = imageInspector?.returnTarget ?? null;
-    setImageInspector(null);
-    if (returnTarget === "leaderboard") setLeaderboardOpen(true);
-  };
-
-  const navigateImageInspector = useCallback((direction: -1 | 1) => {
-    setImageInspector((current) =>
-      current
-        ? {
-            ...current,
-            index:
-              (current.index + direction + current.candidates.length) %
-              current.candidates.length,
-          }
-        : current,
-    );
-  }, []);
-
-  const inspectHistoryCandidate = (candidate: ComparisonHistoryCandidate) => {
-    if (!candidate.imageUrl) return;
-    setHistoryOpen(false);
-    const candidates = historyEntries.flatMap((entry) =>
-      entry.outcome === "tie" || entry.outcome === "both-lose"
-        ? [entry.left, entry.right]
-        : [entry.winner, entry.loser],
-    );
-    openImageInspector(
-      {
-        id: candidate.id,
-        imageUrl: candidate.imageUrl,
-        concept: candidate.concept,
-      },
-      candidates.flatMap((item) =>
-        item.imageUrl
-          ? [{ id: item.id, imageUrl: item.imageUrl, concept: item.concept }]
-          : [],
-      ),
-    );
-  };
-
-  const openPoolLeaderboard = async () => {
-    setLeaderboardOpen(true);
-    setLeaderboardLoading(true);
-    setLeaderboardError(null);
-    setFavoriteError(null);
-    try {
-      const response = await fetch("/api/game/leaderboard", {
-        cache: "no-store",
-      });
-      const data = await readJson<{
-        entries: PoolLeaderboardEntry[];
-        poolMaximum: number;
-      }>(response);
-      setLeaderboardEntries(data.entries);
-    } catch (error) {
-      setLeaderboardError(
-        error instanceof Error ? error.message : "Could not load the pool",
-      );
-    } finally {
-      setLeaderboardLoading(false);
-    }
-  };
-
-  const updateFavorite = async (candidateId: string, favorite: boolean) => {
-    setFavoriteSaving(candidateId);
-    setFavoriteError(null);
-    try {
-      await readJson<{ candidateId: string; favorite: boolean }>(
-        await fetch("/api/game/favorites", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ candidateId, favorite }),
-        }),
-      );
-      setHistoryEntries((entries) =>
-        entries.map((entry) =>
-          entry.outcome === "tie" || entry.outcome === "both-lose"
-            ? {
-                ...entry,
-                left:
-                  entry.left.id === candidateId
-                    ? { ...entry.left, favorite }
-                    : entry.left,
-                right:
-                  entry.right.id === candidateId
-                    ? { ...entry.right, favorite }
-                    : entry.right,
-              }
-            : {
-                ...entry,
-                winner:
-                  entry.winner.id === candidateId
-                    ? { ...entry.winner, favorite }
-                    : entry.winner,
-                loser:
-                  entry.loser.id === candidateId
-                    ? { ...entry.loser, favorite }
-                    : entry.loser,
-              },
-        ),
-      );
-      setLeaderboardEntries((entries) =>
-        entries.map((entry) =>
-          entry.candidate.id === candidateId ? { ...entry, favorite } : entry,
-        ),
-      );
-    } catch (error) {
-      setFavoriteError(
-        error instanceof Error ? error.message : "Could not update favorite",
-      );
-    } finally {
-      setFavoriteSaving(null);
-    }
-  };
-
-  const openNewGame = () => {
-    setGameTransferError(null);
-    setLoadGameOpen(false);
-    setNewGameOpen(true);
-  };
-
-  const openLoadGame = () => {
-    setGameTransferError(null);
-    setNewGameOpen(false);
-    setLoadGameOpen(true);
-  };
-
-  const exportCurrentGame = async () => {
-    setGameTransferAction("exporting");
-    setGameTransferError(null);
-    setExportNotice(null);
-    try {
-      const response = await fetch("/api/game/snapshot", {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        const data = (await response.json()) as { error?: string };
-        throw new Error(data.error ?? "Could not export this game");
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("content-disposition") ?? "";
-      const filename =
-        disposition.match(/filename="([^"]+)"/)?.[1] ??
-        `diptych-picker-round-${gameRef.current?.round.roundNumber ?? 1}.json`;
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      link.click();
-      URL.revokeObjectURL(url);
-      const exportPath = response.headers.get("x-diptych-export-path");
-      setExportNotice(
-        exportPath
-          ? `Exported ${filename} to ${exportPath} and downloaded a copy.`
-          : `Downloaded ${filename}.`,
-      );
-      setLocalError(null);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not export this game";
-      if (newGameOpen || loadGameOpen) setGameTransferError(message);
-      else setLocalError(message);
-    } finally {
-      setGameTransferAction(null);
-    }
-  };
-
-  const importSavedGame = async (file: File) => {
-    if (file.size > MAX_GAME_SAVE_BYTES) {
-      setGameTransferError("The selected save file is too large");
-      return;
-    }
-    setGameTransferAction("importing");
-    setGameTransferError(null);
-    selectionLocked.current = true;
-    try {
-      const state = await readJson<GameStartState>(
-        await fetch("/api/game/snapshot", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: await file.text(),
-        }),
-      );
-      if (state.status !== "ready") {
-        throw new Error("The saved game did not contain a ready comparison");
-      }
-      const current = gameRef.current;
-      if (current) {
-        await preloadChangedAssets(
-          current,
-          state.game,
-          new AbortController().signal,
-        );
-      }
-      commitStartState(state);
-      setNewGameOpen(false);
-      setLoadGameOpen(false);
-      setLocalError(null);
-    } catch (error) {
-      setGameTransferError(
-        error instanceof Error ? error.message : "Could not load this game",
-      );
-    } finally {
-      selectionLocked.current = false;
-      setGameTransferAction(null);
-    }
-  };
-
-  const startFreshGame = async () => {
-    cancelActiveSelection();
-    selectionLocked.current = true;
-    setInitializing(true);
-    setGameTransferAction("resetting");
-    setGameTransferError(null);
-    try {
-      const state = await readJson<GameStartState>(
-        await fetch("/api/game/start", { method: "POST" }),
-      );
-      commitStartState(state);
-      setNewGameOpen(false);
-      setLoadGameOpen(false);
-      setLocalError(null);
-    } catch (error) {
-      setGameTransferError(
-        error instanceof Error ? error.message : "Could not start a new game",
-      );
-    } finally {
-      selectionLocked.current = false;
-      setInitializing(false);
-      setGameTransferAction(null);
-    }
-  };
 
   const retryInitial = async () => {
     setInitializing(true);
@@ -1657,7 +1315,7 @@ export function GameScreen() {
   const exploreCandidateVariations = async (
     candidate: InspectableCandidate,
   ) => {
-    setImageInspector(null);
+    dismissImageInspector();
     openPreferences();
     try {
       const response = await fetch(candidate.imageUrl, {
@@ -2108,7 +1766,7 @@ export function GameScreen() {
           error={historyError}
           favoriteError={favoriteError}
           favoriteSaving={favoriteSaving}
-          onClose={() => setHistoryOpen(false)}
+          onClose={closeComparisonHistory}
           onInspect={inspectHistoryCandidate}
           onToggleFavorite={(candidateId, favorite) =>
             void updateFavorite(candidateId, favorite)
@@ -2123,7 +1781,7 @@ export function GameScreen() {
           error={leaderboardError}
           favoriteError={favoriteError}
           favoriteSaving={favoriteSaving}
-          onClose={() => setLeaderboardOpen(false)}
+          onClose={closePoolLeaderboard}
           onInspect={inspectLeaderboardCandidate}
           onToggleFavorite={(candidateId, favorite) =>
             void updateFavorite(candidateId, favorite)
@@ -2143,7 +1801,7 @@ export function GameScreen() {
           mode="load"
           action={gameTransferAction}
           error={gameTransferError}
-          onClose={() => setLoadGameOpen(false)}
+          onClose={closeLoadGame}
           onExport={() => void exportCurrentGame()}
           onImport={importSavedGame}
           onStartFresh={() => void startFreshGame()}
@@ -2155,7 +1813,7 @@ export function GameScreen() {
           mode="new"
           action={gameTransferAction}
           error={gameTransferError}
-          onClose={() => setNewGameOpen(false)}
+          onClose={closeNewGame}
           onExport={() => void exportCurrentGame()}
           onImport={importSavedGame}
           onStartFresh={() => void startFreshGame()}
