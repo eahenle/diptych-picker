@@ -7,7 +7,6 @@ import {
   backfillGeneratedPool,
   recordGenerationTurnaround,
   refillJobMatchesGenerationPreferences,
-  summarizeLeaderboardPreferenceEvidence,
   type BufferedCandidate,
   type ChallengerState,
   type LeaderboardVisualProfile,
@@ -43,7 +42,6 @@ import {
 import {
   createPromptCardBlendRequest,
   createPromptCard as createPromptCardRecord,
-  drawPromptCard,
   emptyPromptDeck,
   preparePromptCardEditorJob,
   recordPromptCardDecision,
@@ -66,6 +64,14 @@ import {
   recordTie,
   tieReferenceSide,
 } from "./game-comparison";
+import {
+  planRefillCapacity,
+  refillContext,
+  validRefillWork,
+  withoutRefillRecord,
+  type RefillCapacityResult,
+  type RefillContext,
+} from "./game-refill";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import type { AssetStore } from "./providers";
 import type { GameRepository } from "./repository";
@@ -84,19 +90,6 @@ export interface GameServiceConfig {
   initialTurnaroundMs: number;
   fallbackDelayMs: number;
   fallbackMaximumConsecutive: number;
-}
-
-interface RefillContext {
-  game: GameState;
-  winnerSide: Side;
-  retainedWinner: Candidate;
-  rejectedCandidate: Candidate;
-  comparisonOutcome?: "tie" | "both-lose";
-}
-
-interface CapacityResult {
-  state: ChallengerState;
-  jobs: GenerationJob[];
 }
 
 interface RefillObservation {
@@ -488,8 +481,8 @@ export class GameService {
       // a terminal state, but exclude them from replacement capacity and
       // discard their eventual results during reconciliation.
       let refreshed: ChallengerState = { ...challengers, ready: [] };
-      const context = this.refillContext(updated, refreshed);
-      const capacity: CapacityResult = context
+      const context = refillContext(updated, refreshed);
+      const capacity: RefillCapacityResult = context
         ? this.addRefillCapacity(refreshed, context)
         : { state: refreshed, jobs: [] };
       refreshed = capacity.state;
@@ -786,7 +779,7 @@ export class GameService {
       ]);
       if (!game || !challengers) return;
 
-      const context = this.refillContext(game, challengers);
+      const context = refillContext(game, challengers);
       if (!context) return;
       const capacity = this.addRefillCapacity(challengers, context);
       if (capacity.jobs.length === 0) return;
@@ -906,7 +899,7 @@ export class GameService {
       }
     }
 
-    const context = this.refillContext(game, challengers);
+    const context = refillContext(game, challengers);
     if (context) {
       const capacity = this.addRefillCapacity(challengers, context);
       challengers = capacity.state;
@@ -943,7 +936,7 @@ export class GameService {
         return { game, challengers };
       }
       if (
-        !this.validRefillWork(work, record, challengers.sessionId) ||
+        !validRefillWork(work, record, challengers.sessionId) ||
         !this.sameJob(work, expected)
       ) {
         return {
@@ -957,7 +950,7 @@ export class GameService {
     if (
       result.jobId !== record.jobId ||
       !work ||
-      !this.validRefillWork(work, record, challengers.sessionId) ||
+      !validRefillWork(work, record, challengers.sessionId) ||
       !this.sameJob(work, expected)
     ) {
       return {
@@ -1024,7 +1017,7 @@ export class GameService {
         replayed.challengers,
       );
       await this.mailbox.archive(record.jobId);
-      const cleaned = this.withoutRefillRecord(challengers, record.jobId);
+      const cleaned = withoutRefillRecord(challengers, record.jobId);
       await this.challengerRepository.save(cleaned);
       return { game, challengers: cleaned };
     }
@@ -1079,7 +1072,7 @@ export class GameService {
     game = replayed.game;
     applied = replayed.challengers;
     await this.mailbox.archive(record.jobId);
-    const cleaned = this.withoutRefillRecord(applied, record.jobId);
+    const cleaned = withoutRefillRecord(applied, record.jobId);
     await this.challengerRepository.save(cleaned);
     return { game, challengers: cleaned };
   }
@@ -1089,7 +1082,7 @@ export class GameService {
     record: RefillJobRecord,
   ): Promise<ChallengerState> {
     await this.mailbox.archive(record.jobId);
-    const cleaned = this.withoutRefillRecord(state, record.jobId);
+    const cleaned = withoutRefillRecord(state, record.jobId);
     await this.challengerRepository.save(cleaned);
     return cleaned;
   }
@@ -1391,68 +1384,17 @@ export class GameService {
   private addRefillCapacity(
     state: ChallengerState,
     context: RefillContext,
-  ): CapacityResult {
-    const jobs: GenerationJob[] = [];
-    const records: RefillJobRecord[] = [];
-    const leaderboardVisualProfile = this.currentLeaderboardVisualProfile(
-      state,
-      context.game,
-    );
-    const deficit = Math.max(
-      0,
-      this.config.bufferTarget - state.ready.length - state.refillJobs.length,
-    );
-
-    for (let index = 0; index < deficit; index += 1) {
-      const id = this.createId();
-      if (
-        state.refillJobs.some(({ jobId }) => jobId === id) ||
-        records.some(({ jobId }) => jobId === id)
-      ) {
-        throw new Error(`Duplicate refill job ID ${id}`);
-      }
-      const createdAt = this.now();
-      const promptCard = drawPromptCard(context.game.promptDeck, this.random);
-      const job: GenerationJob = {
-        id,
-        kind: "refill",
-        createdAt,
-        roundNumber: context.game.round.roundNumber,
-        winnerSide: context.winnerSide,
-        retainedWinner: context.retainedWinner,
-        rejectedCandidate: context.rejectedCandidate,
-        selectionHistory: context.game.history.slice(-12),
-        recentConcepts: recentConcepts(context.game, 10),
-        leaderboardEvidence: summarizeLeaderboardPreferenceEvidence(state),
-        ...(leaderboardVisualProfile ? { leaderboardVisualProfile } : {}),
-        preferenceSeed: context.game.preferenceSeed,
-        preferenceProfile:
-          context.game.preferenceProfile ??
-          preferenceProfileFromSeed(context.game.preferenceSeed),
-        ...(promptCard ? { promptCard } : {}),
-        ...(context.game.variationSource
-          ? { variationSource: context.game.variationSource }
-          : {}),
-        sessionId: state.sessionId,
-        pinnedWinnerId: context.retainedWinner.id,
-        comparisonOutcome: context.comparisonOutcome,
-      };
-      jobs.push(job);
-      records.push({
-        jobId: id,
-        pinnedWinnerId: context.retainedWinner.id,
-        enqueuedAt: createdAt,
-        expectedJob: job,
-      });
-    }
-
-    return {
-      state:
-        records.length === 0
-          ? state
-          : { ...state, refillJobs: [...state.refillJobs, ...records] },
-      jobs,
-    };
+  ): RefillCapacityResult {
+    return planRefillCapacity(state, context, {
+      bufferTarget: this.config.bufferTarget,
+      leaderboardVisualProfile: this.currentLeaderboardVisualProfile(
+        state,
+        context.game,
+      ),
+      createId: this.createId,
+      now: this.now,
+      random: this.random,
+    });
   }
 
   private async prepareComparison(
@@ -1534,65 +1476,6 @@ export class GameService {
             );
     await this.challengerRepository.save(compared);
     return compared;
-  }
-
-  private refillContext(
-    game: GameState,
-    challengers: ChallengerState,
-  ): RefillContext | null {
-    if (
-      game.pendingSelection?.kind === "buffer" ||
-      game.pendingSelection?.kind === "retirement"
-    ) {
-      const winnerSide = game.pendingSelection.winnerSide;
-      return {
-        game,
-        winnerSide,
-        retainedWinner: candidateAt(game.round, winnerSide),
-        rejectedCandidate: candidateAt(game.round, oppositeSide(winnerSide)),
-      };
-    }
-
-    if (
-      game.pendingSelection?.kind === "tie" ||
-      game.pendingSelection?.kind === "both-lose"
-    ) {
-      const referenceSide = game.pendingSelection.referenceSide;
-      return {
-        game,
-        winnerSide: referenceSide,
-        retainedWinner: candidateAt(game.round, referenceSide),
-        rejectedCandidate: candidateAt(game.round, oppositeSide(referenceSide)),
-        comparisonOutcome: game.pendingSelection.kind,
-      };
-    }
-
-    const retainedId = game.round.retainedCandidateId;
-    if (!retainedId) return null;
-    const winnerSide: Side | null =
-      game.round.leftCandidate.id === retainedId
-        ? "left"
-        : game.round.rightCandidate.id === retainedId
-          ? "right"
-          : null;
-    if (!winnerSide) return null;
-
-    const lastSelection = game.history.at(-1);
-    const rejectedCandidate =
-      lastSelection &&
-      (lastSelection.outcome === undefined ||
-        lastSelection.outcome === "selection")
-        ? challengers.ratings.find(
-            ({ candidate }) => candidate.id === lastSelection.loserId,
-          )?.candidate
-        : undefined;
-    return {
-      game,
-      winnerSide,
-      retainedWinner: candidateAt(game.round, winnerSide),
-      rejectedCandidate:
-        rejectedCandidate ?? candidateAt(game.round, oppositeSide(winnerSide)),
-    };
   }
 
   private async completePreparedSelection(
@@ -1991,31 +1874,6 @@ export class GameService {
         ...(variationSource ? { variationSource } : {}),
       },
     ].slice(-25);
-  }
-
-  private validRefillWork(
-    work: GenerationJob,
-    record: RefillJobRecord,
-    sessionId: string,
-  ): boolean {
-    return (
-      work.kind === "refill" &&
-      work.id === record.jobId &&
-      work.createdAt === record.enqueuedAt &&
-      work.sessionId === sessionId &&
-      work.pinnedWinnerId === record.pinnedWinnerId &&
-      work.retainedWinner.id === record.pinnedWinnerId
-    );
-  }
-
-  private withoutRefillRecord(
-    state: ChallengerState,
-    jobId: string,
-  ): ChallengerState {
-    return {
-      ...state,
-      refillJobs: state.refillJobs.filter((record) => record.jobId !== jobId),
-    };
   }
 
   private async ensureJobsEnqueued(jobs: readonly GenerationJob[]) {
