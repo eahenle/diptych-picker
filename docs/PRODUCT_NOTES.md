@@ -31,6 +31,25 @@ not sufficient reason to introduce a breaking save, API, or workflow change.
 Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
 
+## 2026-07-22
+
+### GameScreen boundary extractions
+
+The first behavior-neutral `GameScreen` decomposition moves snapshot export,
+saved-game import, and explicit new-game orchestration into a dedicated
+`useGameTransfer` controller. Shared JSON-response and image-preload helpers now
+sit outside the main component as well. The existing modal, snapshot endpoints,
+selection lock, preload-before-commit behavior, and user-facing errors remain
+unchanged; the extraction creates a smaller feature boundary for future transfer
+work without coupling it to comparison-loop changes.
+
+Candidate browsing now has the same boundary: comparison-history loading,
+pool-leaderboard loading, favorite updates, image-inspector navigation, and
+modal return behavior live in `useCandidateBrowser`. Active-candidate,
+leaderboard, and history inspection retain their existing navigation and
+variation-analysis behavior while the main screen no longer owns their API and
+modal state directly.
+
 ## 2026-07-21
 
 ### Inspectable generation queue
