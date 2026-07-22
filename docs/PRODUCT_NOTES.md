@@ -92,6 +92,12 @@ leaderboard evidence attachment, durable work validation, and record removal
 are isolated from mailbox I/O. `GameService` still decides when to persist and
 enqueue each plan, preserving its existing recovery order.
 
+Dependency maintenance is now explicit rather than incidental. The committed
+lockfile remains the reproducible install authority; discovery-range upgrades
+occur only in isolated maintenance changes with coupled-framework review, the
+full validation matrix, and merge-level rollback described in
+`docs/DEPENDENCY_POLICY.md`.
+
 ## 2026-07-21
 
 ### Inspectable generation queue

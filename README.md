@@ -150,12 +150,15 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/agent-mailbox.ts`: validated durable job/result protocol and restart recovery.
 - `src/server/preference-profile-schema.ts`: shared strict, request, and backward-compatible persisted preference validation.
 - `src/server/co-proc-generation-transport.ts`: opt-in live NDJSON notification over secure attachable `co-proc` endpoints, with durable mailbox fallback.
-- `src/server/game-service.ts`: transactional selection, buffer/refill coordination, result verification, winner-preserving reconciliation, and cleanup retry.
+- `src/server/game-service.ts`: transactional lock, persistence, mailbox, reconciliation, and cleanup orchestration.
+- `src/server/game-comparison.ts` and `game-refill.ts`: comparison rating/receipt rules and deterministic refill context, planning, and work validation.
 - `src/server/game-snapshot.ts`: versioned save validation, asset verification, fresh-session restore, and stale-job exclusion.
 - `src/server/initial-game.ts`: seed-or-generated initial-pair orchestration.
 - `src/server/repository.ts` and `initial-bootstrap.ts`: atomic local persistence behind interfaces.
 - `src/server/asset-store.ts`: immutable PNG storage and verification.
-- `src/components/game-screen.tsx`: async polling, preload-before-swap, keyboard controls, and exactly two candidate images once ready.
+- `src/components/game-screen.tsx`: the rendered game shell, keyboard wiring, and exactly two candidate images once ready.
+- `src/components/use-selection-controller.ts` and `use-game-session-polling.ts`: preload-before-swap selection recovery plus bootstrap, health, and background-job polling.
+- `src/components/use-preference-editor.ts`, `use-game-transfer.ts`, and `use-candidate-browser.ts`: preference, save/load, and candidate-inspection workflow boundaries.
 - `GET /api/game/health`: a narrow live snapshot of ready, active, waiting, draining, and reusable-pool counts for the UI status readout.
 - `GET /api/game/leaderboard`: the current reusable pool ranked by Elo with display-safe candidate metadata and no prompt or mailbox contents.
 - `GET /api/game/history`: up to fifty newest-first decisions with display-safe winner and rejected-candidate metadata plus the full decision count.
@@ -164,3 +167,5 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 
 The latest comprehensive maintainability audit and its deferred structural work
 are recorded in [Codebase Review — 2026-07-21](docs/CODEBASE_REVIEW_2026-07-21.md).
+Reproducible installs and isolated maintenance upgrades follow the
+[dependency update policy](docs/DEPENDENCY_POLICY.md).
