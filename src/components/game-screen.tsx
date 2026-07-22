@@ -1,30 +1,18 @@
 "use client";
 
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import {
-  isSelectionBoundWait,
   preferenceProfileFromSeed,
   type BufferHealth,
   type DisplayedEloRatings,
   type GameStartState,
   type GameState,
-  type PreferenceProfile,
-  type PreferencePreset,
-  type PreferenceProfileSnapshot,
-  type PreferenceRevision,
-  type VariationSource,
 } from "@/domain/game";
 import { CandidateCard } from "./candidate-card";
 import { ComparisonHistory } from "./comparison-history";
 import { readJson } from "./game-api";
 import { GameTransferModal } from "./game-transfer-modal";
-import { ImageInspector, type InspectableCandidate } from "./image-inspector";
+import { ImageInspector } from "./image-inspector";
 import { PoolLeaderboard } from "./pool-leaderboard";
 import { QueueDetails } from "./queue-details";
 import { PreferenceProfileModal } from "./preference-profile-modal";
@@ -33,37 +21,9 @@ import { useGameSessionPolling } from "./use-game-session-polling";
 import { useGameTransfer } from "./use-game-transfer";
 import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
 import { usePreferenceDraft } from "./use-preference-draft";
-import { usePreferencePresets } from "./use-preference-presets";
-import { usePromptDeck } from "./use-prompt-deck";
+import { usePreferenceEditor } from "./use-preference-editor";
 import { useSelectionController } from "./use-selection-controller";
 import styles from "./game-screen.module.css";
-
-const SOURCE_PROFILE_POLL_INTERVAL_MS = 500;
-
-type SourceProfileResponse =
-  | { status: "analyzing"; jobId: string }
-  | {
-      status: "completed";
-      jobId: string;
-      profile: PreferenceRevision;
-      reasoningSummary: string;
-    }
-  | { status: "failed"; jobId: string; message: string };
-
-function waitForSourceProfilePoll(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException("Source analysis cancelled", "AbortError"));
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, SOURCE_PROFILE_POLL_INTERVAL_MS);
-    if (signal.aborted) return onAbort();
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
 
 type HeaderPictographName = "export" | "load" | "preferences" | "new";
 
@@ -120,16 +80,6 @@ export function GameScreen() {
   const [game, setGame] = useState<GameState | null>(null);
   const [startState, setStartState] = useState<GameStartState | null>(null);
   const [initializing, setInitializing] = useState(true);
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [preferencesSaving, setPreferencesSaving] = useState(false);
-  const [preferenceSaveQueued, setPreferenceSaveQueued] = useState(false);
-  const [sourceProfileAnalyzing, setSourceProfileAnalyzing] = useState(false);
-  const [sourceProfileError, setSourceProfileError] = useState<string | null>(
-    null,
-  );
-  const [sourceProfileSummary, setSourceProfileSummary] = useState<
-    string | null
-  >(null);
   const [queueDetailsOpen, setQueueDetailsOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
@@ -138,12 +88,6 @@ export function GameScreen() {
     null,
   );
   const gameRef = useRef<GameState | null>(null);
-  const sourceProfileControllerRef = useRef<AbortController | null>(null);
-  const queuedPreferenceProfileRef = useRef<PreferenceProfile | null>(null);
-  const queuedPreferenceVariationSourceRef = useRef<VariationSource | null>(
-    null,
-  );
-  const queuedPreferenceSaveStartedRef = useRef(false);
   const {
     baseProfile: preferenceDraftBaseProfile,
     profile: preferenceDraft,
@@ -160,23 +104,6 @@ export function GameScreen() {
     gameRef.current = next;
     setGame(next);
   }, []);
-
-  const {
-    error: promptDeckError,
-    saving: promptDeckSaving,
-    blendPromptCards,
-    clearError: clearPromptDeckError,
-    createPromptCard,
-    updatePromptDeck,
-  } = usePromptDeck({ commitGame });
-
-  const {
-    error: presetError,
-    saving: presetSaving,
-    clearError: clearPresetError,
-    deletePreferencePreset,
-    savePreferencePreset: savePreset,
-  } = usePreferencePresets({ commitGame });
 
   const commitStartState = useCallback(
     (next: GameStartState) => {
@@ -278,7 +205,43 @@ export function GameScreen() {
     updateFavorite,
   } = useCandidateBrowser({ gameRef });
 
-  useEffect(() => () => sourceProfileControllerRef.current?.abort(), []);
+  const {
+    open: preferencesOpen,
+    saving: preferencesSaving,
+    saveQueued: preferenceSaveQueued,
+    sourceAnalyzing: sourceProfileAnalyzing,
+    sourceError: sourceProfileError,
+    sourceSummary: sourceProfileSummary,
+    selectionBoundWait,
+    presetError,
+    presetSaving,
+    promptDeckError,
+    promptDeckSaving,
+    applyPreferencePreset,
+    blendPromptCards,
+    closePreferences,
+    createPromptCard,
+    deletePreferencePreset,
+    exploreCandidateVariations,
+    openPreferences,
+    restorePreferenceRevision,
+    savePreferencePreset,
+    savePreferences,
+    analyzeSourceImage,
+    updatePromptDeck,
+  } = usePreferenceEditor({
+    game,
+    profile: preferenceDraft,
+    baseProfile: preferenceDraftBaseProfile,
+    variationSource: preferenceVariationSource,
+    commitGame,
+    dismissImageInspector,
+    applyAnalyzedProfile,
+    applyPresetDraft,
+    resetPreferenceDraft,
+    restorePreferenceDraftRevision,
+    setLocalError,
+  });
 
   useGameplayShortcuts({
     suspended:
@@ -293,195 +256,6 @@ export function GameScreen() {
     onTie: tie,
     onBothLose: bothLose,
   });
-
-  const persistPreferences = useCallback(
-    async (
-      profile: PreferenceProfile,
-      expectedProfile: PreferenceProfile,
-      variationSource: VariationSource | null,
-    ) => {
-      setPreferencesSaving(true);
-      try {
-        const state = await readJson<GameState>(
-          await fetch("/api/game", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              preferenceProfile: profile,
-              expectedPreferenceProfile: expectedProfile,
-              variationSourceCandidateId: variationSource?.candidateId ?? null,
-            }),
-          }),
-        );
-        commitGame(state);
-        setPreferencesOpen(false);
-        setLocalError(null);
-      } catch (error) {
-        setLocalError(
-          error instanceof Error ? error.message : "Could not save preferences",
-        );
-      } finally {
-        queuedPreferenceProfileRef.current = null;
-        queuedPreferenceVariationSourceRef.current = null;
-        queuedPreferenceSaveStartedRef.current = false;
-        setPreferenceSaveQueued(false);
-        setPreferencesSaving(false);
-      }
-    },
-    [commitGame],
-  );
-
-  const savePreferences = async () => {
-    if (selectionBoundWait) {
-      queuedPreferenceProfileRef.current = preferenceDraft;
-      queuedPreferenceVariationSourceRef.current = preferenceVariationSource;
-      queuedPreferenceSaveStartedRef.current = false;
-      setPreferenceSaveQueued(true);
-      setPreferencesSaving(true);
-      setLocalError(null);
-      return;
-    }
-    await persistPreferences(
-      preferenceDraft,
-      preferenceDraftBaseProfile,
-      preferenceVariationSource,
-    );
-  };
-
-  const savePreferencePreset = (name: string): Promise<boolean> =>
-    savePreset(name, preferenceDraft);
-
-  const applyPreferencePreset = (preset: PreferencePreset) => {
-    applyPresetDraft(preset);
-    setSourceProfileError(null);
-    setSourceProfileSummary(
-      `Preset “${preset.name}” applied to the draft. Review it, then save to apply.`,
-    );
-  };
-
-  const analyzeSourceImage = async (
-    image: File,
-    variationSource: VariationSource | null = null,
-  ) => {
-    if (sourceProfileAnalyzing || preferencesSaving) return;
-    const controller = new AbortController();
-    sourceProfileControllerRef.current?.abort();
-    sourceProfileControllerRef.current = controller;
-    setSourceProfileAnalyzing(true);
-    setSourceProfileError(null);
-    setSourceProfileSummary(null);
-    try {
-      const form = new FormData();
-      form.set("image", image);
-      let result = await readJson<SourceProfileResponse>(
-        await fetch("/api/game/preferences/source", {
-          method: "POST",
-          body: form,
-          signal: controller.signal,
-        }),
-      );
-      while (result.status === "analyzing") {
-        await waitForSourceProfilePoll(controller.signal);
-        result = await readJson<SourceProfileResponse>(
-          await fetch(
-            `/api/game/preferences/source?jobId=${encodeURIComponent(result.jobId)}`,
-            { cache: "no-store", signal: controller.signal },
-          ),
-        );
-      }
-      if (result.status === "failed") throw new Error(result.message);
-      applyAnalyzedProfile(result.profile, variationSource);
-      setSourceProfileSummary(result.reasoningSummary);
-      const acknowledged = await fetch(
-        `/api/game/preferences/source?jobId=${encodeURIComponent(result.jobId)}`,
-        { method: "DELETE", signal: controller.signal },
-      );
-      if (!acknowledged.ok) {
-        throw new Error(
-          "The profile was populated, but its analysis job could not be archived.",
-        );
-      }
-    } catch (error) {
-      if (
-        !controller.signal.aborted &&
-        !(error instanceof DOMException && error.name === "AbortError")
-      ) {
-        setSourceProfileError(
-          error instanceof Error
-            ? error.message
-            : "Could not analyze the source image",
-        );
-      }
-    } finally {
-      if (sourceProfileControllerRef.current === controller) {
-        sourceProfileControllerRef.current = null;
-        setSourceProfileAnalyzing(false);
-      }
-    }
-  };
-
-  const closePreferences = () => {
-    if (
-      preferencesSaving ||
-      sourceProfileAnalyzing ||
-      presetSaving ||
-      promptDeckSaving
-    )
-      return;
-    setPreferencesOpen(false);
-  };
-
-  const openPreferences = () => {
-    if (!game) return;
-    const currentProfile =
-      game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed);
-    queuedPreferenceProfileRef.current = null;
-    queuedPreferenceVariationSourceRef.current = null;
-    queuedPreferenceSaveStartedRef.current = false;
-    setPreferenceSaveQueued(false);
-    setPreferencesSaving(false);
-    setSourceProfileError(null);
-    setSourceProfileSummary(null);
-    clearPresetError();
-    clearPromptDeckError();
-    resetPreferenceDraft(currentProfile, game.variationSource ?? null);
-    setPreferencesOpen(true);
-  };
-
-  const exploreCandidateVariations = async (
-    candidate: InspectableCandidate,
-  ) => {
-    dismissImageInspector();
-    openPreferences();
-    try {
-      const response = await fetch(candidate.imageUrl, {
-        cache: "force-cache",
-      });
-      if (!response.ok) {
-        throw new Error("The selected image could not be loaded for analysis.");
-      }
-      const contents = await response.blob();
-      const contentType = contents.type || "image/png";
-      const extension =
-        contentType === "image/jpeg"
-          ? "jpg"
-          : contentType === "image/webp"
-            ? "webp"
-            : "png";
-      await analyzeSourceImage(
-        new File([contents], `${candidate.id}.${extension}`, {
-          type: contentType,
-        }),
-        { candidateId: candidate.id, concept: candidate.concept },
-      );
-    } catch (error) {
-      setSourceProfileError(
-        error instanceof Error
-          ? error.message
-          : "Could not analyze the selected image",
-      );
-    }
-  };
 
   const dismissGenerationNotice = async () => {
     try {
@@ -499,24 +273,10 @@ export function GameScreen() {
     }
   };
 
-  const restorePreferenceRevision = (
-    revision: PreferenceProfileSnapshot,
-    frozen: boolean,
-  ) => {
-    restorePreferenceDraftRevision(revision, frozen);
-    setSourceProfileError(null);
-    setSourceProfileSummary(
-      frozen
-        ? "Revision restored as a frozen draft. Review it, then save to apply."
-        : "Revision restored as an editable draft. Review it, then save to apply.",
-    );
-  };
-
   const retryAvailable =
     game?.round.status === "error" && Boolean(game.pendingSelection);
   const status = game?.round.status;
   const streak = game?.round.winStreak ?? 0;
-  const selectionBoundWait = game ? isSelectionBoundWait(game) : false;
   const retirementLoading =
     status === "generating" && game?.pendingSelection?.kind === "retirement";
   const tieLoading =
@@ -532,27 +292,6 @@ export function GameScreen() {
         ? "refilling"
         : "low"
     : null;
-
-  useEffect(() => {
-    if (
-      !preferenceSaveQueued ||
-      selectionBoundWait ||
-      !game ||
-      queuedPreferenceSaveStartedRef.current
-    ) {
-      return;
-    }
-    const queuedProfile = queuedPreferenceProfileRef.current;
-    if (!queuedProfile) return;
-    const currentProfile =
-      game.preferenceProfile ?? preferenceProfileFromSeed(game.preferenceSeed);
-    queuedPreferenceSaveStartedRef.current = true;
-    void persistPreferences(
-      queuedProfile,
-      currentProfile,
-      queuedPreferenceVariationSourceRef.current,
-    );
-  }, [game, persistPreferences, preferenceSaveQueued, selectionBoundWait]);
 
   return (
     <main className={styles.shell}>

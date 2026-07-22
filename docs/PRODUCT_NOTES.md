@@ -72,6 +72,13 @@ prompt-card background-job refreshes, and initial-generation retry now live in
 behavior together while leaving durable state commits explicit at the screen
 boundary.
 
+The remaining modal-level preference orchestration now lives in
+`usePreferenceEditor`: explicit and queued saves, source-image analysis and job
+acknowledgement, candidate-derived variation setup, preset application, revision
+restoration, and prompt-deck/preset controller composition. The screen provides
+the current durable game and renders the modal, while the controller owns its
+workflow state and cleanup.
+
 ## 2026-07-21
 
 ### Inspectable generation queue
