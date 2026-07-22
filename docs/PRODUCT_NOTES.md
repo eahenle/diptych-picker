@@ -66,6 +66,12 @@ selection recovery, and explicit retry reconciliation. `GameScreen` retains the
 rendered comparison and keyboard wiring while its core orchestration drops to a
 smaller feature-facing surface.
 
+Initial game loading, initialization polling, aggregate queue-health refreshes,
+prompt-card background-job refreshes, and initial-generation retry now live in
+`useGameSessionPolling`. This keeps reconnect timing and best-effort health
+behavior together while leaving durable state commits explicit at the screen
+boundary.
+
 ## 2026-07-21
 
 ### Inspectable generation queue
