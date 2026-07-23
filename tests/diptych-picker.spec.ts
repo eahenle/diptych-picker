@@ -437,7 +437,7 @@ test("opens a display-safe newest-first comparison history", async ({
   await expect(imageDialog).toHaveCount(0);
 });
 
-test("favorites a candidate across history, pool, refresh, and export", async ({
+test("favorites a candidate across history, gallery, pool, refresh, and export", async ({
   page,
   request,
 }) => {
@@ -495,6 +495,33 @@ test("favorites a candidate across history, pool, refresh, and export", async ({
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Close history" }).click();
+
+  await page.getByRole("button", { name: "Favorites" }).click();
+  const favoritesDialog = page.getByRole("dialog", { name: "Favorites" });
+  await expect(favoritesDialog.getByText(winner.concept)).toBeVisible();
+  const favoritesResponse = await request.get("/api/game/favorites");
+  expect(favoritesResponse.status()).toBe(200);
+  const favorites = await favoritesResponse.json();
+  expect(favorites.entries[0]).toMatchObject({
+    candidate: { id: winner.id, concept: winner.concept },
+  });
+  expect(JSON.stringify(favorites)).not.toContain("prompt");
+
+  await favoritesDialog
+    .getByRole("button", { name: `View ${winner.concept} larger` })
+    .click();
+  const favoriteInspector = page.getByRole("dialog", {
+    name: `Expanded image: ${winner.concept}`,
+  });
+  await expect(
+    favoriteInspector.getByRole("button", { name: "Explore variations" }),
+  ).toBeVisible();
+  await favoriteInspector
+    .getByRole("button", { name: "Close expanded image" })
+    .click();
+  await expect(favoritesDialog).toBeVisible();
+  await page.getByRole("button", { name: "Close favorites" }).click();
+
   await page
     .getByRole("button", {
       name: "View pool leaderboard; 7 of 50 reusable images",

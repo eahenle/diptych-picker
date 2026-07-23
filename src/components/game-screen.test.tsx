@@ -984,6 +984,74 @@ describe("GameScreen challenger reconciliation", () => {
     ).toHaveFocus();
   });
 
+  it("opens every favorite, returns from inspection, and removes one", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (
+          String(input).endsWith("/api/game/favorites") &&
+          init?.method === "PUT"
+        ) {
+          return json({ candidateId: "archived-favorite", favorite: false });
+        }
+        if (String(input).endsWith("/api/game/favorites")) {
+          return json({
+            entries: [
+              {
+                rank: 1,
+                candidate: {
+                  id: "archived-favorite",
+                  imageUrl: "/api/assets/archived-favorite.png",
+                  concept: "Archived favorite",
+                  style: ["editorial", "copper"],
+                },
+                rating: 1092,
+                wins: 7,
+                losses: 2,
+                source: "generated",
+                poolMember: false,
+              },
+            ],
+          });
+        }
+        return json({ status: "ready", game: initializedGame });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Favorites" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Favorites" });
+    expect(dialog).toHaveTextContent("Archived favorite");
+    expect(dialog).toHaveTextContent("1092 Elo");
+    expect(dialog).toHaveTextContent("Archived");
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/favorites", {
+      cache: "no-store",
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "View Archived favorite larger" }),
+    );
+    expect(dialog).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close expanded image" }),
+    );
+    expect(screen.getByRole("dialog", { name: "Favorites" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove favorite" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Archived favorite")).not.toBeInTheDocument(),
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/favorites", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidateId: "archived-favorite",
+        favorite: false,
+      }),
+    });
+  });
+
   it("closes non-busy dialogs with Escape", async () => {
     vi.stubGlobal(
       "fetch",

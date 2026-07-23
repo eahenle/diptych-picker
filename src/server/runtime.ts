@@ -13,6 +13,7 @@ import {
   summarizeBufferHealth,
   summarizeComparisonHistory,
   summarizeDisplayedScores,
+  summarizeFavoriteGallery,
   summarizePoolLeaderboard,
   type PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
@@ -306,6 +307,13 @@ export async function getPoolLeaderboard() {
   return {
     entries: summarizePoolLeaderboard(await challengerRepository.load()),
     poolMaximum: challengerConfig.poolMaximum,
+  };
+}
+
+export async function getFavoriteGallery() {
+  await gameService.reconcile();
+  return {
+    entries: summarizeFavoriteGallery(await challengerRepository.load()),
   };
 }
 

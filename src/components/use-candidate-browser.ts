@@ -5,6 +5,7 @@ import type { GameState } from "@/domain/game";
 import type {
   ComparisonHistoryCandidate,
   ComparisonHistoryEntry,
+  FavoriteGalleryEntry,
   PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
 import { readJson } from "./game-api";
@@ -19,6 +20,12 @@ interface UseCandidateBrowserOptions {
 
 export function useCandidateBrowser({ gameRef }: UseCandidateBrowserOptions) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [favoriteEntries, setFavoriteEntries] = useState<
+    FavoriteGalleryEntry[]
+  >([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoritesError, setFavoritesError] = useState<string | null>(null);
   const [imageInspector, setImageInspector] =
     useState<ImageInspectorState | null>(null);
   const [historyEntries, setHistoryEntries] = useState<
@@ -108,9 +115,22 @@ export function useCandidateBrowser({ gameRef }: UseCandidateBrowserOptions) {
     [leaderboardEntries, openImageInspector],
   );
 
+  const inspectFavoriteCandidate = useCallback(
+    (candidate: FavoriteGalleryEntry["candidate"]) => {
+      setFavoritesOpen(false);
+      openImageInspector(
+        candidate,
+        favoriteEntries.map((entry) => entry.candidate),
+        "favorites",
+      );
+    },
+    [favoriteEntries, openImageInspector],
+  );
+
   const closeImageInspector = useCallback(() => {
     const returnTarget = imageInspector?.returnTarget ?? null;
     setImageInspector(null);
+    if (returnTarget === "favorites") setFavoritesOpen(true);
     if (returnTarget === "leaderboard") setLeaderboardOpen(true);
   }, [imageInspector?.returnTarget]);
 
@@ -177,6 +197,28 @@ export function useCandidateBrowser({ gameRef }: UseCandidateBrowserOptions) {
     }
   }, []);
 
+  const openFavoritesGallery = useCallback(async () => {
+    setFavoritesOpen(true);
+    setFavoritesLoading(true);
+    setFavoritesError(null);
+    setFavoriteError(null);
+    try {
+      const response = await fetch("/api/game/favorites", {
+        cache: "no-store",
+      });
+      const data = await readJson<{ entries: FavoriteGalleryEntry[] }>(
+        response,
+      );
+      setFavoriteEntries(data.entries);
+    } catch (caught) {
+      setFavoritesError(
+        caught instanceof Error ? caught.message : "Could not load favorites",
+      );
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }, []);
+
   const updateFavorite = useCallback(
     async (candidateId: string, favorite: boolean) => {
       setFavoriteSaving(candidateId);
@@ -221,6 +263,11 @@ export function useCandidateBrowser({ gameRef }: UseCandidateBrowserOptions) {
             entry.candidate.id === candidateId ? { ...entry, favorite } : entry,
           ),
         );
+        setFavoriteEntries((entries) =>
+          favorite
+            ? entries
+            : entries.filter((entry) => entry.candidate.id !== candidateId),
+        );
       } catch (caught) {
         setFavoriteError(
           caught instanceof Error
@@ -235,11 +282,16 @@ export function useCandidateBrowser({ gameRef }: UseCandidateBrowserOptions) {
   );
 
   const closeComparisonHistory = useCallback(() => setHistoryOpen(false), []);
+  const closeFavoritesGallery = useCallback(() => setFavoritesOpen(false), []);
   const closePoolLeaderboard = useCallback(() => setLeaderboardOpen(false), []);
 
   return {
+    favoriteEntries,
     favoriteError,
     favoriteSaving,
+    favoritesError,
+    favoritesLoading,
+    favoritesOpen,
     historyEntries,
     historyError,
     historyLoading,
@@ -251,13 +303,16 @@ export function useCandidateBrowser({ gameRef }: UseCandidateBrowserOptions) {
     leaderboardLoading,
     leaderboardOpen,
     closeComparisonHistory,
+    closeFavoritesGallery,
     closeImageInspector,
     closePoolLeaderboard,
     dismissImageInspector,
+    inspectFavoriteCandidate,
     inspectHistoryCandidate,
     inspectLeaderboardCandidate,
     navigateImageInspector,
     openComparisonHistory,
+    openFavoritesGallery,
     openImageInspector,
     openPoolLeaderboard,
     updateFavorite,

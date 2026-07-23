@@ -22,9 +22,9 @@ normal implementation and play-testing loop.
 6. [ ] Continue the persistent `co-proc` transport design in
        [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md), keeping
        durable mailbox operation as the fallback during migration.
-7. [ ] After those foundations, consider one-step undo, tournament play, and a
-       dedicated favorites gallery. Broad refactoring should follow feature
-       boundaries instead of preceding them.
+7. [ ] After those foundations, consider one-step undo and tournament play.
+       The dedicated favorites gallery has shipped. Broad refactoring should
+       follow feature boundaries instead of preceding them.
 
 Compatibility remains the default: a moderate, non-blocking advisory alone is
 not sufficient reason to introduce a breaking save, API, or workflow change.
@@ -32,6 +32,15 @@ Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
 
 ## 2026-07-22
+
+### Dedicated favorites gallery
+
+The header's Favorites control opens every favorited candidate in deterministic
+Elo order, including durable rated images that have left the reusable pool.
+Cards expose display-safe concept, style, record, provenance, and pool status
+without prompts or mailbox details. Each favorite can be inspected in the
+shared full-size navigator, removed in place, or used to start the existing
+approval-gated Explore variations flow.
 
 ### GameScreen boundary extractions
 

@@ -10,6 +10,7 @@ import {
 } from "@/domain/game";
 import { CandidateCard } from "./candidate-card";
 import { ComparisonHistory } from "./comparison-history";
+import { FavoritesGallery } from "./favorites-gallery";
 import { readJson } from "./game-api";
 import { GameTransferModal } from "./game-transfer-modal";
 import { ImageInspector } from "./image-inspector";
@@ -25,7 +26,8 @@ import { usePreferenceEditor } from "./use-preference-editor";
 import { useSelectionController } from "./use-selection-controller";
 import styles from "./game-screen.module.css";
 
-type HeaderPictographName = "export" | "load" | "preferences" | "new";
+type HeaderPictographName =
+  "export" | "favorites" | "load" | "preferences" | "new";
 
 function HeaderPictograph({ name }: { name: HeaderPictographName }) {
   const paths: Record<HeaderPictographName, ReactNode> = {
@@ -35,6 +37,9 @@ function HeaderPictograph({ name }: { name: HeaderPictographName }) {
         <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
         <path d="M4 19h16" />
       </>
+    ),
+    favorites: (
+      <path d="M12 20.5 4.7 13.3A5 5 0 0 1 11.8 6l.2.2.2-.2a5 5 0 0 1 7.1 7.1z" />
     ),
     load: (
       <>
@@ -180,8 +185,12 @@ export function GameScreen() {
   });
 
   const {
+    favoriteEntries,
     favoriteError,
     favoriteSaving,
+    favoritesError,
+    favoritesLoading,
+    favoritesOpen,
     historyEntries,
     historyError,
     historyLoading,
@@ -193,13 +202,16 @@ export function GameScreen() {
     leaderboardLoading,
     leaderboardOpen,
     closeComparisonHistory,
+    closeFavoritesGallery,
     closeImageInspector,
     closePoolLeaderboard,
     dismissImageInspector,
+    inspectFavoriteCandidate,
     inspectHistoryCandidate,
     inspectLeaderboardCandidate,
     navigateImageInspector,
     openComparisonHistory,
+    openFavoritesGallery,
     openImageInspector,
     openPoolLeaderboard,
     updateFavorite,
@@ -248,6 +260,7 @@ export function GameScreen() {
       preferencesOpen ||
       newGameOpen ||
       loadGameOpen ||
+      favoritesOpen ||
       leaderboardOpen ||
       queueDetailsOpen ||
       historyOpen ||
@@ -332,6 +345,16 @@ export function GameScreen() {
             onClick={openLoadGame}
           >
             <HeaderPictograph name="load" />
+          </button>
+          <button
+            type="button"
+            className={styles.utilityButton}
+            aria-label="Favorites"
+            title="View favorites"
+            disabled={!game || reconcilingRetry || initializing}
+            onClick={() => void openFavoritesGallery()}
+          >
+            <HeaderPictograph name="favorites" />
           </button>
           <button
             type="button"
@@ -620,6 +643,25 @@ export function GameScreen() {
           onInspect={inspectLeaderboardCandidate}
           onToggleFavorite={(candidateId, favorite) =>
             void updateFavorite(candidateId, favorite)
+          }
+        />
+      ) : null}
+
+      {favoritesOpen && game ? (
+        <FavoritesGallery
+          entries={favoriteEntries}
+          loading={favoritesLoading}
+          error={favoritesError}
+          favoriteError={favoriteError}
+          favoriteSaving={favoriteSaving}
+          onClose={closeFavoritesGallery}
+          onInspect={inspectFavoriteCandidate}
+          onExplore={(candidate) => {
+            closeFavoritesGallery();
+            void exploreCandidateVariations(candidate);
+          }}
+          onRemoveFavorite={(candidateId) =>
+            void updateFavorite(candidateId, false)
           }
         />
       ) : null}

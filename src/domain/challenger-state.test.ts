@@ -13,6 +13,7 @@ import {
   summarizeComparisonHistory,
   summarizeDisplayedEloRatings,
   summarizeDisplayedScores,
+  summarizeFavoriteGallery,
   summarizeLeaderboardPreferenceEvidence,
   summarizePoolLeaderboard,
   updateElo,
@@ -701,6 +702,47 @@ describe("challenger state", () => {
     ]);
     expect(JSON.stringify(entries)).not.toContain("prompt");
     expect(JSON.stringify(entries)).not.toContain("excluded");
+  });
+
+  it("ranks every favorite without exposing prompts or requiring pool membership", () => {
+    const entries = summarizeFavoriteGallery(
+      state({
+        ratings: [
+          rating("pooled", 1012.4, { favorite: true }),
+          rating("archived", 1044.6, {
+            wins: 6,
+            losses: 1,
+            poolMember: false,
+            favorite: true,
+          }),
+          rating("not-favorite", 1200),
+        ],
+      }),
+    );
+
+    expect(entries).toEqual([
+      {
+        rank: 1,
+        candidate: {
+          id: "archived",
+          imageUrl: "/api/assets/archived.png",
+          concept: "archived concept",
+          style: ["archived"],
+        },
+        rating: 1045,
+        wins: 6,
+        losses: 1,
+        source: "generated",
+        poolMember: false,
+      },
+      expect.objectContaining({
+        rank: 2,
+        candidate: expect.objectContaining({ id: "pooled" }),
+        poolMember: true,
+      }),
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("prompt");
+    expect(JSON.stringify(entries)).not.toContain("not-favorite");
   });
 
   it("bounds adaptive evidence to leaderboard leaders and trailers", () => {
