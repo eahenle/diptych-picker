@@ -187,6 +187,16 @@ export interface PoolLeaderboardEntry {
   favorite: boolean;
 }
 
+export interface FavoriteGalleryEntry {
+  rank: number;
+  candidate: PoolLeaderboardEntry["candidate"];
+  rating: number;
+  wins: number;
+  losses: number;
+  source: CandidateRating["source"];
+  poolMember: boolean;
+}
+
 export interface PreferenceLeaderboardEntry {
   rank: number;
   candidateId: string;
@@ -417,6 +427,38 @@ export function summarizePoolLeaderboard(
       losses,
       source,
       favorite: Boolean(favorite),
+    }));
+}
+
+export function summarizeFavoriteGallery(
+  state: ChallengerState | null,
+): FavoriteGalleryEntry[] {
+  return (state?.ratings ?? [])
+    .filter(({ favorite }) => favorite)
+    .toSorted(
+      (left, right) =>
+        right.rating - left.rating ||
+        right.wins - left.wins ||
+        left.losses - right.losses ||
+        left.candidate.id.localeCompare(right.candidate.id),
+    )
+    .map(({ candidate, rating, wins, losses, source, poolMember }, index) => ({
+      rank: index + 1,
+      candidate: {
+        id: candidate.id,
+        imageUrl: candidate.imageUrl,
+        concept: candidate.concept,
+        style: candidate.style,
+        ...(candidate.lineage ? { lineage: candidate.lineage } : {}),
+        ...(candidate.promptCardId
+          ? { promptCardId: candidate.promptCardId }
+          : {}),
+      },
+      rating: Math.round(rating),
+      wins,
+      losses,
+      source,
+      poolMember,
     }));
 }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   CandidateFavoriteNotFoundError,
+  getFavoriteGallery,
   setCandidateFavorite,
 } from "@/server/runtime";
 
@@ -13,6 +14,12 @@ const favoriteSchema = z
     favorite: z.boolean(),
   })
   .strict();
+
+export async function GET() {
+  return NextResponse.json(await getFavoriteGallery(), {
+    headers: { "Cache-Control": "no-store" },
+  });
+}
 
 export async function PUT(request: Request) {
   let body: unknown;

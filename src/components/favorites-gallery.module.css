@@ -1,0 +1,118 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 280px));
+  gap: 14px;
+  justify-content: start;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grid li {
+  min-width: 0;
+  overflow: hidden;
+  background: #090b0d;
+  border: 1px solid #383337;
+}
+
+.imageButton {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: zoom-in;
+}
+
+.imageButton:hover,
+.imageButton:focus-visible {
+  outline: 1px solid var(--copper-bright);
+  outline-offset: -1px;
+}
+
+.imageButton img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.details {
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+}
+
+.heading,
+.record {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.heading strong {
+  overflow: hidden;
+  color: #e4ddd5;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heading small,
+.tags,
+.record small {
+  color: #8f8984;
+  font-size: 10px;
+}
+
+.tags {
+  overflow: hidden;
+  min-height: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record strong {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.actions button {
+  min-height: 34px;
+  flex: 1;
+  padding: 0 9px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.actions button:hover,
+.actions button:focus-visible {
+  color: var(--text);
+  border-color: var(--copper-bright);
+  background: rgba(180, 104, 73, 0.08);
+  outline: none;
+}
+
+.actions button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+@media (max-width: 600px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

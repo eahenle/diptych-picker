@@ -15,7 +15,7 @@ export type InspectableCandidate = Pick<
 export interface ImageInspectorState {
   candidates: InspectableCandidate[];
   index: number;
-  returnTarget: "leaderboard" | null;
+  returnTarget: "favorites" | "leaderboard" | null;
 }
 
 interface ImageInspectorProps {
