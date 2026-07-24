@@ -44,7 +44,6 @@ import {
   createPromptCardBlendRequest,
   createPromptCard as createPromptCardRecord,
   emptyPromptDeck,
-  preparePromptCardEditorJob,
   recordPromptCardDecision,
   type CreatePromptCardInput,
 } from "@/domain/prompt-deck";
@@ -75,6 +74,7 @@ import {
 } from "./game-refill";
 import { effectiveGameRules, validGameRules } from "./game-rules";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
+import { PromptCardReconciler } from "./prompt-card-reconciler";
 import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import type { AssetStore } from "./providers";
 import type { GameRepository } from "./repository";
@@ -105,6 +105,7 @@ interface RefillObservation {
 
 export class GameService {
   private reconciliation: Promise<GameState | null> | null = null;
+  private readonly promptCardReconciler: PromptCardReconciler;
 
   constructor(
     private readonly gameRepository: GameRepository,
@@ -116,10 +117,19 @@ export class GameService {
     private readonly createId: () => string = () => crypto.randomUUID(),
     private readonly random: () => number = Math.random,
     private readonly leaderboardProfiles?: LeaderboardProfileCoordinator,
-    private readonly promptCardEditor?: PromptCardEditorMailbox,
+    promptCardEditor?: PromptCardEditorMailbox,
     private readonly promptCardBlender?: PromptCardBlenderMailbox,
     private readonly promptCardWriter?: PromptCardWriterCoordinator,
-  ) {}
+  ) {
+    this.promptCardReconciler = new PromptCardReconciler({
+      repository: this.gameRepository,
+      editor: promptCardEditor,
+      blender: this.promptCardBlender,
+      writer: this.promptCardWriter,
+      createId: this.createId,
+      now: this.now,
+    });
+  }
 
   async assertIdle(): Promise<void> {
     await this.gameRepository.withLock(async () => {
@@ -328,7 +338,7 @@ export class GameService {
         },
       };
       await this.gameRepository.save(updated);
-      await this.ensurePromptCardBlenderEnqueued(job);
+      await this.promptCardReconciler.ensureBlenderEnqueued(job);
       return updated;
     });
   }
@@ -399,7 +409,7 @@ export class GameService {
         },
       };
       await this.gameRepository.save(updated);
-      await this.ensurePromptCardWriterEnqueued(job);
+      await this.promptCardReconciler.ensureWriterEnqueued(job);
       return updated;
     });
   }
@@ -729,7 +739,7 @@ export class GameService {
       );
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
-      nextGame = await this.syncPromptCardEditor(nextGame);
+      nextGame = await this.promptCardReconciler.reconcileEditor(nextGame);
       if (nextGame.round.status === "idle") {
         await this.challengerRepository.save({
           ...capacity.state,
@@ -884,7 +894,7 @@ export class GameService {
       );
       await this.challengerRepository.save(durableChallengers);
       await this.gameRepository.save(nextGame);
-      nextGame = await this.syncPromptCardEditor(nextGame);
+      nextGame = await this.promptCardReconciler.reconcileEditor(nextGame);
       if (nextGame.round.status === "idle") {
         await this.challengerRepository.save({
           ...capacity.state,
@@ -936,9 +946,7 @@ export class GameService {
       await this.gameRepository.save(game);
     }
 
-    game = await this.syncPromptCardEditor(game);
-    game = await this.syncPromptCardBlender(game);
-    game = await this.syncPromptCardWriter(game);
+    game = await this.promptCardReconciler.reconcile(game);
 
     if (
       game.round.status === "generating" &&
@@ -1212,236 +1220,6 @@ export class GameService {
     const cleaned = withoutRefillRecord(state, record.jobId);
     await this.challengerRepository.save(cleaned);
     return cleaned;
-  }
-
-  private async syncPromptCardEditor(game: GameState): Promise<GameState> {
-    const mailbox = this.promptCardEditor;
-    if (!mailbox || !game.promptDeck) return game;
-    let next = game;
-    let deck = game.promptDeck;
-    const record = deck.editorJob;
-    if (record) {
-      const [work, result] = await Promise.all([
-        mailbox.readPromptCardEditorWork(record.jobId),
-        mailbox.readPromptCardEditorResult(record.jobId),
-      ]);
-      if (!result) {
-        if (!work) {
-          await this.ensurePromptCardEditorEnqueued(record.expectedJob);
-        } else if (!isDeepStrictEqual(work, record.expectedJob)) {
-          await mailbox.archivePromptCardEditor(record.jobId);
-          deck = {
-            ...deck,
-            cards: deck.cards.map((card) =>
-              card.id === record.cardId
-                ? {
-                    ...card,
-                    editorRejectCheckpoint: record.previousRejectCheckpoint,
-                  }
-                : card,
-            ),
-            editorJob: null,
-          };
-          next = { ...next, promptDeck: deck };
-          await this.gameRepository.save(next);
-        }
-        return next;
-      }
-
-      const validCompleted =
-        work &&
-        isDeepStrictEqual(work, record.expectedJob) &&
-        result.status === "completed" &&
-        result.kind === "prompt-card-editor" &&
-        result.cardId === record.cardId;
-      const suggestions = validCompleted
-        ? [
-            ...(deck.suggestions ?? []),
-            ...result.proposals.map((proposal) => ({
-              id: this.createId(),
-              parentCardId: record.cardId,
-              ...proposal,
-              createdAt: result.completedAt,
-            })),
-          ].slice(-10)
-        : (deck.suggestions ?? []);
-      await mailbox.archivePromptCardEditor(record.jobId);
-      deck = {
-        ...deck,
-        editorJob: null,
-        suggestions,
-      };
-      next = {
-        ...next,
-        promptDeck: deck,
-      };
-      await this.gameRepository.save(next);
-    }
-
-    if (deck.editorJob) return next;
-    const prepared = preparePromptCardEditorJob(
-      deck,
-      this.createId,
-      this.now(),
-    );
-    if (!prepared) return next;
-    next = { ...next, promptDeck: prepared.deck };
-    await this.gameRepository.save(next);
-    await this.ensurePromptCardEditorEnqueued(prepared.job);
-    return next;
-  }
-
-  private async ensurePromptCardEditorEnqueued(
-    job: Parameters<PromptCardEditorMailbox["enqueuePromptCardEditor"]>[0],
-  ): Promise<void> {
-    const mailbox = this.promptCardEditor;
-    if (!mailbox) return;
-    try {
-      await mailbox.enqueuePromptCardEditor(job);
-    } catch (error) {
-      const work = await mailbox.readPromptCardEditorWork(job.id);
-      if (work && isDeepStrictEqual(work, job)) return;
-      throw error;
-    }
-  }
-
-  private async syncPromptCardBlender(game: GameState): Promise<GameState> {
-    const mailbox = this.promptCardBlender;
-    const deck = game.promptDeck;
-    const record = deck?.blendJob;
-    if (!mailbox || !deck || !record) return game;
-
-    const [work, result] = await Promise.all([
-      mailbox.readPromptCardBlenderWork(record.jobId),
-      mailbox.readPromptCardBlenderResult(record.jobId),
-    ]);
-    if (!result) {
-      if (!work) {
-        await this.ensurePromptCardBlenderEnqueued(record.expectedJob);
-      } else if (!isDeepStrictEqual(work, record.expectedJob)) {
-        await mailbox.archivePromptCardBlender(record.jobId);
-        const next = {
-          ...game,
-          promptDeck: { ...deck, blendJob: null },
-        };
-        await this.gameRepository.save(next);
-        return next;
-      }
-      return game;
-    }
-
-    const validCompleted =
-      work &&
-      isDeepStrictEqual(work, record.expectedJob) &&
-      result.status === "completed" &&
-      result.kind === "prompt-card-blender" &&
-      isDeepStrictEqual(result.cardIds, record.cardIds);
-    const suggestions = validCompleted
-      ? [
-          ...(deck.suggestions ?? []),
-          {
-            id: this.createId(),
-            parentCardId: record.cardIds[0],
-            parentCardIds: record.cardIds,
-            ...result.proposal,
-            createdAt: result.completedAt,
-          },
-        ].slice(-10)
-      : (deck.suggestions ?? []);
-    await mailbox.archivePromptCardBlender(record.jobId);
-    const next = {
-      ...game,
-      promptDeck: {
-        ...deck,
-        blendJob: null,
-        suggestions,
-      },
-    };
-    await this.gameRepository.save(next);
-    return next;
-  }
-
-  private async ensurePromptCardBlenderEnqueued(
-    job: Parameters<PromptCardBlenderMailbox["enqueuePromptCardBlender"]>[0],
-  ): Promise<void> {
-    const mailbox = this.promptCardBlender;
-    if (!mailbox) return;
-    try {
-      await mailbox.enqueuePromptCardBlender(job);
-    } catch (error) {
-      const work = await mailbox.readPromptCardBlenderWork(job.id);
-      if (work && isDeepStrictEqual(work, job)) return;
-      throw error;
-    }
-  }
-
-  private async syncPromptCardWriter(game: GameState): Promise<GameState> {
-    const writer = this.promptCardWriter;
-    const deck = game.promptDeck;
-    const record = deck?.writerJob;
-    if (!writer || !deck || !record) return game;
-
-    const [work, result] = await Promise.all([
-      writer.readWork(record.jobId),
-      writer.readResult(record.jobId),
-    ]);
-    if (!result) {
-      if (!work) {
-        await this.ensurePromptCardWriterEnqueued(record.expectedJob);
-      } else if (!isDeepStrictEqual(work, record.expectedJob)) {
-        await writer.archive(record.jobId);
-        const next = {
-          ...game,
-          promptDeck: { ...deck, writerJob: null },
-        };
-        await this.gameRepository.save(next);
-        return next;
-      }
-      return game;
-    }
-
-    const validCompleted =
-      work &&
-      isDeepStrictEqual(work, record.expectedJob) &&
-      result.status === "completed" &&
-      result.kind === "prompt-card-writer" &&
-      isDeepStrictEqual(result.sourceCandidateIds, record.sourceCandidateIds);
-    const suggestions = validCompleted
-      ? [
-          ...(deck.suggestions ?? []),
-          {
-            id: this.createId(),
-            sourceCandidateIds: record.sourceCandidateIds,
-            ...result.proposal,
-            createdAt: result.completedAt,
-          },
-        ].slice(-10)
-      : (deck.suggestions ?? []);
-    await writer.archive(record.jobId);
-    const next = {
-      ...game,
-      promptDeck: {
-        ...deck,
-        writerJob: null,
-        suggestions,
-      },
-    };
-    await this.gameRepository.save(next);
-    return next;
-  }
-
-  private async ensurePromptCardWriterEnqueued(
-    job: Parameters<PromptCardWriterCoordinator["enqueue"]>[0],
-  ): Promise<void> {
-    const writer = this.promptCardWriter;
-    if (!writer) return;
-    try {
-      await writer.enqueue(job);
-    } catch (error) {
-      const work = await writer.readWork(job.id);
-      if (work && isDeepStrictEqual(work, job)) return;
-      throw error;
-    }
   }
 
   private async syncLeaderboardProfile(

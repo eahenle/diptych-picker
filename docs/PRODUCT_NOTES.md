@@ -48,6 +48,16 @@ and fallback limits immediately. Rules travel with saved-game exports; legacy
 games use environment-backed defaults, and starting fresh restores those
 defaults.
 
+### Prompt-card reconciliation boundary
+
+Prompt-card editor, blender, and favorite-set writer jobs now reconcile through
+one focused server coordinator instead of three parallel implementations inside
+`GameService`. The extraction preserves durable intent validation, missing-work
+re-enqueue, mismatched-work archival, editor checkpoint restoration, bounded
+suggestion ordering, and the immediate editor check after a comparison records
+new rejection evidence. API behavior, persistence shape, mailbox protocol, and
+approval gates are unchanged.
+
 ### Prompt cards from favorite image sets
 
 The Favorites gallery lets the player select three to five generated favorites
