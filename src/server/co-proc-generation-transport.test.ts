@@ -18,6 +18,7 @@ import {
   CoProcGenerationTransport,
   TransportNotifyingGenerationMailbox,
   type GenerationChannelTransport,
+  type GenerationTerminalSignal,
   type GenerationTransport,
 } from "./co-proc-generation-transport";
 
@@ -147,6 +148,8 @@ function deferred(): {
 
 class MemoryMailbox implements GenerationMailbox {
   enqueued: GenerationJob[] = [];
+  result: GenerationResult | null = null;
+  resultReads = 0;
 
   async enqueue(value: GenerationJob): Promise<void> {
     this.enqueued.push(value);
@@ -161,7 +164,8 @@ class MemoryMailbox implements GenerationMailbox {
   }
 
   async readResult(): Promise<GenerationResult | null> {
-    return null;
+    this.resultReads += 1;
+    return this.result;
   }
 
   async archive(): Promise<void> {}
@@ -208,6 +212,46 @@ describe("TransportNotifyingGenerationMailbox", () => {
     await expect(adapter.enqueue(job())).resolves.toBeUndefined();
     expect(mailbox.enqueued).toEqual([job()]);
     expect(onTransportError).toHaveBeenCalledWith(expect.any(Error), job());
+  });
+
+  it("eagerly ingests a matching live terminal signal from durable storage", async () => {
+    const mailbox = new MemoryMailbox();
+    mailbox.result = {
+      jobId: "job-1",
+      status: "failed",
+      completedAt: "2026-07-19T01:05:00.000Z",
+      message: "worker unavailable",
+      retryable: true,
+      category: "operational",
+    };
+    let publishSignal!: (signal: GenerationTerminalSignal) => void;
+    const transport: GenerationTransport = {
+      notify: vi.fn(async () => {}),
+      subscribeTerminalSignals: (listener) => {
+        publishSignal = listener;
+        return () => {};
+      },
+    };
+    const adapter = new TransportNotifyingGenerationMailbox(
+      mailbox,
+      transport,
+      { durableJobPath: (value) => `/mailbox/pending/${value.id}.json` },
+    );
+
+    publishSignal({
+      channel: "gen_a",
+      jobId: "job-1",
+      status: "failed",
+      resultPath: "/mailbox/failed/job-1.json",
+    });
+    await vi.waitFor(() => expect(mailbox.resultReads).toBe(1));
+    mailbox.result = null;
+
+    await expect(adapter.readResult("job-1")).resolves.toMatchObject({
+      jobId: "job-1",
+      status: "failed",
+    });
+    expect(mailbox.resultReads).toBe(1);
   });
 });
 
@@ -258,6 +302,81 @@ describe("CoProcGenerationTransport", () => {
         })}\n`,
       );
       await expect(notification).resolves.toBeUndefined();
+    } finally {
+      await peer.input.close();
+      await peer.output.close();
+    }
+  });
+
+  it("emits a correlated terminal signal after acknowledged delivery", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-co-proc-"));
+    const dataRoot = join(root, "data");
+    const durableJobPath = pendingJobPath(dataRoot);
+    const resultPath = join(
+      dataRoot,
+      "agent-mailbox",
+      "completed",
+      "job-1.json",
+    );
+    await chmod(root, 0o700);
+    await mkdir(dirname(durableJobPath), { recursive: true });
+    await writeFile(durableJobPath, `${JSON.stringify(job())}\n`, "utf8");
+    const peer = await createSecureChannel(root, "gen_a");
+    const transport = new CoProcGenerationTransport({
+      channel: "gen_a",
+      runtimeRoot: root,
+      readyTimeoutMs: 100,
+      acknowledgementTimeoutMs: 100,
+    });
+    const terminalSignal = vi.fn();
+    transport.subscribeTerminalSignals(terminalSignal);
+
+    try {
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 1,
+          type: "ready",
+          id: "gen_a",
+        })}\n`,
+      );
+      const notification = transport.notify(job(), durableJobPath);
+      const frame = await readFrame(peer.input);
+      const lease = await claimDispatchedLease(dataRoot, frame);
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 2,
+          type: "ack",
+          id: "job-1",
+          lease_token: frame.lease_token,
+          lease_expires_at: lease.expiresAt,
+        })}\n`,
+      );
+      await notification;
+      await expect(
+        transport.notify(
+          { ...job(), id: "job-2" },
+          pendingJobPath(dataRoot, "job-2"),
+        ),
+      ).rejects.toBeInstanceOf(CoProcChannelUnavailableError);
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 2,
+          type: "result",
+          id: "job-1",
+          lease_token: frame.lease_token,
+          status: "completed",
+          result_path: resultPath,
+        })}\n`,
+      );
+
+      await vi.waitFor(() =>
+        expect(terminalSignal).toHaveBeenCalledWith({
+          channel: "gen_a",
+          jobId: "job-1",
+          status: "completed",
+          resultPath,
+        }),
+      );
     } finally {
       await peer.input.close();
       await peer.output.close();

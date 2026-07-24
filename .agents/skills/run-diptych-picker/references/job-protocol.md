@@ -70,6 +70,29 @@ skips live leases; under the same lock it revokes an expired lease and returns
 that active job during ordinary polling or startup recovery. A stale peer
 cannot reserve an outcome after takeover.
 
+After a leased completion or failure helper has successfully published the
+durable result, the persistent peer sends exactly one correlated terminal
+frame:
+
+```json
+{
+  "version": 2,
+  "type": "result",
+  "id": "job-id",
+  "lease_token": "uuid",
+  "status": "completed",
+  "result_path": "/absolute/data-root/agent-mailbox/completed/job-id.json"
+}
+```
+
+`status` is `completed` or `failed`, and `result_path` must be the absolute,
+normalized path for the matching job beneath that exact mailbox directory.
+The app rejects another token, job ID, status directory, or path, then eagerly
+ingests the file through the normal strict result parser. The durable file
+remains authoritative if the frame is missing, malformed, delayed, or lost
+during a restart. The mailbox monitor does not hold a lease and never sends
+co-proc terminal frames.
+
 ## Job request
 
 ```json
