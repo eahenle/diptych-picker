@@ -33,6 +33,7 @@ import {
   preferenceProfileFromSeed,
   willRetireChampion,
   type Candidate,
+  type GameRules,
   type GameState,
   type PreferenceProfile,
   type PreferencePreset,
@@ -72,6 +73,7 @@ import {
   type RefillCapacityResult,
   type RefillContext,
 } from "./game-refill";
+import { effectiveGameRules, validGameRules } from "./game-rules";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import type { AssetStore } from "./providers";
@@ -81,6 +83,7 @@ export class SelectionConflictError extends Error {}
 export class MissingGameError extends Error {}
 export class PreferencePresetLimitError extends Error {}
 export class PromptDeckError extends Error {}
+export class GameRulesError extends Error {}
 
 export interface GameServiceConfig {
   bufferTarget: number;
@@ -198,6 +201,40 @@ export class GameService {
       }
       const updated: GameState = { ...current, preferencePresets };
       await this.gameRepository.save(updated);
+      return updated;
+    });
+  }
+
+  async updateGameRules(rules: GameRules): Promise<GameState> {
+    if (!validGameRules(rules)) {
+      throw new GameRulesError("One or more game rules are out of range.");
+    }
+    return this.withStateLocks(async () => {
+      const [current, challengers] = await Promise.all([
+        this.gameRepository.load(),
+        this.challengerRepository.load(),
+      ]);
+      if (!current || !challengers) {
+        throw new MissingGameError("Start a game before editing its rules");
+      }
+      const updated: GameState = {
+        ...current,
+        gameRules: { ...rules },
+      };
+      let nextChallengers = backfillGeneratedPool(
+        challengers,
+        rules.poolMaximum,
+      );
+      const context = refillContext(updated, nextChallengers);
+      const capacity = context
+        ? this.addRefillCapacity(nextChallengers, context)
+        : { state: nextChallengers, jobs: [] };
+      nextChallengers = capacity.state;
+      await this.gameRepository.save(updated);
+      if (nextChallengers !== challengers) {
+        await this.challengerRepository.save(nextChallengers);
+      }
+      await this.ensureJobsEnqueued(capacity.jobs);
       return updated;
     });
   }
@@ -591,9 +628,19 @@ export class GameService {
       }
 
       const selectedAt = this.now();
-      const retirement = willRetireChampion(current, winnerSide);
+      const rules = this.rulesFor(current);
+      const retirement = willRetireChampion(
+        current,
+        winnerSide,
+        rules.championRetirementStreak,
+      );
       const inFlight = retirement
-        ? beginChampionRetirement(current, winnerSide, selectedAt)
+        ? beginChampionRetirement(
+            current,
+            winnerSide,
+            selectedAt,
+            rules.championRetirementStreak,
+          )
         : beginBufferedSelection(current, winnerSide, selectedAt);
       if (!inFlight) {
         throw new SelectionConflictError(
@@ -615,7 +662,7 @@ export class GameService {
         retainedWinner,
         rejectedCandidate,
         comparisonReceipt(current, winnerSide, selectedAt),
-        this.config,
+        { ...this.config, poolMaximum: rules.poolMaximum },
       );
       let preparedReadyHeads: BufferedCandidate[] = [];
       let nextGame = inFlight;
@@ -763,7 +810,10 @@ export class GameService {
       };
       let nextChallengers =
         outcome === "tie"
-          ? recordTie(baseline, left, right, receipt, this.config)
+          ? recordTie(baseline, left, right, receipt, {
+              ...this.config,
+              poolMaximum: this.rulesFor(current).poolMaximum,
+            })
           : recordBothLose(
               baseline,
               left,
@@ -902,7 +952,7 @@ export class GameService {
 
     const backfilled = backfillGeneratedPool(
       challengers,
-      this.config.poolMaximum,
+      this.rulesFor(game).poolMaximum,
     );
     if (backfilled !== challengers) {
       challengers = backfilled;
@@ -1532,7 +1582,7 @@ export class GameService {
     context: RefillContext,
   ): RefillCapacityResult {
     return planRefillCapacity(state, context, {
-      bufferTarget: this.config.bufferTarget,
+      bufferTarget: this.rulesFor(context.game).bufferTarget,
       leaderboardVisualProfile: this.currentLeaderboardVisualProfile(
         state,
         context.game,
@@ -1603,7 +1653,10 @@ export class GameService {
             game.round.leftCandidate,
             game.round.rightCandidate,
             receipt,
-            this.config,
+            {
+              ...this.config,
+              poolMaximum: this.rulesFor(game).poolMaximum,
+            },
           )
         : pending.kind === "both-lose"
           ? recordBothLose(
@@ -1618,7 +1671,10 @@ export class GameService {
               candidateAt(game.round, pending.winnerSide),
               candidateAt(game.round, oppositeSide(pending.winnerSide)),
               receipt,
-              this.config,
+              {
+                ...this.config,
+                poolMaximum: this.rulesFor(game).poolMaximum,
+              },
             );
     await this.challengerRepository.save(compared);
     return compared;
@@ -1841,7 +1897,7 @@ export class GameService {
       recentCandidateIds,
       random: this.random,
       delayMs: this.config.fallbackDelayMs,
-      maximumConsecutiveDraws: this.config.fallbackMaximumConsecutive,
+      maximumConsecutiveDraws: this.rulesFor(game).fallbackMaximumConsecutive,
     });
   }
 
@@ -1884,7 +1940,7 @@ export class GameService {
         recentCandidateIds,
         random: this.random,
         delayMs: this.config.fallbackDelayMs,
-        maximumConsecutiveDraws: this.config.fallbackMaximumConsecutive,
+        maximumConsecutiveDraws: this.rulesFor(game).fallbackMaximumConsecutive,
       },
       fallbackCount,
     );
@@ -2056,6 +2112,10 @@ export class GameService {
     const updated = { ...game };
     delete updated.generationNotice;
     return updated;
+  }
+
+  private rulesFor(game: GameState): GameRules {
+    return effectiveGameRules(game, this.config);
   }
 
   private withStateLocks<T>(operation: () => Promise<T>): Promise<T> {

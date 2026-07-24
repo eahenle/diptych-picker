@@ -169,6 +169,15 @@ const gameStateSchema: z.ZodType<GameState> = z
       )
       .max(20)
       .optional(),
+    gameRules: z
+      .object({
+        bufferTarget: z.number().int().min(1).max(10),
+        poolMaximum: z.number().int().min(2).max(50),
+        championRetirementStreak: z.number().int().min(2).max(50),
+        fallbackMaximumConsecutive: z.number().int().min(1).max(50),
+      })
+      .strict()
+      .optional(),
     promptDeck: z
       .object({
         enabled: z.boolean(),

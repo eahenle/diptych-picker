@@ -33,6 +33,12 @@ const state: GameState = {
   },
   history: [],
   preferenceSeed: "seed",
+  gameRules: {
+    bufferTarget: 4,
+    poolMaximum: 24,
+    championRetirementStreak: 8,
+    fallbackMaximumConsecutive: 6,
+  },
 };
 
 describe("JsonGameRepository", () => {

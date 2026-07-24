@@ -663,6 +663,64 @@ test("persists a fine-grained preference profile and composes generation context
   expect(state.game.preferenceRevisions).toHaveLength(2);
 });
 
+test("edits durable game rules and applies the champion streak immediately", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByText("Game rules", { exact: true }).click();
+  await expect(page.getByLabel("Ready queue target")).toHaveValue("5");
+  await page.getByLabel("Ready queue target").fill("3");
+  await page.getByLabel("Reusable pool capacity").fill("6");
+  await page.getByLabel("Champion streak limit").fill("2");
+  await page.getByLabel("Fallback draw limit").fill("4");
+
+  const rulesResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/rules") &&
+      response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Apply rules" }).click();
+  expect((await rulesResponse).status()).toBe(200);
+
+  const rules = await (await request.get("/api/game/rules")).json();
+  expect(rules).toEqual({
+    rules: {
+      bufferTarget: 3,
+      poolMaximum: 6,
+      championRetirementStreak: 2,
+      fallbackMaximumConsecutive: 4,
+    },
+  });
+  const leaderboard = await (await request.get("/api/game/leaderboard")).json();
+  expect(leaderboard.poolMaximum).toBe(6);
+  expect(leaderboard.entries).toHaveLength(6);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByText("Game rules", { exact: true }).click();
+  await expect(page.getByLabel("Ready queue target")).toHaveValue("3");
+  await expect(page.getByLabel("Reusable pool capacity")).toHaveValue("6");
+  await expect(page.getByLabel("Champion streak limit")).toHaveValue("2");
+  await expect(page.getByLabel("Fallback draw limit")).toHaveValue("4");
+  await page.keyboard.press("Escape");
+
+  const originalLeft = await page
+    .getByTestId("candidate-card-left")
+    .getAttribute("data-candidate-id");
+  await select(page, "left", 2);
+  await select(page, "left", 3);
+  await expect(page.getByTestId("candidate-card-left")).not.toHaveAttribute(
+    "data-candidate-id",
+    originalLeft!,
+  );
+  const state = await (await request.get("/api/game")).json();
+  expect(state.game.round).toMatchObject({
+    retainedCandidateId: null,
+    winStreak: 0,
+  });
+});
+
 test("saves and applies named preference presets as drafts", async ({
   page,
   request,

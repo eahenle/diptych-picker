@@ -564,18 +564,18 @@ export function updateElo(
   };
 }
 
-export function admitGeneratedCandidate(
-  state: ChallengerState,
-  candidateId: string,
-  poolMaximum = DEFAULT_POOL_MAXIMUM,
-): ChallengerState {
+function effectivePoolMaximum(poolMaximum: number): number {
   const configuredMaximum = Number.isFinite(poolMaximum)
     ? Math.floor(poolMaximum)
     : DEFAULT_POOL_MAXIMUM;
-  const effectiveMaximum = Math.min(
-    DEFAULT_POOL_MAXIMUM,
-    Math.max(0, configuredMaximum),
-  );
+  return Math.min(DEFAULT_POOL_MAXIMUM, Math.max(0, configuredMaximum));
+}
+
+export function resizeCandidatePool(
+  state: ChallengerState,
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): ChallengerState {
+  const effectiveMaximum = effectivePoolMaximum(poolMaximum);
   const rankedMembers = state.ratings
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => item.poolMember)
@@ -593,10 +593,19 @@ export function admitGeneratedCandidate(
       : state.ratings.map((item) =>
           excessMembers.has(item) ? { ...item, poolMember: false } : item,
         );
-  const repairedState =
-    repairedRatings === state.ratings
-      ? state
-      : { ...state, ratings: repairedRatings };
+  return repairedRatings === state.ratings
+    ? state
+    : { ...state, ratings: repairedRatings };
+}
+
+export function admitGeneratedCandidate(
+  state: ChallengerState,
+  candidateId: string,
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): ChallengerState {
+  const effectiveMaximum = effectivePoolMaximum(poolMaximum);
+  const repairedState = resizeCandidatePool(state, poolMaximum);
+  const repairedRatings = repairedState.ratings;
   const candidate = repairedRatings.find(
     (item) => item.candidate.id === candidateId,
   );
@@ -640,7 +649,8 @@ export function backfillGeneratedPool(
   state: ChallengerState,
   poolMaximum = DEFAULT_POOL_MAXIMUM,
 ): ChallengerState {
-  return state.ratings
+  const resized = resizeCandidatePool(state, poolMaximum);
+  return resized.ratings
     .filter(
       (item) =>
         item.source === "generated" &&
@@ -655,7 +665,7 @@ export function backfillGeneratedPool(
     .reduce(
       (current, { item }) =>
         admitGeneratedCandidate(current, item.candidate.id, poolMaximum),
-      state,
+      resized,
     );
 }
 

@@ -7,6 +7,19 @@ export type PreferenceAdaptationFreedom =
   "frozen" | PreferenceAdaptationStrength;
 export const GENERATION_JOB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 export const CHAMPION_RETIREMENT_STREAK = 10;
+export const GAME_RULE_BOUNDS = {
+  bufferTarget: { min: 1, max: 10 },
+  poolMaximum: { min: 2, max: 50 },
+  championRetirementStreak: { min: 2, max: 50 },
+  fallbackMaximumConsecutive: { min: 1, max: 50 },
+} as const;
+
+export interface GameRules {
+  bufferTarget: number;
+  poolMaximum: number;
+  championRetirementStreak: number;
+  fallbackMaximumConsecutive: number;
+}
 
 export interface PreferenceProfile {
   themes: string;
@@ -262,6 +275,7 @@ export interface GameState {
   preferenceProfile?: PreferenceProfile;
   preferenceRevisions?: PreferenceProfileSnapshot[];
   preferencePresets?: PreferencePreset[];
+  gameRules?: GameRules;
   promptDeck?: PromptDeck;
   variationSource?: VariationSource;
   pendingSelection?: PendingSelection;
@@ -517,11 +531,12 @@ export function beginBufferedSelection(
 export function willRetireChampion(
   state: GameState,
   winnerSide: Side,
+  retirementStreak = CHAMPION_RETIREMENT_STREAK,
 ): boolean {
   const winner = candidateAt(state.round, winnerSide);
   return (
     state.round.retainedCandidateId === winner.id &&
-    state.round.winStreak + 1 >= CHAMPION_RETIREMENT_STREAK
+    state.round.winStreak + 1 >= retirementStreak
   );
 }
 
@@ -529,9 +544,10 @@ export function beginChampionRetirement(
   state: GameState,
   winnerSide: Side,
   selectedAt: string,
+  retirementStreak = CHAMPION_RETIREMENT_STREAK,
 ): GameState | null {
   if (state.round.status === "generating") return null;
-  if (!willRetireChampion(state, winnerSide)) {
+  if (!willRetireChampion(state, winnerSide, retirementStreak)) {
     throw new Error("The selected candidate has not reached retirement");
   }
 
@@ -839,6 +855,8 @@ export function mergeServerResult(
   winnerSide: Side,
 ): GameState {
   const currentWinner = candidateAt(current.round, winnerSide);
+  const responseWinner = candidateAt(response.round, winnerSide);
+  if (responseWinner.id !== currentWinner.id) return response;
 
   return {
     ...response,

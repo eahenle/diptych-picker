@@ -385,6 +385,18 @@ describe("round transitions", () => {
     });
   });
 
+  it("uses a per-game champion streak limit", () => {
+    const initial = game();
+    initial.round.retainedCandidateId = initial.round.leftCandidate.id;
+    initial.round.winStreak = 1;
+
+    expect(willRetireChampion(initial, "left", 2)).toBe(true);
+    expect(
+      beginChampionRetirement(initial, "left", "2026-07-16T00:10:00.000Z", 2)
+        ?.pendingSelection,
+    ).toMatchObject({ kind: "retirement", winnerSide: "left" });
+  });
+
   it("requires two fresh distinct candidates to finish retirement", () => {
     const initial = game();
     initial.round.retainedCandidateId = initial.round.rightCandidate.id;
@@ -586,4 +598,21 @@ describe("round transitions", () => {
       expect(merged.round.winStreak).toBe(1);
     },
   );
+
+  it("accepts both server replacements after champion retirement", () => {
+    const current = game();
+    const response = {
+      ...current,
+      round: {
+        ...current.round,
+        leftCandidate: candidate("left-2", "left"),
+        rightCandidate: candidate("right-2", "right"),
+        roundNumber: 2,
+        retainedCandidateId: null,
+        winStreak: 0,
+      },
+    };
+
+    expect(mergeServerResult(current, response, "left")).toBe(response);
+  });
 });

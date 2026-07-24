@@ -14,11 +14,13 @@ import {
   type PreferenceProfile,
   type PreferencePreset,
   type PreferenceProfileSnapshot,
+  type GameRules,
   type PromptDeck,
   type VariationSource,
 } from "@/domain/game";
 import { ModalShell } from "./modal-shell";
 import { PromptDeckEditor } from "./prompt-deck-editor";
+import { GameRulesEditor } from "./game-rules-editor";
 import modalStyles from "./game-modal.module.css";
 import styles from "./preference-profile-modal.module.css";
 
@@ -93,6 +95,9 @@ interface PreferenceProfileModalProps {
   promptDeck: PromptDeck | undefined;
   promptDeckSaving: boolean;
   promptDeckError: string | null;
+  gameRules: GameRules | null;
+  gameRulesSaving: boolean;
+  gameRulesError: string | null;
   selectionBoundWait: boolean;
   onClose: () => void;
   onSave: () => void;
@@ -107,6 +112,7 @@ interface PreferenceProfileModalProps {
   onCreatePromptCard: ComponentProps<typeof PromptDeckEditor>["onCreate"];
   onUpdatePromptDeck: ComponentProps<typeof PromptDeckEditor>["onUpdate"];
   onBlendPromptCards: ComponentProps<typeof PromptDeckEditor>["onBlend"];
+  onUpdateGameRules: (rules: GameRules) => Promise<boolean>;
   onFieldChange: <Key extends PreferenceField>(
     key: Key,
     value: PreferenceProfile[Key],
@@ -130,6 +136,9 @@ export function PreferenceProfileModal({
   promptDeck,
   promptDeckSaving,
   promptDeckError,
+  gameRules,
+  gameRulesSaving,
+  gameRulesError,
   selectionBoundWait,
   onClose,
   onSave,
@@ -141,12 +150,18 @@ export function PreferenceProfileModal({
   onCreatePromptCard,
   onUpdatePromptDeck,
   onBlendPromptCards,
+  onUpdateGameRules,
   onFieldChange,
   onFreedomChange,
 }: PreferenceProfileModalProps) {
   const sourceInputRef = useRef<HTMLInputElement | null>(null);
   const [presetName, setPresetName] = useState("");
-  const busy = saving || sourceAnalyzing || presetSaving || promptDeckSaving;
+  const busy =
+    saving ||
+    sourceAnalyzing ||
+    presetSaving ||
+    promptDeckSaving ||
+    gameRulesSaving;
   const adaptationFreedom = preferenceAdaptationFreedom(profile);
   const adaptationFreedomValue = {
     frozen: 0,
@@ -257,6 +272,12 @@ export function PreferenceProfileModal({
           onCreate={onCreatePromptCard}
           onUpdate={onUpdatePromptDeck}
           onBlend={onBlendPromptCards}
+        />
+        <GameRulesEditor
+          rules={gameRules}
+          busy={busy}
+          error={gameRulesError}
+          onSave={onUpdateGameRules}
         />
         <details className={styles.presets}>
           <summary>
