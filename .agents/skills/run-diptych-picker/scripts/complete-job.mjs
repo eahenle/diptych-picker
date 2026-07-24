@@ -11,6 +11,7 @@ import {
   dataDirectory,
   exportDirectory,
   JOB_ID,
+  LEASE_TOKEN,
   parseArgs,
   publishTerminal,
   required,
@@ -45,6 +46,10 @@ const proposalSchema = z
 const args = parseArgs(process.argv.slice(2));
 const jobId = required(args, "job");
 if (!JOB_ID.test(jobId)) throw new Error("Invalid generation job ID");
+const leaseToken = args["lease-token"];
+if (leaseToken !== undefined && !LEASE_TOKEN.test(leaseToken)) {
+  throw new Error("Invalid lease token");
+}
 const proposal = proposalSchema.parse(
   JSON.parse(await readFile(required(args, "proposal-file"), "utf8")),
 );
@@ -52,7 +57,7 @@ const imagePath = required(args, "image");
 const root = dataDirectory();
 const mailbox = join(root, "agent-mailbox");
 
-const activeJob = await assertActiveJob(mailbox, jobId);
+const activeJob = await assertActiveJob(mailbox, jobId, leaseToken);
 if (
   activeJob.kind === "source-profile" ||
   activeJob.kind === "leaderboard-profile" ||
@@ -119,7 +124,7 @@ if (
   throw new Error("Decoded PNG dimensions do not match its metadata");
 }
 
-await reserveOutcome(mailbox, jobId, "completed");
+await reserveOutcome(mailbox, jobId, "completed", leaseToken);
 
 const candidateId = `challenger-${jobId}`;
 const filename = `${createHash("sha256").update(source).digest("hex")}.png`;

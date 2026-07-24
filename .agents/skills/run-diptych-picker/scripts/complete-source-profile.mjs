@@ -7,6 +7,7 @@ import {
   assertActiveJob,
   dataDirectory,
   JOB_ID,
+  LEASE_TOKEN,
   parseArgs,
   publishTerminal,
   required,
@@ -35,11 +36,15 @@ const analysisSchema = z
 const args = parseArgs(process.argv.slice(2));
 const jobId = required(args, "job");
 if (!JOB_ID.test(jobId)) throw new Error("Invalid profile-analysis job ID");
+const leaseToken = args["lease-token"];
+if (leaseToken !== undefined && !LEASE_TOKEN.test(leaseToken)) {
+  throw new Error("Invalid lease token");
+}
 const analysis = analysisSchema.parse(
   JSON.parse(await readFile(required(args, "profile-file"), "utf8")),
 );
 const mailbox = join(dataDirectory(), "agent-mailbox");
-const activeJob = await assertActiveJob(mailbox, jobId);
+const activeJob = await assertActiveJob(mailbox, jobId, leaseToken);
 if (
   activeJob.kind !== "source-profile" &&
   activeJob.kind !== "leaderboard-profile"
@@ -57,7 +62,7 @@ for (const sourceImage of sourceImages) {
   }
 }
 
-await reserveOutcome(mailbox, jobId, "completed");
+await reserveOutcome(mailbox, jobId, "completed", leaseToken);
 const published = await publishTerminal(mailbox, jobId, "completed", {
   jobId,
   kind: activeJob.kind,

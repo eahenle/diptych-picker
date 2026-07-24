@@ -64,6 +64,20 @@ function optionalPositiveInteger(
   return parsed;
 }
 
+function optionalLeaseDuration(
+  name: string,
+  value: string | undefined,
+): number | undefined {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 10_000 || parsed > 600_000) {
+    throw new Error(`${name} must be an integer from 10000 through 600000`);
+  }
+  return parsed;
+}
+
 const dataDirectory = join(
   /* turbopackIgnore: true */ process.cwd(),
   process.env.LOCAL_DATA_DIR ?? ".local-data",
@@ -106,6 +120,10 @@ const coProcAcknowledgementTimeout = optionalPositiveInteger(
   "CO_PROC_GENERATION_ACK_TIMEOUT_MS",
   process.env.CO_PROC_GENERATION_ACK_TIMEOUT_MS,
 );
+const coProcLeaseDuration = optionalLeaseDuration(
+  "CO_PROC_GENERATION_LEASE_MS",
+  process.env.CO_PROC_GENERATION_LEASE_MS,
+);
 if (mockMode && process.env.NODE_ENV === "production") {
   throw new Error("The deterministic mock worker is test-only");
 }
@@ -142,6 +160,7 @@ export const generationMailbox =
                 runtimeRoot: process.env.CO_PROC_RUNTIME_ROOT,
                 readyTimeoutMs: coProcReadyTimeout,
                 acknowledgementTimeoutMs: coProcAcknowledgementTimeout,
+                leaseDurationMs: coProcLeaseDuration,
               }),
           ),
         ),

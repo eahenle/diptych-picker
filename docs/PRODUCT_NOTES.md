@@ -31,6 +31,21 @@ not sufficient reason to introduce a breaking save, API, or workflow change.
 Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
 
+## 2026-07-24
+
+### Durable persistent-worker leases
+
+The opt-in co-proc generation frame now carries a one-use lease token, durable
+lease path, and bounded renewal duration. A persistent peer must atomically
+move the pending job to active and create its owner-only lease before
+acknowledging delivery. Renewals and terminal completion or failure require the
+same token; exclusive outcome reservations retain that owner across an
+idempotent retry. The mailbox monitor skips live leases, revokes expired leases
+under a per-job filesystem lock, and resumes them during ordinary polling
+without requiring a restart. Immutable completed/failed files and app
+reconciliation remain authoritative while direct live result frames stay
+staged.
+
 ## 2026-07-23
 
 ### Acknowledged persistent-channel dispatch

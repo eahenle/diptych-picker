@@ -540,6 +540,8 @@ describe("FileGenerationMailbox", () => {
     await writeFile(join(root, "active", "job-1.json"), "active\n", "utf8");
     await mkdir(join(root, "outcomes"), { recursive: true });
     await writeFile(join(root, "outcomes", "job-1.json"), "reserved\n", "utf8");
+    await mkdir(join(root, "leases"), { recursive: true });
+    await writeFile(join(root, "leases", "job-1.json"), "leased\n", "utf8");
 
     await mailbox.archive("job-1");
 
@@ -550,6 +552,9 @@ describe("FileGenerationMailbox", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       access(join(root, "outcomes", "job-1.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      access(join(root, "leases", "job-1.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 

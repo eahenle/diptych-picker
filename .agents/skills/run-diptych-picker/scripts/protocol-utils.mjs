@@ -1,7 +1,23 @@
-import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 export const JOB_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+export const CHANNEL_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+export const LEASE_TOKEN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const MIN_LEASE_MS = 10_000;
+export const MAX_LEASE_MS = 600_000;
+const LEASE_LOCK_TIMEOUT_MS = 5_000;
+const STALE_LEASE_LOCK_MS = 30_000;
 
 export function dataDirectory() {
   return resolve(process.cwd(), process.env.LOCAL_DATA_DIR ?? ".local-data");
@@ -46,14 +62,24 @@ export function required(values, name) {
   return value;
 }
 
-export async function assertActiveJob(mailbox, jobId) {
-  const path = join(mailbox, "active", `${jobId}.json`);
-  const active = await readJson(path, `No active job ${jobId}`);
-  if (!active || active.id !== jobId) {
-    throw new Error(`Active job ${jobId} contains another job ID`);
-  }
-  validateJobKind(active);
-  return active;
+export async function assertActiveJob(mailbox, jobId, leaseToken) {
+  return withJobLeaseLock(mailbox, jobId, async () => {
+    const active = await readActiveJob(mailbox, jobId);
+    const reservation = await readJsonIfExists(
+      join(mailbox, "outcomes", `${jobId}.json`),
+    );
+    if (reservation) {
+      assertOutcomeReservation(
+        reservation,
+        jobId,
+        reservation.outcome,
+        leaseToken,
+      );
+      return active;
+    }
+    await assertLeaseOwnership(mailbox, jobId, leaseToken);
+    return active;
+  });
 }
 
 export function validateJobKind(job) {
@@ -169,23 +195,39 @@ function validProfileSource(sourceImage) {
   );
 }
 
-export async function reserveOutcome(mailbox, jobId, outcome) {
-  const opposite = outcome === "completed" ? "failed" : "completed";
-  const oppositeResult = await readJsonIfExists(
-    join(mailbox, opposite, `${jobId}.json`),
-  );
-  if (oppositeResult) {
-    throw new Error(`Job ${jobId} already published the ${opposite} outcome`);
-  }
+export async function reserveOutcome(mailbox, jobId, outcome, leaseToken) {
+  return withJobLeaseLock(mailbox, jobId, async () => {
+    const opposite = outcome === "completed" ? "failed" : "completed";
+    const oppositeResult = await readJsonIfExists(
+      join(mailbox, opposite, `${jobId}.json`),
+    );
+    if (oppositeResult) {
+      throw new Error(`Job ${jobId} already published the ${opposite} outcome`);
+    }
 
-  const path = join(mailbox, "outcomes", `${jobId}.json`);
-  const reservation = {
-    jobId,
-    outcome,
-    reservedAt: new Date().toISOString(),
-  };
-  const created = await atomicCreateJson(path, reservation);
-  const recorded = created ? reservation : await readJson(path);
+    const path = join(mailbox, "outcomes", `${jobId}.json`);
+    const existing = await readJsonIfExists(path);
+    if (existing) {
+      assertOutcomeReservation(existing, jobId, outcome, leaseToken);
+      return existing;
+    }
+
+    await readActiveJob(mailbox, jobId);
+    await assertLeaseOwnership(mailbox, jobId, leaseToken);
+    const reservation = {
+      jobId,
+      outcome,
+      reservedAt: new Date().toISOString(),
+      ...(leaseToken ? { leaseToken } : {}),
+    };
+    const created = await atomicCreateJson(path, reservation);
+    const recorded = created ? reservation : await readJson(path);
+    assertOutcomeReservation(recorded, jobId, outcome, leaseToken);
+    return recorded;
+  });
+}
+
+function assertOutcomeReservation(recorded, jobId, outcome, leaseToken) {
   if (
     recorded.jobId !== jobId ||
     (recorded.outcome !== "completed" && recorded.outcome !== "failed")
@@ -197,7 +239,289 @@ export async function reserveOutcome(mailbox, jobId, outcome) {
       `Job ${jobId} reserved the ${recorded.outcome} outcome; cannot publish ${outcome}`,
     );
   }
-  return recorded;
+  if ((recorded.leaseToken ?? undefined) !== (leaseToken ?? undefined)) {
+    throw new Error(`Job ${jobId} outcome is owned by another lease`);
+  }
+}
+
+export function leaseDuration(value) {
+  const parsed = Number(value);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < MIN_LEASE_MS ||
+    parsed > MAX_LEASE_MS
+  ) {
+    throw new Error(
+      `Lease duration must be an integer from ${MIN_LEASE_MS} through ${MAX_LEASE_MS}`,
+    );
+  }
+  return parsed;
+}
+
+export async function claimJobLease(
+  mailbox,
+  jobId,
+  channel,
+  token,
+  durationMs,
+) {
+  if (!JOB_ID.test(jobId)) throw new Error("Invalid generation job ID");
+  if (!CHANNEL_NAME.test(channel)) throw new Error("Invalid co-proc channel");
+  if (!LEASE_TOKEN.test(token)) throw new Error("Invalid lease token");
+  const validatedDuration = leaseDuration(durationMs);
+
+  return withJobLeaseLock(mailbox, jobId, async () => {
+    if (await hasTerminalResult(mailbox, jobId)) {
+      throw new Error(`Job ${jobId} is already terminal`);
+    }
+    const existing = await readJobLease(mailbox, jobId);
+    const activePath = join(mailbox, "active", `${jobId}.json`);
+    const pendingPath = join(mailbox, "pending", `${jobId}.json`);
+    if (existing) {
+      if (
+        existing.token === token &&
+        existing.channel === channel &&
+        !leaseExpired(existing)
+      ) {
+        await readActiveJob(mailbox, jobId);
+        return existing;
+      }
+      if (!leaseExpired(existing)) {
+        throw new Error(`Job ${jobId} already has a live lease`);
+      }
+      await expireJobLease(mailbox, existing);
+    }
+    if (await readJsonIfExists(activePath)) {
+      throw new Error(`Job ${jobId} is already active without this lease`);
+    }
+    const pendingJob = await readJson(
+      pendingPath,
+      `No pending job ${jobId} to lease`,
+    );
+    if (pendingJob.id !== jobId) {
+      throw new Error(`Pending job ${jobId} contains another job ID`);
+    }
+    validateJobKind(pendingJob);
+
+    const now = new Date();
+    const lease = {
+      version: 1,
+      jobId,
+      channel,
+      token,
+      claimedAt: now.toISOString(),
+      renewedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + validatedDuration).toISOString(),
+    };
+    const leasePath = jobLeasePath(mailbox, jobId);
+    await mkdir(dirname(leasePath), { recursive: true, mode: 0o700 });
+    await chmod(dirname(leasePath), 0o700);
+    if (!(await atomicCreateJson(leasePath, lease, { mode: 0o600 }))) {
+      throw new Error(`Job ${jobId} lease appeared during claim`);
+    }
+    try {
+      await mkdir(dirname(activePath), { recursive: true });
+      await rename(pendingPath, activePath);
+    } catch (error) {
+      await rm(leasePath, { force: true });
+      throw error;
+    }
+    return lease;
+  });
+}
+
+export async function renewJobLease(mailbox, jobId, token, durationMs) {
+  if (!JOB_ID.test(jobId)) throw new Error("Invalid generation job ID");
+  if (!LEASE_TOKEN.test(token)) throw new Error("Invalid lease token");
+  const validatedDuration = leaseDuration(durationMs);
+
+  return withJobLeaseLock(mailbox, jobId, async () => {
+    await readActiveJob(mailbox, jobId);
+    if (await hasTerminalResult(mailbox, jobId)) {
+      throw new Error(`Job ${jobId} is already terminal`);
+    }
+    const existing = await readJobLease(mailbox, jobId);
+    if (!existing || existing.token !== token) {
+      throw new Error(`Job ${jobId} is owned by another lease`);
+    }
+    if (leaseExpired(existing)) {
+      throw new Error(`Job ${jobId} lease has expired`);
+    }
+    const now = new Date();
+    const renewed = {
+      ...existing,
+      renewedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + validatedDuration).toISOString(),
+    };
+    await writeJsonAtomic(jobLeasePath(mailbox, jobId), renewed);
+    return renewed;
+  });
+}
+
+export async function claimUnleasedJob(
+  mailbox,
+  pendingPath,
+  activePath,
+  jobId,
+) {
+  return withJobLeaseLock(mailbox, jobId, async () => {
+    const lease = await readJobLease(mailbox, jobId);
+    if (lease && !leaseExpired(lease)) return false;
+    if (lease) await expireJobLease(mailbox, lease);
+    try {
+      await rename(pendingPath, activePath);
+      return true;
+    } catch (error) {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    }
+  });
+}
+
+export async function leaseRecoveryState(mailbox, jobId) {
+  return withJobLeaseLock(mailbox, jobId, async () => {
+    const lease = await readJobLease(mailbox, jobId);
+    if (!lease) return "unleased";
+    if (!leaseExpired(lease)) return "live";
+    return "expired";
+  });
+}
+
+export async function releaseExpiredJobLease(mailbox, jobId) {
+  return withJobLeaseLock(mailbox, jobId, async () => {
+    const lease = await readJobLease(mailbox, jobId);
+    if (!lease || !leaseExpired(lease)) return false;
+    await expireJobLease(mailbox, lease);
+    return true;
+  });
+}
+
+export async function readJobLease(mailbox, jobId) {
+  const lease = await readJsonIfExists(jobLeasePath(mailbox, jobId));
+  if (!lease) return null;
+  if (
+    lease.version !== 1 ||
+    lease.jobId !== jobId ||
+    !CHANNEL_NAME.test(lease.channel ?? "") ||
+    !LEASE_TOKEN.test(lease.token ?? "") ||
+    !validTimestamp(lease.claimedAt) ||
+    !validTimestamp(lease.renewedAt) ||
+    !validTimestamp(lease.expiresAt) ||
+    Date.parse(lease.expiresAt) <= Date.parse(lease.renewedAt)
+  ) {
+    throw new Error(`Invalid lease record for job ${jobId}`);
+  }
+  return lease;
+}
+
+async function assertLeaseOwnership(mailbox, jobId, leaseToken) {
+  const lease = await readJobLease(mailbox, jobId);
+  if (!lease) {
+    if (leaseToken) {
+      throw new Error(`Job ${jobId} has no matching lease`);
+    }
+    return;
+  }
+  if (leaseExpired(lease)) {
+    throw new Error(`Job ${jobId} lease has expired`);
+  }
+  if (!leaseToken || lease.token !== leaseToken) {
+    throw new Error(`Job ${jobId} is owned by another lease`);
+  }
+}
+
+async function readActiveJob(mailbox, jobId) {
+  const path = join(mailbox, "active", `${jobId}.json`);
+  const active = await readJson(path, `No active job ${jobId}`);
+  if (!active || active.id !== jobId) {
+    throw new Error(`Active job ${jobId} contains another job ID`);
+  }
+  validateJobKind(active);
+  return active;
+}
+
+function leaseExpired(lease, now = Date.now()) {
+  return Date.parse(lease.expiresAt) <= now;
+}
+
+async function expireJobLease(mailbox, lease) {
+  const expiredDirectory = join(mailbox, "expired-leases");
+  await mkdir(expiredDirectory, { recursive: true, mode: 0o700 });
+  await chmod(expiredDirectory, 0o700);
+  await rename(
+    jobLeasePath(mailbox, lease.jobId),
+    join(expiredDirectory, `${lease.jobId}.${lease.token}.json`),
+  ).catch((error) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+}
+
+function jobLeasePath(mailbox, jobId) {
+  return join(mailbox, "leases", `${jobId}.json`);
+}
+
+function validTimestamp(value) {
+  return (
+    typeof value === "string" &&
+    Number.isFinite(Date.parse(value)) &&
+    value === new Date(value).toISOString()
+  );
+}
+
+async function withJobLeaseLock(mailbox, jobId, operation) {
+  const lockRoot = join(mailbox, "lease-locks");
+  const lockPath = join(lockRoot, `${jobId}.lock`);
+  await mkdir(lockRoot, { recursive: true, mode: 0o700 });
+  await chmod(lockRoot, 0o700);
+  const deadline = Date.now() + LEASE_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      await mkdir(lockPath);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      const lockStat = await stat(lockPath).catch((statError) => {
+        if (statError.code === "ENOENT") return null;
+        throw statError;
+      });
+      if (lockStat && Date.now() - lockStat.mtimeMs > STALE_LEASE_LOCK_MS) {
+        const stalePath = `${lockPath}.${crypto.randomUUID()}.stale`;
+        try {
+          await rename(lockPath, stalePath);
+          await rm(stalePath, { recursive: true, force: true });
+          continue;
+        } catch (renameError) {
+          if (renameError.code !== "ENOENT") throw renameError;
+        }
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out acquiring lease lock for job ${jobId}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  try {
+    return await operation();
+  } finally {
+    await rm(lockPath, { recursive: true, force: true });
+  }
+}
+
+async function writeJsonAtomic(destination, value) {
+  await mkdir(dirname(destination), { recursive: true });
+  const temporary = join(
+    dirname(destination),
+    `.${process.pid}.${crypto.randomUUID()}.tmp`,
+  );
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
+  try {
+    await rename(temporary, destination);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 export async function publishTerminal(mailbox, jobId, outcome, result) {
@@ -221,20 +545,21 @@ export async function hasTerminalResult(mailbox, jobId) {
   return Boolean(completed ?? failed);
 }
 
-export async function atomicCreateJson(destination, value) {
+export async function atomicCreateJson(destination, value, options) {
   return atomicCreateFile(
     destination,
     Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8"),
+    options,
   );
 }
 
-export async function atomicCreateFile(destination, contents) {
+export async function atomicCreateFile(destination, contents, options) {
   await mkdir(dirname(destination), { recursive: true });
   const temporary = join(
     dirname(destination),
     `.${process.pid}.${crypto.randomUUID()}.tmp`,
   );
-  await writeFile(temporary, contents, { flag: "wx" });
+  await writeFile(temporary, contents, { flag: "wx", ...options });
   try {
     await link(temporary, destination);
     return true;
