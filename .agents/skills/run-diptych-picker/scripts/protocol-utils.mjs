@@ -154,6 +154,27 @@ export function validateJobKind(job) {
     }
     return;
   }
+  if (kind === "prompt-card-writer") {
+    const sources = job.sources;
+    if (
+      !Array.isArray(sources) ||
+      sources.length < 3 ||
+      sources.length > 5 ||
+      sources.some(
+        (source) =>
+          typeof source.candidateId !== "string" ||
+          source.candidateId.length === 0 ||
+          typeof source.concept !== "string" ||
+          !Array.isArray(source.style) ||
+          !validProfileSource(source.sourceImage),
+      ) ||
+      new Set(sources.map(({ candidateId }) => candidateId)).size !==
+        sources.length
+    ) {
+      throw new Error(`Prompt-card writer job ${job.id} is invalid`);
+    }
+    return;
+  }
   if (kind === "refill") {
     if (!JOB_ID.test(job.sessionId ?? "")) {
       throw new Error(`Refill job ${job.id} requires a valid sessionId`);

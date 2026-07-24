@@ -310,6 +310,39 @@ const promptCardBlenderJobSchema = z
     path: ["cards"],
   });
 
+const promptCardWriterJobSchema = z
+  .object({
+    id: jobIdSchema,
+    kind: z.literal("prompt-card-writer"),
+    createdAt: timestampSchema,
+    sources: z
+      .array(
+        z
+          .object({
+            candidateId: nonBlankStringSchema.max(200),
+            concept: nonBlankStringSchema.max(240),
+            style: z.array(nonBlankStringSchema.max(80)).max(4),
+            sourceImage: profileSourceImageSchema,
+          })
+          .strict(),
+      )
+      .min(3)
+      .max(5),
+  })
+  .strict()
+  .superRefine((job, context) => {
+    const candidateIds = new Set(
+      job.sources.map(({ candidateId }) => candidateId),
+    );
+    if (candidateIds.size !== job.sources.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["sources"],
+        message: "Prompt-card writer sources must use unique candidate IDs",
+      });
+    }
+  });
+
 const discriminatedGenerationJobSchema = z.discriminatedUnion("kind", [
   challengerGenerationJobSchema,
   initialGenerationJobSchema,
@@ -338,6 +371,7 @@ const mailboxJobSchema = z.preprocess(
     leaderboardProfileJobSchema,
     promptCardEditorJobSchema,
     promptCardBlenderJobSchema,
+    promptCardWriterJobSchema,
   ]),
 );
 
@@ -468,6 +502,28 @@ const completedPromptCardBlenderResultSchema = z
   })
   .strict();
 
+const completedPromptCardWriterResultSchema = z
+  .object({
+    jobId: jobIdSchema,
+    kind: z.literal("prompt-card-writer"),
+    status: z.literal("completed"),
+    completedAt: timestampSchema,
+    sourceCandidateIds: z
+      .array(nonBlankStringSchema.max(200))
+      .min(3)
+      .max(5)
+      .superRefine((ids, context) => {
+        if (new Set(ids).size !== ids.length) {
+          context.addIssue({
+            code: "custom",
+            message: "Prompt-card writer source IDs must be unique",
+          });
+        }
+      }),
+    proposal: promptCardEditorProposalSchema,
+  })
+  .strict();
+
 const failedGenerationResultSchema = z
   .object({
     jobId: jobIdSchema,
@@ -506,12 +562,18 @@ const promptCardBlenderResultSchema = z.union([
   failedGenerationResultSchema,
 ]);
 
+const promptCardWriterResultSchema = z.union([
+  completedPromptCardWriterResultSchema,
+  failedGenerationResultSchema,
+]);
+
 const mailboxResultSchema = z.union([
   completedGenerationResultSchema,
   completedSourceProfileResultSchema,
   completedLeaderboardProfileResultSchema,
   completedPromptCardEditorResultSchema,
   completedPromptCardBlenderResultSchema,
+  completedPromptCardWriterResultSchema,
   failedGenerationResultSchema,
 ]);
 
@@ -532,18 +594,24 @@ export type PromptCardBlenderJob = z.infer<typeof promptCardBlenderJobSchema>;
 export type PromptCardBlenderResult = z.infer<
   typeof promptCardBlenderResultSchema
 >;
+export type PromptCardWriterJob = z.infer<typeof promptCardWriterJobSchema>;
+export type PromptCardWriterResult = z.infer<
+  typeof promptCardWriterResultSchema
+>;
 export type AgentJob =
   | GenerationJob
   | SourceProfileJob
   | LeaderboardProfileJob
   | PromptCardEditorJob
-  | PromptCardBlenderJob;
+  | PromptCardBlenderJob
+  | PromptCardWriterJob;
 export type AgentResult =
   | GenerationResult
   | SourceProfileResult
   | LeaderboardProfileResult
   | PromptCardEditorResult
-  | PromptCardBlenderResult;
+  | PromptCardBlenderResult
+  | PromptCardWriterResult;
 
 const reservedJobRecordSchema = z
   .object({
@@ -621,6 +689,15 @@ export interface PromptCardBlenderMailbox {
   archivePromptCardBlender(jobId: string): Promise<void>;
 }
 
+export interface PromptCardWriterMailbox {
+  enqueuePromptCardWriter(job: PromptCardWriterJob): Promise<void>;
+  readPromptCardWriterWork(jobId: string): Promise<PromptCardWriterJob | null>;
+  readPromptCardWriterResult(
+    jobId: string,
+  ): Promise<PromptCardWriterResult | null>;
+  archivePromptCardWriter(jobId: string): Promise<void>;
+}
+
 export class DuplicateGenerationJobError extends Error {}
 
 export class FileGenerationMailbox
@@ -629,7 +706,8 @@ export class FileGenerationMailbox
     SourceProfileMailbox,
     LeaderboardProfileMailbox,
     PromptCardEditorMailbox,
-    PromptCardBlenderMailbox
+    PromptCardBlenderMailbox,
+    PromptCardWriterMailbox
 {
   private static readonly inFlightEnqueues = new Map<string, string>();
 
@@ -663,6 +741,11 @@ export class FileGenerationMailbox
 
   async enqueuePromptCardBlender(job: PromptCardBlenderJob): Promise<void> {
     const validated = promptCardBlenderJobSchema.parse(job);
+    await this.enqueueValidated(validated);
+  }
+
+  async enqueuePromptCardWriter(job: PromptCardWriterJob): Promise<void> {
+    const validated = promptCardWriterJobSchema.parse(job);
     await this.enqueueValidated(validated);
   }
 
@@ -899,6 +982,36 @@ export class FileGenerationMailbox
     return result ? promptCardBlenderResultSchema.parse(result) : null;
   }
 
+  async readPromptCardWriterWork(
+    jobId: string,
+  ): Promise<PromptCardWriterJob | null> {
+    const validatedJobId = jobIdSchema.parse(jobId);
+    const pending = await this.readJobAt(
+      join(this.rootDirectory, "pending", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (pending) return promptCardWriterJobSchema.parse(pending);
+    const active = await this.readJobAt(
+      join(this.rootDirectory, "active", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (active) return promptCardWriterJobSchema.parse(active);
+    const record = await this.readValidated(
+      join(this.rootDirectory, "ids", `${validatedJobId}.json`),
+      generationJobRecordSchema,
+    );
+    return record?.state === "reserved"
+      ? promptCardWriterJobSchema.parse(record.job)
+      : null;
+  }
+
+  async readPromptCardWriterResult(
+    jobId: string,
+  ): Promise<PromptCardWriterResult | null> {
+    const result = await this.readMailboxResult(jobId);
+    return result ? promptCardWriterResultSchema.parse(result) : null;
+  }
+
   private async readMailboxResult(jobId: string): Promise<AgentResult | null> {
     const validatedJobId = jobIdSchema.parse(jobId);
     const [completed, failed] = await Promise.all([
@@ -976,6 +1089,10 @@ export class FileGenerationMailbox
   }
 
   archivePromptCardBlender(jobId: string): Promise<void> {
+    return this.archive(jobId);
+  }
+
+  archivePromptCardWriter(jobId: string): Promise<void> {
     return this.archive(jobId);
   }
 

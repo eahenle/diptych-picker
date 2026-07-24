@@ -19,10 +19,13 @@ normal implementation and play-testing loop.
        immutable lineage, and approval-gated repair suggestions.
 5. [x] Add model-assisted two-card blending that reuses the deck's durable,
        approval-gated suggestion machinery and records both immutable parents.
-6. [ ] Continue the persistent `co-proc` transport design in
+6. [x] Write prompt cards from sets of three to five generated favorites,
+       keeping the images immutable, the proposal approval-gated, and accepted
+       card lineage attributable to every source candidate.
+7. [ ] Continue the persistent `co-proc` transport design in
        [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md), keeping
        durable mailbox operation as the fallback during migration.
-7. [ ] After those foundations, consider one-step undo and tournament play.
+8. [ ] After those foundations, consider tournament play.
        The dedicated favorites gallery has shipped. Broad refactoring should
        follow feature boundaries instead of preceding them.
 
@@ -32,6 +35,20 @@ Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
 
 ## 2026-07-24
+
+### Prompt cards from favorite image sets
+
+The Favorites gallery lets the player select three to five generated favorites
+and request a model-authored card that captures their shared transferable
+composition, mood, medium, palette, and visual style. Curated seeds and private
+source uploads are ineligible. The app normalizes each selected candidate into
+a content-addressed, read-only source, records the exact source IDs in durable
+job intent, and rejects reordered or mismatched results during reconciliation.
+The returned card remains a suggestion until accepted or discarded in
+Preferences. Acceptance creates a new immutable card with all source candidate
+IDs preserved; it never modifies or replaces the selected images. Save export
+omits an in-flight writer job, and loading another save archives the current
+writer work before state changes.
 
 ### Correlated persistent-channel results
 
@@ -222,6 +239,10 @@ or discards it. The player can also select any two active cards and request a
 balanced model-assisted blend. That durable non-image job receives only the two
 immutable card snapshots and their influence ratio, returns one reviewable
 proposal, and creates a child carrying both parent IDs only after acceptance.
+The Favorites gallery similarly accepts three to five generated favorites for
+a dedicated writer job. It receives normalized immutable source images, returns
+one reviewable proposal, and records every source candidate ID only when the
+player accepts the card.
 
 ## 2026-07-20
 

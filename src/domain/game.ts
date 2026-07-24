@@ -65,6 +65,7 @@ export interface PromptCard {
   weight: number;
   tags: string[];
   parents: string[];
+  sourceCandidateIds?: string[];
   active: boolean;
   createdAt: string;
   stats: PromptCardStats;
@@ -116,10 +117,39 @@ export interface PromptCardBlendJobRecord {
   expectedJob: PromptCardBlendRequest;
 }
 
+export interface PromptCardWriterSource {
+  candidateId: string;
+  concept: string;
+  style: string[];
+  sourceImage: {
+    filename: string;
+    path: string;
+    contentType: "image/png";
+    width: number;
+    height: number;
+    byteLength: number;
+  };
+}
+
+export interface PromptCardWriterRequest {
+  id: string;
+  kind: "prompt-card-writer";
+  createdAt: string;
+  sources: PromptCardWriterSource[];
+}
+
+export interface PromptCardWriterJobRecord {
+  jobId: string;
+  sourceCandidateIds: string[];
+  enqueuedAt: string;
+  expectedJob: PromptCardWriterRequest;
+}
+
 export interface PromptCardSuggestion {
   id: string;
-  parentCardId: string;
+  parentCardId?: string;
   parentCardIds?: string[];
+  sourceCandidateIds?: string[];
   title: string;
   prompt: string;
   negativePrompt: string;
@@ -134,6 +164,7 @@ export interface PromptDeck {
   verdicts: PromptCardVerdict[];
   editorJob?: PromptCardEditorJobRecord | null;
   blendJob?: PromptCardBlendJobRecord | null;
+  writerJob?: PromptCardWriterJobRecord | null;
   suggestions?: PromptCardSuggestion[];
 }
 

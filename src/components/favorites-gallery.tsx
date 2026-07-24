@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- Favorite thumbnails use immutable local candidate assets. */
 
+import { useState } from "react";
 import type { FavoriteGalleryEntry } from "@/domain/challenger-state";
 import { ModalShell } from "./modal-shell";
 import modalStyles from "./game-modal.module.css";
@@ -13,10 +14,14 @@ interface FavoritesGalleryProps {
   error: string | null;
   favoriteError: string | null;
   favoriteSaving: string | null;
+  writerActive: boolean;
+  writerBusy: boolean;
+  writerError: string | null;
   onClose: () => void;
   onInspect: (candidate: FavoriteGalleryEntry["candidate"]) => void;
   onExplore: (candidate: FavoriteGalleryEntry["candidate"]) => void;
   onRemoveFavorite: (candidateId: string) => void;
+  onWritePromptCard: (candidateIds: string[]) => Promise<boolean>;
 }
 
 export function FavoritesGallery({
@@ -25,11 +30,39 @@ export function FavoritesGallery({
   error,
   favoriteError,
   favoriteSaving,
+  writerActive,
+  writerBusy,
+  writerError,
   onClose,
   onInspect,
   onExplore,
   onRemoveFavorite,
+  onWritePromptCard,
 }: FavoritesGalleryProps) {
+  const [writerSelection, setWriterSelection] = useState<string[]>([]);
+  const eligibleIds = new Set(
+    entries
+      .filter(({ source }) => source === "generated")
+      .map(({ candidate }) => candidate.id),
+  );
+  const selectedIds = writerSelection.filter((id) => eligibleIds.has(id));
+
+  const toggleWriterSource = (candidateId: string) => {
+    setWriterSelection((current) => {
+      const eligible = current.filter((id) => eligibleIds.has(id));
+      return eligible.includes(candidateId)
+        ? eligible.filter((id) => id !== candidateId)
+        : eligible.length < 5
+          ? [...eligible, candidateId]
+          : eligible;
+    });
+  };
+
+  const writePromptCard = async () => {
+    if (selectedIds.length < 3 || selectedIds.length > 5) return;
+    if (await onWritePromptCard(selectedIds)) setWriterSelection([]);
+  };
+
   return (
     <ModalShell
       className={`${modalStyles.dialog} ${modalStyles.wider}`}
@@ -54,6 +87,11 @@ export function FavoritesGallery({
         {favoriteError ? (
           <p className={modalStyles.alert} role="alert">
             {favoriteError}
+          </p>
+        ) : null}
+        {writerError ? (
+          <p className={modalStyles.alert} role="alert">
+            {writerError}
           </p>
         ) : null}
         {loading ? (
@@ -102,6 +140,23 @@ export function FavoritesGallery({
                     </small>
                   </span>
                   <div className={styles.actions}>
+                    {entry.source === "generated" ? (
+                      <button
+                        type="button"
+                        aria-pressed={selectedIds.includes(entry.candidate.id)}
+                        disabled={
+                          writerBusy ||
+                          writerActive ||
+                          (!selectedIds.includes(entry.candidate.id) &&
+                            selectedIds.length >= 5)
+                        }
+                        onClick={() => toggleWriterSource(entry.candidate.id)}
+                      >
+                        {selectedIds.includes(entry.candidate.id)
+                          ? "Selected for card"
+                          : "Select for card"}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => onExplore(entry.candidate)}
@@ -121,6 +176,27 @@ export function FavoritesGallery({
             ))}
           </ol>
         )}
+        {entries.some(({ source }) => source === "generated") ? (
+          <div className={styles.writerControls}>
+            <span>
+              {writerActive
+                ? "A card is being drafted from saved images."
+                : `${selectedIds.length}/5 generated favorites selected · choose at least 3`}
+            </span>
+            <button
+              type="button"
+              disabled={
+                writerBusy ||
+                writerActive ||
+                selectedIds.length < 3 ||
+                selectedIds.length > 5
+              }
+              onClick={() => void writePromptCard()}
+            >
+              {writerBusy ? "Starting writer…" : "Draft prompt card"}
+            </button>
+          </div>
+        ) : null}
         <div className={modalStyles.actions}>
           <button
             type="button"

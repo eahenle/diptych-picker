@@ -82,6 +82,7 @@
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
   margin-top: 2px;
 }
@@ -89,6 +90,7 @@
 .actions button {
   min-height: 34px;
   flex: 1;
+  flex-basis: 90px;
   padding: 0 9px;
   color: var(--muted);
   font-size: 10px;
@@ -96,6 +98,34 @@
   background: transparent;
   border: 1px solid var(--border);
   cursor: pointer;
+}
+
+.writerControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  background: rgba(180, 104, 73, 0.06);
+  border: 1px solid var(--border);
+}
+
+.writerControls button {
+  min-height: 36px;
+  padding: 0 14px;
+  color: var(--text);
+  font-weight: 700;
+  background: rgba(180, 104, 73, 0.12);
+  border: 1px solid var(--copper-bright);
+  cursor: pointer;
+}
+
+.writerControls button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .actions button:hover,
@@ -114,5 +144,10 @@
 @media (max-width: 600px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .writerControls {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

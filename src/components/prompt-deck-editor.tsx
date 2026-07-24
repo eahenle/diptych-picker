@@ -186,15 +186,25 @@ export function PromptDeckEditor({
           </p>
         ) : null}
 
+        {deck?.writerJob ? (
+          <p className={styles.editorStatus} role="status">
+            Writer is synthesizing a reviewable card from{" "}
+            <strong>
+              {deck.writerJob.sourceCandidateIds.length} favorites
+            </strong>
+            …
+          </p>
+        ) : null}
+
         {(deck?.suggestions ?? []).length > 0 ? (
           <section
             className={styles.suggestions}
-            aria-label="Editor suggestions"
+            aria-label="Prompt card suggestions"
           >
-            <strong>Editor suggestions</strong>
+            <strong>Prompt-card suggestions</strong>
             <small>
-              Review first. Accepting creates a new immutable child card; the
-              original is unchanged.
+              Review first. Accepting creates a new immutable card; source cards
+              and images stay unchanged.
             </small>
             <ul>
               {(deck?.suggestions ?? []).map((suggestion) => (
@@ -210,6 +220,11 @@ export function PromptDeckEditor({
                             "source card",
                         )
                         .join(" + ")}
+                    </small>
+                  ) : suggestion.sourceCandidateIds ? (
+                    <small>
+                      Written from {suggestion.sourceCandidateIds.length} saved
+                      generated images
                     </small>
                   ) : null}
                   <p>{suggestion.prompt}</p>

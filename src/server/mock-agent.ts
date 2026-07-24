@@ -16,6 +16,9 @@ import type {
   PromptCardEditorJob,
   PromptCardEditorMailbox,
   PromptCardEditorResult,
+  PromptCardWriterJob,
+  PromptCardWriterMailbox,
+  PromptCardWriterResult,
   SourceProfileJob,
   SourceProfileMailbox,
   SourceProfileResult,
@@ -93,6 +96,10 @@ export class MockAgentWorker {
     }
     if (job.kind === "prompt-card-blender") {
       await this.completePromptCardBlender(job);
+      return;
+    }
+    if (job.kind === "prompt-card-writer") {
+      await this.completePromptCardWriter(job);
       return;
     }
 
@@ -273,6 +280,37 @@ export class MockAgentWorker {
         tags: [...new Set([...first.tags, ...second.tags])].slice(0, 8),
         reasoningSummary:
           "Combines the strongest compatible qualities of both immutable source cards into one reviewable child.",
+      },
+    };
+    await this.publish("completed", job.id, result);
+  }
+
+  private async completePromptCardWriter(
+    job: PromptCardWriterJob,
+  ): Promise<void> {
+    const concepts = job.sources.map(({ concept }) => concept);
+    const tags = [...new Set(job.sources.flatMap(({ style }) => style))].slice(
+      0,
+      8,
+    );
+    const result: PromptCardWriterResult = {
+      jobId: job.id,
+      kind: "prompt-card-writer",
+      status: "completed",
+      completedAt: this.now(),
+      sourceCandidateIds: job.sources.map(({ candidateId }) => candidateId),
+      proposal: {
+        title: "Favorite-set synthesis",
+        prompt:
+          `Create a new image direction that synthesizes the transferable composition, mood, medium, and palette shared by ${concepts.join(", ")} without copying any source exactly.`.slice(
+            0,
+            1_000,
+          ),
+        negativePrompt:
+          "exact reproduction, recognizable identity, readable text, logos",
+        tags,
+        reasoningSummary:
+          "Extracts shared aesthetic qualities from the selected immutable generated favorites while preserving them as read-only sources.",
       },
     };
     await this.publish("completed", job.id, result);
@@ -478,6 +516,38 @@ export class MockPromptCardBlenderMailbox implements PromptCardBlenderMailbox {
 
   private async resume(job: PromptCardBlenderJob | null): Promise<void> {
     if (job && !(await this.mailbox.readPromptCardBlenderResult(job.id))) {
+      this.worker.schedule(job);
+    }
+  }
+}
+
+export class MockPromptCardWriterMailbox implements PromptCardWriterMailbox {
+  constructor(
+    private readonly mailbox: PromptCardWriterMailbox,
+    private readonly worker: MockAgentWorker,
+  ) {}
+
+  async enqueuePromptCardWriter(job: PromptCardWriterJob): Promise<void> {
+    await this.mailbox.enqueuePromptCardWriter(job);
+    this.worker.schedule(job);
+  }
+
+  async readPromptCardWriterWork(jobId: string) {
+    const job = await this.mailbox.readPromptCardWriterWork(jobId);
+    await this.resume(job);
+    return job;
+  }
+
+  readPromptCardWriterResult(jobId: string) {
+    return this.mailbox.readPromptCardWriterResult(jobId);
+  }
+
+  archivePromptCardWriter(jobId: string) {
+    return this.mailbox.archivePromptCardWriter(jobId);
+  }
+
+  private async resume(job: PromptCardWriterJob | null): Promise<void> {
+    if (job && !(await this.mailbox.readPromptCardWriterResult(job.id))) {
       this.worker.schedule(job);
     }
   }

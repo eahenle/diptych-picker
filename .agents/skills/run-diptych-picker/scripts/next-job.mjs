@@ -344,6 +344,7 @@ function priorityRank(job) {
   if (job.kind === "source-profile") return 1;
   if (job.kind === "prompt-card-editor") return 3;
   if (job.kind === "prompt-card-blender") return 3;
+  if (job.kind === "prompt-card-writer") return 3;
   if (job.kind === "leaderboard-profile") return 4;
   if (job.kind === "refill") return 5;
   return 2;

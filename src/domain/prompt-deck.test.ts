@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Candidate, GameState, PromptDeck } from "./game";
 import {
   createPromptCard,
+  createPromptCardWriterRequest,
   drawPromptCard,
   emptyPromptDeck,
   preparePromptCardEditorJob,
@@ -37,7 +38,39 @@ describe("prompt deck", () => {
       verdicts: [],
       editorJob: null,
       blendJob: null,
+      writerJob: null,
       suggestions: [],
+    });
+  });
+
+  it("prepares a writer request with immutable candidate sources", () => {
+    const sourceImage = {
+      filename: `${"a".repeat(64)}.png`,
+      path: `profile-sources/${"a".repeat(64)}.png`,
+      contentType: "image/png" as const,
+      width: 1024,
+      height: 1024,
+      byteLength: 2048,
+    };
+    expect(
+      createPromptCardWriterRequest(
+        ["one", "two", "three"].map((candidateId) => ({
+          candidateId,
+          concept: `Concept ${candidateId}`,
+          style: ["editorial"],
+          sourceImage,
+        })),
+        "writer-1",
+        "2026-07-21T11:00:00.000Z",
+      ),
+    ).toMatchObject({
+      id: "writer-1",
+      kind: "prompt-card-writer",
+      sources: [
+        { candidateId: "one" },
+        { candidateId: "two" },
+        { candidateId: "three" },
+      ],
     });
   });
 

@@ -253,6 +253,49 @@ function withPromptCardBlendJob(game: GameState): GameState {
   };
 }
 
+function withPromptCardWriterJob(game: GameState): GameState {
+  const sourceCandidateIds = ["favorite-1", "favorite-2", "favorite-3"];
+  const sources = sourceCandidateIds.map((candidateId, index) => {
+    const filename = `${String(index + 1).repeat(64)}.png`;
+    return {
+      candidateId,
+      concept: `Favorite ${index + 1}`,
+      style: ["photographic"],
+      sourceImage: {
+        filename,
+        path: `profile-sources/${filename}`,
+        contentType: "image/png" as const,
+        width: 1024,
+        height: 1024,
+        byteLength: 4096,
+      },
+    };
+  });
+  const expectedJob = {
+    id: "writer-1",
+    kind: "prompt-card-writer" as const,
+    createdAt: NOW,
+    sources,
+  };
+  return {
+    ...game,
+    promptDeck: {
+      enabled: game.promptDeck?.enabled ?? false,
+      cards: game.promptDeck?.cards ?? [],
+      verdicts: game.promptDeck?.verdicts ?? [],
+      editorJob: game.promptDeck?.editorJob ?? null,
+      blendJob: game.promptDeck?.blendJob ?? null,
+      writerJob: {
+        jobId: expectedJob.id,
+        sourceCandidateIds,
+        enqueuedAt: NOW,
+        expectedJob,
+      },
+      suggestions: game.promptDeck?.suggestions ?? [],
+    },
+  };
+}
+
 function service(options: {
   game?: GameState | null;
   challengers?: ChallengerState | null;
@@ -343,7 +386,9 @@ describe("GameSnapshotService", () => {
 
   it("exports without session-bound prompt-card jobs", async () => {
     const context = service({
-      game: withPromptCardBlendJob(withPromptCardEditorJob(gameState())),
+      game: withPromptCardWriterJob(
+        withPromptCardBlendJob(withPromptCardEditorJob(gameState())),
+      ),
       challengers: challengerState(),
     });
 
@@ -351,6 +396,7 @@ describe("GameSnapshotService", () => {
 
     expect(snapshot.game.promptDeck?.editorJob).toBeNull();
     expect(snapshot.game.promptDeck?.blendJob).toBeNull();
+    expect(snapshot.game.promptDeck?.writerJob).toBeNull();
     expect(snapshot.game.promptDeck?.cards[0].editorRejectCheckpoint).toBe(0);
     expect(snapshot.game.promptDeck?.verdicts).toHaveLength(4);
   });
@@ -445,8 +491,10 @@ describe("GameSnapshotService", () => {
     });
     const snapshot = await source.snapshotService.export();
     const target = service({
-      game: withPromptCardBlendJob(
-        withPromptCardEditorJob({ ...gameState(), history: [] }),
+      game: withPromptCardWriterJob(
+        withPromptCardBlendJob(
+          withPromptCardEditorJob({ ...gameState(), history: [] }),
+        ),
       ),
       challengers: withRefillJob(challengerState()),
       createId: () => "new-session",
@@ -467,6 +515,7 @@ describe("GameSnapshotService", () => {
     expect(target.archive).toHaveBeenCalledWith("old-refill");
     expect(target.archive).toHaveBeenCalledWith("editor-1");
     expect(target.archive).toHaveBeenCalledWith("blend-1");
+    expect(target.archive).toHaveBeenCalledWith("writer-1");
   });
 
   it("rejects unavailable assets before changing the current game", async () => {

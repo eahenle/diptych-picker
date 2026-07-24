@@ -53,6 +53,7 @@ export function useGameSessionPolling({
   const promptCardBackgroundJobIds = [
     game?.promptDeck?.editorJob?.jobId,
     game?.promptDeck?.blendJob?.jobId,
+    game?.promptDeck?.writerJob?.jobId,
   ].filter((jobId): jobId is string => Boolean(jobId));
   const promptCardBackgroundJobKey = promptCardBackgroundJobIds.join(":");
 
@@ -184,6 +185,7 @@ export function useGameSessionPolling({
         const activeJobIds = [
           response.game.promptDeck?.editorJob?.jobId,
           response.game.promptDeck?.blendJob?.jobId,
+          response.game.promptDeck?.writerJob?.jobId,
         ];
         if (activeJobIds.some((jobId) => jobId && watchedJobIds.has(jobId))) {
           timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);

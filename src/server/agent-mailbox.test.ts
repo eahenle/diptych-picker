@@ -18,6 +18,7 @@ import {
   type LeaderboardProfileJob,
   type PromptCardBlenderJob,
   type PromptCardEditorJob,
+  type PromptCardWriterJob,
 } from "./agent-mailbox";
 
 const job = (id = "job-1"): GenerationJob => ({
@@ -235,6 +236,29 @@ const promptCardBlenderJob = (
   ratio: 0.5,
 });
 
+const promptCardWriterJob = (
+  id = "prompt-card-writer-1",
+): PromptCardWriterJob => ({
+  id,
+  kind: "prompt-card-writer",
+  createdAt: "2026-07-20T20:00:00.000Z",
+  sources: ["favorite-1", "favorite-2", "favorite-3"].map(
+    (candidateId, index) => ({
+      candidateId,
+      concept: `${candidateId} concept`,
+      style: ["editorial"],
+      sourceImage: {
+        filename: `${String(index + 1).repeat(64)}.png`,
+        path: `profile-sources/${String(index + 1).repeat(64)}.png`,
+        contentType: "image/png",
+        width: 100,
+        height: 100,
+        byteLength: 1024,
+      },
+    }),
+  ),
+});
+
 async function mailboxRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "diptych-mailbox-"));
 }
@@ -269,6 +293,39 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("strictly persists prompt-card writer work and its proposal", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const writerJob = promptCardWriterJob();
+    await mailbox.enqueuePromptCardWriter(writerJob);
+
+    await expect(
+      mailbox.readPromptCardWriterWork(writerJob.id),
+    ).resolves.toEqual(writerJob);
+    const result = {
+      jobId: writerJob.id,
+      kind: "prompt-card-writer",
+      status: "completed",
+      completedAt: "2026-07-20T20:01:00.000Z",
+      sourceCandidateIds: writerJob.sources.map(
+        ({ candidateId }) => candidateId,
+      ),
+      proposal: {
+        title: "Favorite synthesis",
+        prompt:
+          "A tactile editorial direction synthesizing shared light, scale, and material qualities.",
+        negativePrompt: "exact copies, readable text, logos",
+        tags: ["editorial", "tactile"],
+        reasoningSummary: "Extracts shared qualities without copying a source.",
+      },
+    };
+    await writeRawResult(root, "completed", writerJob.id, result);
+
+    await expect(
+      mailbox.readPromptCardWriterResult(writerJob.id),
+    ).resolves.toEqual(result);
+  });
+
   it("strictly persists prompt-card blender work and one proposal", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);

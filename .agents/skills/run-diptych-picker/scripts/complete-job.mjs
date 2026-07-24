@@ -62,7 +62,8 @@ if (
   activeJob.kind === "source-profile" ||
   activeJob.kind === "leaderboard-profile" ||
   activeJob.kind === "prompt-card-editor" ||
-  activeJob.kind === "prompt-card-blender"
+  activeJob.kind === "prompt-card-blender" ||
+  activeJob.kind === "prompt-card-writer"
 ) {
   throw new Error("Non-image jobs must use their dedicated completion command");
 }

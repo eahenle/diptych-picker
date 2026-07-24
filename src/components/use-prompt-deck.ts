@@ -111,6 +111,34 @@ export function usePromptDeck({ commitGame }: UsePromptDeckOptions) {
     [commitGame],
   );
 
+  const writePromptCard = useCallback(
+    async (candidateIds: string[]): Promise<boolean> => {
+      setSaving(true);
+      setError(null);
+      try {
+        const state = await readJson<GameState>(
+          await fetch("/api/game/preferences/deck/write", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ candidateIds }),
+          }),
+        );
+        commitGame(state);
+        return true;
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Could not write a prompt card from those images",
+        );
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [commitGame],
+  );
+
   const clearError = useCallback(() => setError(null), []);
 
   return {
@@ -120,5 +148,6 @@ export function usePromptDeck({ commitGame }: UsePromptDeckOptions) {
     clearError,
     createPromptCard,
     updatePromptDeck,
+    writePromptCard,
   };
 }

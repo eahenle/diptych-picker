@@ -136,6 +136,29 @@ function promptCardBlender(id, createdAt) {
   };
 }
 
+function promptCardWriter(id, createdAt) {
+  return {
+    id,
+    kind: "prompt-card-writer",
+    createdAt,
+    sources: ["favorite-1", "favorite-2", "favorite-3"].map(
+      (candidateId, index) => ({
+        candidateId,
+        concept: `${candidateId} concept`,
+        style: ["editorial"],
+        sourceImage: {
+          filename: `${String(index + 1).repeat(64)}.png`,
+          path: `profile-sources/${String(index + 1).repeat(64)}.png`,
+          contentType: "image/png",
+          width: 100,
+          height: 100,
+          byteLength: 1024,
+        },
+      }),
+    ),
+  };
+}
+
 async function dataRoot() {
   return mkdtemp(join(tmpdir(), "diptych-next-job-"));
 }
@@ -298,6 +321,24 @@ test("prioritizes prompt-card blender work before cached analysis and refills", 
   const { stdout } = await run(root, ["--max-refills", "3"]);
 
   assert.deepEqual(JSON.parse(stdout), blend);
+});
+
+test("prioritizes prompt-card writer work before cached analysis and refills", async () => {
+  const root = await dataRoot();
+  const writer = promptCardWriter("writer-1", "2026-07-16T01:00:02.000Z");
+  await Promise.all([
+    put(root, "pending", refill("older-refill", "2026-07-16T01:00:00.000Z")),
+    put(
+      root,
+      "pending",
+      leaderboardProfile("leaderboard-1", "2026-07-16T01:00:01.000Z"),
+    ),
+    put(root, "pending", writer),
+  ]);
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.deepEqual(JSON.parse(stdout), writer);
 });
 
 test("prioritizes interactive source analysis before cached leaderboard analysis", async () => {

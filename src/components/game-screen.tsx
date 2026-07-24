@@ -241,6 +241,7 @@ export function GameScreen() {
     savePreferences,
     analyzeSourceImage,
     updatePromptDeck,
+    writePromptCard,
   } = usePreferenceEditor({
     game,
     profile: preferenceDraft,
@@ -654,6 +655,9 @@ export function GameScreen() {
           error={favoritesError}
           favoriteError={favoriteError}
           favoriteSaving={favoriteSaving}
+          writerActive={Boolean(game.promptDeck?.writerJob)}
+          writerBusy={promptDeckSaving}
+          writerError={promptDeckError}
           onClose={closeFavoritesGallery}
           onInspect={inspectFavoriteCandidate}
           onExplore={(candidate) => {
@@ -663,6 +667,14 @@ export function GameScreen() {
           onRemoveFavorite={(candidateId) =>
             void updateFavorite(candidateId, false)
           }
+          onWritePromptCard={async (candidateIds) => {
+            const started = await writePromptCard(candidateIds);
+            if (started) {
+              closeFavoritesGallery();
+              openPreferences();
+            }
+            return started;
+          }}
         />
       ) : null}
 

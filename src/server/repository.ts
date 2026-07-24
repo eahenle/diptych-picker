@@ -183,6 +183,11 @@ const gameStateSchema: z.ZodType<GameState> = z
                 weight: z.number().positive().max(100),
                 tags: z.array(z.string().trim().min(1).max(40)).max(8),
                 parents: z.array(z.string().trim().min(1)).max(5),
+                sourceCandidateIds: z
+                  .array(z.string().trim().min(1).max(200))
+                  .min(3)
+                  .max(5)
+                  .optional(),
                 active: z.boolean(),
                 createdAt: z.string().trim().min(1),
                 stats: z
@@ -291,16 +296,64 @@ const gameStateSchema: z.ZodType<GameState> = z
           .strict()
           .nullable()
           .optional(),
+        writerJob: z
+          .object({
+            jobId: z.string().trim().min(1),
+            sourceCandidateIds: z
+              .array(z.string().trim().min(1).max(200))
+              .min(3)
+              .max(5),
+            enqueuedAt: z.string().trim().min(1),
+            expectedJob: z
+              .object({
+                id: z.string().trim().min(1),
+                kind: z.literal("prompt-card-writer"),
+                createdAt: z.string().trim().min(1),
+                sources: z
+                  .array(
+                    z
+                      .object({
+                        candidateId: z.string().trim().min(1).max(200),
+                        concept: z.string().trim().min(1).max(240),
+                        style: z.array(z.string().trim().min(1).max(80)).max(4),
+                        sourceImage: z
+                          .object({
+                            filename: z.string().regex(/^[a-f0-9]{64}\.png$/),
+                            path: z
+                              .string()
+                              .regex(/^profile-sources\/[a-f0-9]{64}\.png$/),
+                            contentType: z.literal("image/png"),
+                            width: z.number().int().positive().max(4096),
+                            height: z.number().int().positive().max(4096),
+                            byteLength: z.number().int().positive(),
+                          })
+                          .strict(),
+                      })
+                      .strict(),
+                  )
+                  .min(3)
+                  .max(5),
+              })
+              .strict(),
+          })
+          .strict()
+          .nullable()
+          .optional(),
         suggestions: z
           .array(
             z
               .object({
                 id: z.string().trim().min(1),
-                parentCardId: z.string().trim().min(1),
+                parentCardId: z.string().trim().min(1).optional(),
                 parentCardIds: z
                   .array(z.string().trim().min(1))
                   .min(2)
                   .max(2)
+                  .optional(),
+                sourceCandidateIds: z
+                  .array(z.string().trim().min(1).max(200))
+                  .min(3)
+                  .max(5)
                   .optional(),
                 title: z.string().trim().min(1).max(80),
                 prompt: z.string().trim().min(20).max(1_000),
@@ -333,6 +386,17 @@ const gameStateSchema: z.ZodType<GameState> = z
               code: "custom",
               path: ["cards", index, "editorRejectCheckpoint"],
               message: "Prompt card editor checkpoint cannot exceed rejects",
+            });
+          }
+          if (
+            card.sourceCandidateIds &&
+            new Set(card.sourceCandidateIds).size !==
+              card.sourceCandidateIds.length
+          ) {
+            context.addIssue({
+              code: "custom",
+              path: ["cards", index, "sourceCandidateIds"],
+              message: "Prompt card source candidates must be unique",
             });
           }
           ids.add(card.id);
@@ -383,6 +447,29 @@ const gameStateSchema: z.ZodType<GameState> = z
             message: "Prompt card blend job must reference two deck cards",
           });
         }
+        if (
+          deck.writerJob &&
+          (deck.writerJob.expectedJob.id !== deck.writerJob.jobId ||
+            !isDeepStrictEqual(
+              deck.writerJob.expectedJob.sources.map(
+                ({ candidateId }) => candidateId,
+              ),
+              deck.writerJob.sourceCandidateIds,
+            ) ||
+            new Set(deck.writerJob.sourceCandidateIds).size !==
+              deck.writerJob.sourceCandidateIds.length ||
+            deck.writerJob.expectedJob.sources.some(
+              ({ sourceImage }) =>
+                sourceImage.path !== `profile-sources/${sourceImage.filename}`,
+            ))
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["writerJob"],
+            message:
+              "Prompt card writer job must reference unique matching candidates",
+          });
+        }
         const suggestionIds = new Set<string>();
         for (const [index, suggestion] of (deck.suggestions ?? []).entries()) {
           if (suggestionIds.has(suggestion.id)) {
@@ -393,19 +480,30 @@ const gameStateSchema: z.ZodType<GameState> = z
             });
           }
           suggestionIds.add(suggestion.id);
-          const parentIds = suggestion.parentCardIds ?? [
-            suggestion.parentCardId,
-          ];
+          const parentIds =
+            suggestion.parentCardIds ??
+            (suggestion.parentCardId ? [suggestion.parentCardId] : []);
+          const sourceIds = suggestion.sourceCandidateIds ?? [];
+          const invalidParentLineage =
+            parentIds.length > 0 &&
+            (!suggestion.parentCardId ||
+              !ids.has(suggestion.parentCardId) ||
+              parentIds.some((parentId) => !ids.has(parentId)) ||
+              new Set(parentIds).size !== parentIds.length ||
+              parentIds[0] !== suggestion.parentCardId);
+          const invalidSourceLineage =
+            sourceIds.length > 0 &&
+            new Set(sourceIds).size !== sourceIds.length;
           if (
-            !ids.has(suggestion.parentCardId) ||
-            parentIds.some((parentId) => !ids.has(parentId)) ||
-            new Set(parentIds).size !== parentIds.length ||
-            parentIds[0] !== suggestion.parentCardId
+            invalidParentLineage ||
+            invalidSourceLineage ||
+            parentIds.length > 0 === sourceIds.length > 0
           ) {
             context.addIssue({
               code: "custom",
-              path: ["suggestions", index, "parentCardId"],
-              message: "Prompt card suggestions must reference the deck",
+              path: ["suggestions", index],
+              message:
+                "Prompt card suggestions must reference either deck parents or source candidates",
             });
           }
         }
