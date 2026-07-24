@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type {
   BufferHealth,
   Candidate,
+  GameRules,
   GameStartState,
   GameState,
   PreferenceProfile,
@@ -44,6 +45,7 @@ import {
 } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
 import { challengerConfig } from "./challenger-config";
+import { effectiveGameRules } from "./game-rules";
 import { SourceProfileService } from "./source-profile-service";
 import { LeaderboardProfileService } from "./leaderboard-profile-service";
 import { PromptCardWriterService } from "./prompt-card-writer-service";
@@ -374,10 +376,11 @@ export async function getBufferHealth(): Promise<BufferHealth> {
           !refillJobMatchesGenerationPreferences(expectedJob, game),
       ).length
     : 0;
+  const rules = effectiveGameRules(game, challengerConfig);
   return summarizeBufferHealth(
     challengers,
-    challengerConfig.bufferTarget,
-    challengerConfig.poolMaximum,
+    rules.bufferTarget,
+    rules.poolMaximum,
     {
       active: Math.max(0, refillJobs.length - pending),
       pending,
@@ -393,9 +396,10 @@ export async function refreshBufferHealth(): Promise<BufferHealth> {
 
 export async function getPoolLeaderboard() {
   await gameService.reconcile();
+  const game = await repository.load();
   return {
     entries: summarizePoolLeaderboard(await challengerRepository.load()),
-    poolMaximum: challengerConfig.poolMaximum,
+    poolMaximum: effectiveGameRules(game, challengerConfig).poolMaximum,
   };
 }
 
@@ -453,8 +457,16 @@ export async function getDisplayedEloRatings(game: GameState) {
     game,
     challengerConfig.initialRating,
     challengerConfig.eloKFactor,
-    challengerConfig.poolMaximum,
+    effectiveGameRules(game, challengerConfig).poolMaximum,
   );
+}
+
+export async function getGameRules(): Promise<GameRules> {
+  return effectiveGameRules(await repository.load(), challengerConfig);
+}
+
+export async function updateGameRules(rules: GameRules): Promise<GameState> {
+  return gameService.updateGameRules(rules);
 }
 
 export async function updatePreferenceSeed(

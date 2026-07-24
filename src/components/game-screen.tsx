@@ -229,6 +229,9 @@ export function GameScreen() {
     presetSaving,
     promptDeckError,
     promptDeckSaving,
+    gameRules,
+    gameRulesError,
+    gameRulesSaving,
     applyPreferencePreset,
     blendPromptCards,
     closePreferences,
@@ -241,6 +244,7 @@ export function GameScreen() {
     savePreferences,
     analyzeSourceImage,
     updatePromptDeck,
+    updateGameRules,
     writePromptCard,
   } = usePreferenceEditor({
     game,
@@ -725,6 +729,9 @@ export function GameScreen() {
           promptDeck={game.promptDeck}
           promptDeckSaving={promptDeckSaving}
           promptDeckError={promptDeckError}
+          gameRules={gameRules}
+          gameRulesSaving={gameRulesSaving}
+          gameRulesError={gameRulesError}
           selectionBoundWait={selectionBoundWait}
           onClose={closePreferences}
           onSave={() => void savePreferences()}
@@ -736,6 +743,7 @@ export function GameScreen() {
           onCreatePromptCard={createPromptCard}
           onUpdatePromptDeck={updatePromptDeck}
           onBlendPromptCards={blendPromptCards}
+          onUpdateGameRules={updateGameRules}
           onFieldChange={setPreferenceField}
           onFreedomChange={setAdaptationFreedom}
         />

@@ -328,6 +328,27 @@ describe("challenger state", () => {
     ).toBe(false);
   });
 
+  it("trims the weakest members when the pool maximum is lowered", () => {
+    const initial = state({
+      ratings: [
+        rating("weak", 900),
+        rating("middle", 1000),
+        rating("strong", 1100),
+      ],
+    });
+
+    const next = backfillGeneratedPool(initial, 2);
+
+    expect(
+      next.ratings
+        .filter((item) => item.poolMember)
+        .map((item) => item.candidate.id),
+    ).toEqual(["middle", "strong"]);
+    expect(
+      next.ratings.find((item) => item.candidate.id === "weak"),
+    ).toMatchObject({ poolMember: false });
+  });
+
   it("never backfills a candidate permanently rejected from the pool", () => {
     const initial = state({
       ratings: [

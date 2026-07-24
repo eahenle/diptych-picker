@@ -427,6 +427,64 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("persists live rule changes, trims the pool, and expands refill capacity", async () => {
+    const game = gameState();
+    game.round.retainedCandidateId = game.round.leftCandidate.id;
+    game.round.winStreak = 1;
+    const challengers = challengerState(game);
+    const context = serviceFor({
+      game,
+      challengers,
+      createId: ids("rules-refill"),
+    });
+
+    const updated = await context.service.updateGameRules({
+      bufferTarget: 6,
+      poolMaximum: 2,
+      championRetirementStreak: 3,
+      fallbackMaximumConsecutive: 4,
+    });
+
+    expect(updated.gameRules).toEqual({
+      bufferTarget: 6,
+      poolMaximum: 2,
+      championRetirementStreak: 3,
+      fallbackMaximumConsecutive: 4,
+    });
+    await expect(context.gameRepository.load()).resolves.toMatchObject({
+      gameRules: updated.gameRules,
+    });
+    const persistedChallengers = await context.challengerRepository.load();
+    expect(
+      persistedChallengers?.ratings.filter((item) => item.poolMember),
+    ).toHaveLength(2);
+    expect(persistedChallengers?.refillJobs).toHaveLength(1);
+    expect(context.queue.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("retires a champion at the configured streak limit", async () => {
+    const game = gameState({
+      gameRules: {
+        bufferTarget: 5,
+        poolMaximum: 50,
+        championRetirementStreak: 2,
+        fallbackMaximumConsecutive: 10,
+      },
+    });
+    game.round.retainedCandidateId = game.round.leftCandidate.id;
+    game.round.winStreak = 1;
+    const context = serviceFor({ game });
+
+    const selected = await context.service.select("left", 3);
+
+    expect(selected.round).toMatchObject({
+      leftCandidate: { id: "buffer-1" },
+      rightCandidate: { id: "buffer-2" },
+      retainedCandidateId: null,
+      winStreak: 0,
+    });
+  });
+
   it("blends two immutable cards into one approval-gated child", async () => {
     const cards = [
       {

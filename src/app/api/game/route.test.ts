@@ -22,6 +22,8 @@ const dismissGenerationNotice = vi.fn();
 const requestSourceProfile = vi.fn();
 const getSourceProfileStatus = vi.fn();
 const acknowledgeSourceProfile = vi.fn();
+const getGameRules = vi.fn();
+const updateGameRules = vi.fn();
 
 vi.mock("@/server/runtime", () => ({
   generationProvider: "mock",
@@ -45,6 +47,8 @@ vi.mock("@/server/runtime", () => ({
   requestSourceProfile,
   getSourceProfileStatus,
   acknowledgeSourceProfile,
+  getGameRules,
+  updateGameRules,
 }));
 
 beforeEach(() => {
@@ -121,6 +125,62 @@ describe("GET /api/game/health", () => {
     const response = await GET();
 
     expect(await response.json()).toEqual(health);
+  });
+});
+
+describe("GET and PATCH /api/game/rules", () => {
+  const rules = {
+    bufferTarget: 5,
+    poolMaximum: 20,
+    championRetirementStreak: 7,
+    fallbackMaximumConsecutive: 4,
+  };
+
+  it("returns the current effective rules", async () => {
+    getGameRules.mockResolvedValue(rules);
+    const { GET } = await import("./rules/route");
+
+    const response = await GET();
+
+    expect(await response.json()).toEqual({ rules });
+  });
+
+  it("validates and persists all rule fields together", async () => {
+    updateGameRules.mockResolvedValue({
+      gameRules: rules,
+      round: { status: "idle" },
+    });
+    const { PATCH } = await import("./rules/route");
+
+    const response = await PATCH(
+      new Request("http://localhost/api/game/rules", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rules),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(updateGameRules).toHaveBeenCalledWith(rules);
+    expect(await response.json()).toMatchObject({ gameRules: rules });
+  });
+
+  it("rejects fractional or out-of-range rules", async () => {
+    updateGameRules.mockReset();
+    const { PATCH } = await import("./rules/route");
+
+    const response = await PATCH(
+      new Request("http://localhost/api/game/rules", {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...rules,
+          championRetirementStreak: 1.5,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(updateGameRules).not.toHaveBeenCalled();
   });
 });
 

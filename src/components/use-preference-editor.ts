@@ -22,6 +22,7 @@ import { readJson } from "./game-api";
 import type { InspectableCandidate } from "./image-inspector";
 import { usePreferencePresets } from "./use-preference-presets";
 import { usePromptDeck } from "./use-prompt-deck";
+import { useGameRules } from "./use-game-rules";
 
 const SOURCE_PROFILE_POLL_INTERVAL_MS = 500;
 
@@ -115,6 +116,14 @@ export function usePreferenceEditor({
     deletePreferencePreset,
     savePreferencePreset: savePreset,
   } = usePreferencePresets({ commitGame });
+
+  const {
+    rules: gameRules,
+    saving: gameRulesSaving,
+    error: gameRulesError,
+    loadGameRules,
+    updateGameRules,
+  } = useGameRules({ commitGame });
 
   useEffect(() => () => sourceProfileControllerRef.current?.abort(), []);
 
@@ -254,9 +263,22 @@ export function usePreferenceEditor({
   );
 
   const closePreferences = useCallback(() => {
-    if (saving || sourceAnalyzing || presetSaving || promptDeckSaving) return;
+    if (
+      saving ||
+      sourceAnalyzing ||
+      presetSaving ||
+      promptDeckSaving ||
+      gameRulesSaving
+    )
+      return;
     setOpen(false);
-  }, [presetSaving, promptDeckSaving, saving, sourceAnalyzing]);
+  }, [
+    gameRulesSaving,
+    presetSaving,
+    promptDeckSaving,
+    saving,
+    sourceAnalyzing,
+  ]);
 
   const openPreferences = useCallback(() => {
     if (!game) return;
@@ -273,7 +295,14 @@ export function usePreferenceEditor({
     clearPromptDeckError();
     resetPreferenceDraft(currentProfile, game.variationSource ?? null);
     setOpen(true);
-  }, [clearPresetError, clearPromptDeckError, game, resetPreferenceDraft]);
+    void loadGameRules();
+  }, [
+    clearPresetError,
+    clearPromptDeckError,
+    game,
+    loadGameRules,
+    resetPreferenceDraft,
+  ]);
 
   const exploreCandidateVariations = useCallback(
     async (candidate: InspectableCandidate) => {
@@ -359,6 +388,9 @@ export function usePreferenceEditor({
     presetSaving,
     promptDeckError,
     promptDeckSaving,
+    gameRules,
+    gameRulesError,
+    gameRulesSaving,
     applyPreferencePreset,
     blendPromptCards,
     closePreferences,
@@ -371,6 +403,7 @@ export function usePreferenceEditor({
     savePreferences,
     analyzeSourceImage,
     updatePromptDeck,
+    updateGameRules,
     writePromptCard,
   };
 }

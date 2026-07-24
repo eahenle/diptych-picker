@@ -36,6 +36,18 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-24
 
+### Editable per-game rules
+
+Preferences now exposes bounded numeric controls for the ready queue target,
+reusable pool capacity, champion retirement streak, and consecutive fallback
+draw limit. Applying the editor persists one complete rules snapshot for the
+current game without saving unrelated profile drafts. Pool reductions retain
+the strongest members, queue growth requests safe refill capacity when a
+comparison context is available, and future selections read the new retirement
+and fallback limits immediately. Rules travel with saved-game exports; legacy
+games use environment-backed defaults, and starting fresh restores those
+defaults.
+
 ### Prompt cards from favorite image sets
 
 The Favorites gallery lets the player select three to five generated favorites

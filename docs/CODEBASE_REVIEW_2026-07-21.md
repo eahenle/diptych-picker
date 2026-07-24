@@ -87,3 +87,7 @@ and a Next.js production build.
 - The manifest's discovery ranges and lockfile authority are now governed by
   [Dependency update policy](DEPENDENCY_POLICY.md), including isolated updates
   and the full validation gate.
+- User-facing game rules now have a focused `game-rules` domain validator,
+  strict API boundary, per-game persistence, and Preferences editor. Runtime
+  health, pool, scoring, retirement, refill, and fallback paths all read the
+  effective saved rules while legacy saves continue using configured defaults.
