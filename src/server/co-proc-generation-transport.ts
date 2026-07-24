@@ -67,8 +67,10 @@ const coProcControlFrameSchema = z.discriminatedUnion("type", [
       type: z.literal("result"),
       id: z.string().trim().min(1),
       lease_token: leaseTokenSchema,
+      status: z.enum(["completed", "failed"]),
+      result_path: z.string().trim().min(1),
     })
-    .passthrough(),
+    .strict(),
   z
     .object({
       version: z.union([z.literal(1), z.literal(2)]),
@@ -80,8 +82,19 @@ const coProcControlFrameSchema = z.discriminatedUnion("type", [
 ]);
 type CoProcControlFrame = z.infer<typeof coProcControlFrameSchema>;
 
+export interface GenerationTerminalSignal {
+  channel: string;
+  jobId: string;
+  status: "completed" | "failed";
+  resultPath: string;
+}
+
 export interface GenerationTransport {
   notify(job: GenerationJob, durableJobPath: string): Promise<void>;
+  subscribeTerminalSignals?(
+    listener: (signal: GenerationTerminalSignal) => void,
+    onError?: (error: unknown) => void,
+  ): () => void;
 }
 
 export interface GenerationChannelTransport extends GenerationTransport {
@@ -169,6 +182,11 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
   private readonly leaseDurationMs: number;
   private outputBuffer = "";
   private serializedNotification: Promise<void> = Promise.resolve();
+  private terminalObserver: Promise<void> | null = null;
+  private readonly terminalListeners = new Set<
+    (signal: GenerationTerminalSignal) => void
+  >();
+  private readonly terminalErrorListeners = new Set<(error: unknown) => void>();
 
   constructor(options: CoProcGenerationTransportOptions) {
     if (!channelNamePattern.test(options.channel)) {
@@ -227,10 +245,28 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
     }
   }
 
+  subscribeTerminalSignals(
+    listener: (signal: GenerationTerminalSignal) => void,
+    onError?: (error: unknown) => void,
+  ): () => void {
+    this.terminalListeners.add(listener);
+    if (onError) this.terminalErrorListeners.add(onError);
+    return () => {
+      this.terminalListeners.delete(listener);
+      if (onError) this.terminalErrorListeners.delete(onError);
+    };
+  }
+
   private async notifyExclusively(
     job: GenerationJob,
     durableJobPath: string,
   ): Promise<void> {
+    if (this.terminalObserver) {
+      throw new CoProcChannelUnavailableError(
+        this.channel,
+        "worker is still processing an acknowledged job",
+      );
+    }
     const validatedJob = generationJobSchema.parse(job);
     const resolvedJobPath = resolve(/* turbopackIgnore: true */ durableJobPath);
     if (!isAbsolute(durableJobPath) || resolvedJobPath !== durableJobPath) {
@@ -256,6 +292,7 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
     const metadataPath = join(channelDirectory, "metadata.json");
     const inputPath = join(channelDirectory, "input");
     const outputPath = join(channelDirectory, "output");
+    let outputOwnedByObserver = false;
     try {
       await assertOwnedPath(this.runtimeRoot, 0o700, "directory");
       await assertOwnedPath(channelDirectory, 0o700, "directory");
@@ -356,9 +393,110 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
         leaseToken,
         acknowledgement.lease_expires_at,
       );
+      outputOwnedByObserver = true;
+      const observer = this.observeTerminalResult(
+        output,
+        mailboxDirectory,
+        leasePath,
+        validatedJob.id,
+        leaseToken,
+        acknowledgement.lease_expires_at,
+      );
+      const trackedObserver = observer
+        .catch((error: unknown) => {
+          for (const listener of this.terminalErrorListeners) listener(error);
+        })
+        .finally(async () => {
+          await output.close();
+          if (this.terminalObserver === trackedObserver) {
+            this.terminalObserver = null;
+          }
+        });
+      this.terminalObserver = trackedObserver;
     } finally {
-      await output.close();
+      if (!outputOwnedByObserver) await output.close();
     }
+  }
+
+  private async observeTerminalResult(
+    output: FileHandle,
+    mailboxDirectory: string,
+    leasePath: string,
+    jobId: string,
+    leaseToken: string,
+    initialExpiry: string,
+  ): Promise<void> {
+    let leaseExpiry = initialExpiry;
+    while (true) {
+      const deadline = Math.min(Date.parse(leaseExpiry), Date.now() + 30_000);
+      let control: CoProcControlFrame;
+      try {
+        control = await this.readControlFrame(output, deadline);
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          error.message !== "control frame timed out"
+        ) {
+          throw error;
+        }
+        const lease = await this.readDurableLease(leasePath).catch(() => null);
+        if (
+          lease?.jobId === jobId &&
+          lease.channel === this.channel &&
+          lease.token === leaseToken &&
+          Date.parse(lease.expiresAt) > Date.now()
+        ) {
+          leaseExpiry = lease.expiresAt;
+          continue;
+        }
+        return;
+      }
+
+      if (control.type === "result") {
+        if (control.id !== jobId || control.lease_token !== leaseToken) {
+          throw new Error(
+            `Co-proc channel ${this.channel} returned a result for another lease`,
+          );
+        }
+        const resultPath = resolve(
+          /* turbopackIgnore: true */ control.result_path,
+        );
+        const expectedPath = join(
+          mailboxDirectory,
+          control.status,
+          `${jobId}.json`,
+        );
+        if (
+          !isAbsolute(control.result_path) ||
+          resultPath !== control.result_path ||
+          resultPath !== expectedPath
+        ) {
+          throw new Error(
+            `Co-proc channel ${this.channel} returned an invalid terminal result path`,
+          );
+        }
+        const signal: GenerationTerminalSignal = {
+          channel: this.channel,
+          jobId,
+          status: control.status,
+          resultPath,
+        };
+        for (const listener of this.terminalListeners) listener(signal);
+        return;
+      }
+      if (control.type === "error" && control.id === jobId) {
+        throw new Error(
+          `Co-proc channel ${this.channel} failed job ${jobId}: ${control.message}`,
+        );
+      }
+    }
+  }
+
+  private async readDurableLease(leasePath: string) {
+    await assertOwnedPath(leasePath, 0o600, "file");
+    return coProcLeaseSchema.parse(
+      JSON.parse(await readFile(/* turbopackIgnore: true */ leasePath, "utf8")),
+    );
   }
 
   private async waitUntilReady(output: FileHandle): Promise<void> {
@@ -493,6 +631,7 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
           }
           continue;
         }
+        throw new Error("worker output closed");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EAGAIN") {
           throw error;
@@ -557,19 +696,54 @@ export class CoProcGenerationChannelPool implements GenerationTransport {
       )
     );
   }
+
+  subscribeTerminalSignals(
+    listener: (signal: GenerationTerminalSignal) => void,
+    onError?: (error: unknown) => void,
+  ): () => void {
+    const unsubscribers = this.channels.flatMap((channel) => {
+      const unsubscribe = channel.subscribeTerminalSignals?.(listener, onError);
+      return unsubscribe ? [unsubscribe] : [];
+    });
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe();
+    };
+  }
 }
 
 interface TransportNotifyingMailboxOptions {
   durableJobPath(job: GenerationJob): string;
   onTransportError?: (error: unknown, job: GenerationJob) => void;
+  onTerminalSignalError?: (
+    error: unknown,
+    signal?: GenerationTerminalSignal,
+  ) => void;
 }
 
 export class TransportNotifyingGenerationMailbox implements GenerationMailbox {
+  private readonly liveResults = new Map<
+    string,
+    Promise<GenerationResult | null>
+  >();
+
   constructor(
     private readonly durableMailbox: GenerationMailbox,
     private readonly transport: GenerationTransport,
     private readonly options: TransportNotifyingMailboxOptions,
-  ) {}
+  ) {
+    transport.subscribeTerminalSignals?.(
+      (signal) => {
+        this.liveResults.set(
+          signal.jobId,
+          this.ingestTerminalSignal(signal).catch((error: unknown) => {
+            this.options.onTerminalSignalError?.(error, signal);
+            return null;
+          }),
+        );
+      },
+      (error) => this.options.onTerminalSignalError?.(error),
+    );
+  }
 
   async enqueue(job: GenerationJob): Promise<void> {
     const validatedJob = generationJobSchema.parse(job);
@@ -592,11 +766,37 @@ export class TransportNotifyingGenerationMailbox implements GenerationMailbox {
     return this.durableMailbox.readWork(jobId);
   }
 
-  readResult(jobId: string): Promise<GenerationResult | null> {
+  async readResult(jobId: string): Promise<GenerationResult | null> {
+    const liveResult = this.liveResults.get(jobId);
+    if (liveResult) {
+      const result = await liveResult.catch(() => {
+        this.liveResults.delete(jobId);
+        return null;
+      });
+      if (result) return result;
+    }
     return this.durableMailbox.readResult(jobId);
   }
 
-  archive(jobId: string): Promise<void> {
-    return this.durableMailbox.archive(jobId);
+  async archive(jobId: string): Promise<void> {
+    this.liveResults.delete(jobId);
+    await this.durableMailbox.archive(jobId);
+  }
+
+  private async ingestTerminalSignal(
+    signal: GenerationTerminalSignal,
+  ): Promise<GenerationResult> {
+    const result = await this.durableMailbox.readResult(signal.jobId);
+    if (!result) {
+      throw new Error(
+        `Live terminal signal for ${signal.jobId} arrived before its durable result`,
+      );
+    }
+    if (result.status !== signal.status) {
+      throw new Error(
+        `Live terminal signal for ${signal.jobId} does not match its durable result`,
+      );
+    }
+    return result;
   }
 }

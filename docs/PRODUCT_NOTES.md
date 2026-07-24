@@ -33,6 +33,17 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-24
 
+### Correlated persistent-channel results
+
+After a leased persistent worker durably completes or fails a job through the
+existing token-gated helper, it can now send a strict version-2 `result` frame
+with the same lease token, terminal status, and exact normalized mailbox result
+path. The channel rejects mismatched tokens, job IDs, status directories, and
+paths. The mailbox adapter eagerly reads and caches the result through the same
+strict durable parser, so normal game reconciliation sees it immediately.
+Missing, malformed, or interrupted live signals fall back to immutable mailbox
+results, which remain authoritative across app and worker restarts.
+
 ### Durable persistent-worker leases
 
 The opt-in co-proc generation frame now carries a one-use lease token, durable
@@ -43,8 +54,7 @@ same token; exclusive outcome reservations retain that owner across an
 idempotent retry. The mailbox monitor skips live leases, revokes expired leases
 under a per-job filesystem lock, and resumes them during ordinary polling
 without requiring a restart. Immutable completed/failed files and app
-reconciliation remain authoritative while direct live result frames stay
-staged.
+reconciliation remain authoritative.
 
 ## 2026-07-23
 

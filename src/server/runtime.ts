@@ -173,6 +173,14 @@ export const generationMailbox =
               error,
             );
           },
+          onTerminalSignalError: (error, signal) => {
+            console.warn(
+              signal
+                ? `co-proc terminal signal failed for ${signal.jobId}; durable mailbox reconciliation remains active`
+                : "co-proc terminal observation failed; durable mailbox reconciliation remains active",
+              error,
+            );
+          },
         },
       )
     : durableGenerationMailbox;

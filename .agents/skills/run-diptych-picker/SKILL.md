@@ -46,6 +46,13 @@ Read [references/job-protocol.md](references/job-protocol.md) before processing 
 9. The root remains available for user requests and may work on unrelated non-mailbox tasks. It must not call `agent:next`, `agent:complete`, or `agent:fail` while the monitor owns the loop.
 10. When stopped by the user, the root tells the monitor to claim no new work. The monitor lets already-started image workers reach a terminal result when practical, records `--status stopped`, reports active recoverable jobs, and exits. The root then stops only an app process it started and reports the final state.
 
+The mailbox monitor always uses the unleased file-backed completion and failure
+flow below. It never sends co-proc `ack` or `result` frames. A separate
+persistent co-proc peer, when configured, must follow
+[references/job-protocol.md](references/job-protocol.md): claim and renew with
+its lease token, publish through the matching token-gated helper, then send the
+strict correlated terminal frame only after durable publication succeeds.
+
 ## Process jobs
 
 The monitor inspects each claimed job's `kind`. A missing `kind` is a legacy challenger.

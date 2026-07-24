@@ -3,11 +3,12 @@
 Status: co-proc attachable transport and the opt-in durable-notification adapter
 are merged into their repositories' main branches. The Diptych adapter now has
 an opt-in ready/acknowledged multi-channel dispatch stage while durable mailbox
-claim leases and token-gated terminal publication are staged on top of that
-pool, with expiry takeover by the mailbox monitor. Prompt-card persistence,
-weighted draws, candidate attribution, and win/reject statistics are
-implemented, including approval-gated editor suggestions after repeated card
-rejections; direct live result-frame reconciliation remains a staged follow-up.
+claim leases, token-gated terminal publication, and correlated live terminal
+signals are staged on top of that pool, with expiry takeover by the mailbox
+monitor. Prompt-card persistence, weighted draws, candidate attribution, and
+win/reject statistics are implemented, including approval-gated editor
+suggestions after repeated card rejections; removing mailbox reconciliation
+remains a staged follow-up.
 
 ## Objective
 
@@ -46,8 +47,10 @@ failure helpers require that token while the lease is live. Pre-dispatch busy
 or unavailable channels can be skipped; an unacknowledged post-dispatch frame
 is not sent to a second channel. The mailbox monitor ignores live leases,
 revokes expired ones under a per-job lock, and resumes that work through the
-normal polling loop. Immutable terminal files and app reconciliation remain
-authoritative until direct result-frame parity is proven.
+normal polling loop. After durable completion or failure, the peer sends a
+correlated terminal frame with the same token and exact result path. The app
+eagerly validates and ingests that durable result while retaining immutable
+terminal files as the restart and recovery authority.
 
 ## Co-proc prerequisite
 
@@ -75,6 +78,7 @@ version 2.
 {"version":1,"type":"ready","id":"gen_a"}
 {"version":2,"type":"gen","id":"job-123","kind":"refill","job_path":"/absolute/mailbox/pending/job-123.json","lease_path":"/absolute/mailbox/leases/job-123.json","lease_token":"uuid","lease_duration_ms":120000}
 {"version":2,"type":"ack","id":"job-123","lease_token":"uuid","lease_expires_at":"ISO-8601 timestamp"}
+{"version":2,"type":"result","id":"job-123","lease_token":"uuid","status":"completed","result_path":"/absolute/mailbox/completed/job-123.json"}
 ```
 
 Persistent generation peers publish through the existing file-backed completion
@@ -89,9 +93,13 @@ the version-2 `gen` frame only after observing readiness. That frame includes
 `lease_token`, `lease_path`, and `lease_duration_ms`. The peer runs the durable
 claim helper, then confirms the matching token and exact `lease_expires_at` in
 its version-2 `ack`. It renews before expiry and passes the token to the
-completion or failure helper. A peer may report `busy` before dispatch or an
-`error` correlated to a job. Readiness and acknowledgement are backpressure
-and ownership signals, not terminal generation outcomes.
+completion or failure helper. Only after that helper has durably published its
+strict result does the peer send a version-2 `result` frame with the matching
+token, terminal status, and exact normalized path under `completed/` or
+`failed/`. The app rejects another token, status directory, job ID, or path,
+then eagerly reads the result through the same strict mailbox parser. A missing
+or invalid terminal frame never discards the durable result. A peer may report
+`busy` before dispatch or an `error` correlated to a job.
 
 ## Prompt-card deck
 
@@ -142,8 +150,9 @@ The Preference profile modal has a top-line **Frozen / Guided / Unfettered** fre
 3. Move generation workers to persistent named channels and remove mailbox
    polling only after parity tests pass. In progress: ready/acknowledged
    multi-channel dispatch, durable renewable claim leases, token-gated outcome
-   ownership, and expiry takeover are implemented. Direct live terminal-result
-   ingestion and full restart parity still remain on the mailbox path.
+   ownership, expiry takeover, and live terminal-result ingestion are
+   implemented. Immutable mailbox results still provide full restart parity
+   and fallback reconciliation.
 4. Add deck persistence, weighted draw, winner updates, verdict tracking, and editor suggestions. Implemented.
 5. Add blend, write-from-set, lineage UI, and winner-driven inspiration controls.
 6. Fix export responsiveness during loading and add ten-win champion retirement with focused regression tests.

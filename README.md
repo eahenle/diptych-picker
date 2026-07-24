@@ -79,19 +79,22 @@ another channel. Once a generation frame has been written, a missing
 acknowledgement is never retried on a second live channel because that could
 duplicate work. A persistent peer renews its lease with
 `npm run agent:renew-lease` and supplies `--lease-token` when completing or
-failing the job. The mailbox monitor skips live leases and automatically takes
-over expired leases during its ordinary polling loop, without requiring an app
-or monitor restart.
+failing the job. After durable publication, it sends a version-2 `result` frame
+with the same token, terminal status, and exact normalized `completed/` or
+`failed/` result path. The app validates that correlation and eagerly ingests
+the strict durable result. The mailbox monitor skips live leases and
+automatically takes over expired leases during its ordinary polling loop,
+without requiring an app or monitor restart.
 
 Set `CO_PROC_RUNTIME_ROOT` only when `co-proc` uses a non-default runtime root.
 `CO_PROC_GENERATION_READY_TIMEOUT_MS` and
 `CO_PROC_GENERATION_ACK_TIMEOUT_MS` tune the bounded handshake and default to
 100 and 500 milliseconds. `CO_PROC_GENERATION_LEASE_MS` defaults to 120000 and
 accepts 10000 through 600000 milliseconds; peers must renew before expiry. The
-adapter revalidates owner-only directory, metadata, process, FIFO, and lease
-state on every dispatch. Exclusive outcome reservations and immutable terminal
-files remain the app reconciliation boundary, while live claim and result
-publication are now token-owned with expiry-based mailbox fallback.
+adapter revalidates owner-only directory, metadata, process, FIFO, lease, and
+terminal-result state. Exclusive outcome reservations and immutable terminal
+files remain the restart boundary, while live claim, result signaling, and
+publication are token-owned with expiry-based mailbox fallback.
 
 ## Curated and learned pools
 
