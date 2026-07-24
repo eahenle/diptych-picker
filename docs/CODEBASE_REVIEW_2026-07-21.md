@@ -84,6 +84,10 @@ and a Next.js production build.
 - `GameService` comparison recording and refill planning now live in focused
   domain modules while the service retains lock, persistence, mailbox, and
   reconciliation ownership.
+- Prompt-card editor, blender, and writer reconciliation now share a focused
+  server coordinator. `GameService` still owns transaction timing and explicit
+  card requests while durable work validation, re-enqueue, terminal archival,
+  and suggestion creation stay behind the prompt-card boundary.
 - The manifest's discovery ranges and lockfile authority are now governed by
   [Dependency update policy](DEPENDENCY_POLICY.md), including isolated updates
   and the full validation gate.
