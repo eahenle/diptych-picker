@@ -24,6 +24,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const frameBufferSize = 4096;
+const successfulControlTimeoutMs = 500;
 
 async function readFrame(
   handle: Awaited<ReturnType<typeof open>>,
@@ -267,8 +268,8 @@ describe("CoProcGenerationTransport", () => {
     const transport = new CoProcGenerationTransport({
       channel: "gen_a",
       runtimeRoot: root,
-      readyTimeoutMs: 100,
-      acknowledgementTimeoutMs: 100,
+      readyTimeoutMs: successfulControlTimeoutMs,
+      acknowledgementTimeoutMs: successfulControlTimeoutMs,
     });
 
     try {
@@ -325,8 +326,8 @@ describe("CoProcGenerationTransport", () => {
     const transport = new CoProcGenerationTransport({
       channel: "gen_a",
       runtimeRoot: root,
-      readyTimeoutMs: 100,
-      acknowledgementTimeoutMs: 100,
+      readyTimeoutMs: successfulControlTimeoutMs,
+      acknowledgementTimeoutMs: successfulControlTimeoutMs,
     });
     const terminalSignal = vi.fn();
     transport.subscribeTerminalSignals(terminalSignal);
