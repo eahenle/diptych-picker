@@ -58,6 +58,16 @@ suggestion ordering, and the immediate editor check after a comparison records
 new rejection evidence. API behavior, persistence shape, mailbox protocol, and
 approval gates are unchanged.
 
+### Leaderboard visual-profile reconciliation boundary
+
+Adaptive leaderboard image analysis now reconciles through a focused server
+coordinator instead of `GameService`. The extraction preserves exact cohort
+fingerprints, one-attempt scheduling, missing-work re-enqueue, mismatched-work
+archival, valid terminal-result caching, and the rule that refills consume a
+cached profile only while it still matches the current leading cohort.
+Persistence, mailbox priority, source normalization, and preference behavior
+are unchanged.
+
 ### Prompt cards from favorite image sets
 
 The Favorites gallery lets the player select three to five generated favorites
