@@ -3,10 +3,11 @@
 Status: co-proc attachable transport and the opt-in durable-notification adapter
 are merged into their repositories' main branches. The Diptych adapter now has
 an opt-in ready/acknowledged multi-channel dispatch stage while durable mailbox
-claim and terminal publication remain authoritative. Prompt-card persistence,
+claim leases and token-gated terminal publication are staged on top of that
+pool, with expiry takeover by the mailbox monitor. Prompt-card persistence,
 weighted draws, candidate attribution, and win/reject statistics are
 implemented, including approval-gated editor suggestions after repeated card
-rejections; persistent channel ownership remains a staged follow-up.
+rejections; direct live result-frame reconciliation remains a staged follow-up.
 
 ## Objective
 
@@ -36,13 +37,17 @@ Next.js main/deck authority <-> attachable co-proc channels <-> persistent agent
 
 The live socket or pipe layer replaces polling, lock files, and outcome-file signaling. Durable app state must still record outstanding job IDs and terminal reconciliation so a process restart can recover safely; transport availability is not durability.
 
-The current parity stage deliberately stops short of that target. A configured
-pool reserves one ready named channel per concurrent enqueue, writes the
-durable job reference, and requires a matching acknowledgement. Pre-dispatch
-busy or unavailable channels can be skipped; an unacknowledged post-dispatch
-frame is not sent to a second channel. Filesystem claim, completion, failure,
-and restart recovery remain authoritative until the live path proves equivalent
-behavior.
+The current parity stage keeps the filesystem as the durability boundary. A
+configured pool reserves one ready named channel per concurrent enqueue and
+writes the durable job reference before dispatch. The version-2 generation
+frame supplies a one-use token; the peer atomically claims the pending file and
+creates an owner-only renewable lease before acknowledging. Completion and
+failure helpers require that token while the lease is live. Pre-dispatch busy
+or unavailable channels can be skipped; an unacknowledged post-dispatch frame
+is not sent to a second channel. The mailbox monitor ignores live leases,
+revokes expired ones under a per-job lock, and resumes that work through the
+normal polling loop. Immutable terminal files and app reconciliation remain
+authoritative until direct result-frame parity is proven.
 
 ## Co-proc prerequisite
 
@@ -62,24 +67,31 @@ See the companion proposal in the `co-proc` repository: `docs/development/attach
 
 ## Protocol
 
-Every message includes `version`, `type`, and a correlation `id`. Examples omit `version: 1` for brevity.
+Every message includes `version`, `type`, and a correlation `id`. Readiness
+remains version 1 while leased generation dispatch and acknowledgement use
+version 2.
 
 ```json
-{"type":"gen","id":"job-123","prompt":"...","card_id":"card-1"}
-{"type":"result","id":"job-123","card_id":"card-1","path":"/absolute/path/image.png"}
-{"type":"suggest_edits","id":"edit-1","card_id":"card-1","recent_verdicts":[]}
-{"type":"blend","id":"blend-1","a":"card-1","b":"card-2","ratio":0.6}
-{"type":"write_from_set","id":"write-1","source_image_ids":["image-1","image-2","image-3"],"style_notes":"..."}
+{"version":1,"type":"ready","id":"gen_a"}
+{"version":2,"type":"gen","id":"job-123","kind":"refill","job_path":"/absolute/mailbox/pending/job-123.json","lease_path":"/absolute/mailbox/leases/job-123.json","lease_token":"uuid","lease_duration_ms":120000}
+{"version":2,"type":"ack","id":"job-123","lease_token":"uuid","lease_expires_at":"ISO-8601 timestamp"}
 ```
 
-Generation results must name a fully decoded standalone square image at an absolute path. The existing immutable asset validation and SHA-256 publication rules remain the terminal acceptance boundary.
+Persistent generation peers publish through the existing file-backed completion
+or failure helper with the same lease token. Generation results must name a
+fully decoded standalone square image at an absolute path. The existing
+immutable asset validation and SHA-256 publication rules remain the terminal
+acceptance boundary.
 
 During dispatch staging, a persistent generation peer writes
 `{"type":"ready","id":"gen_a"}` before accepting work. The app responds with
-the `gen` frame only after observing readiness, and the peer confirms receipt
-with `{"type":"ack","id":"job-123"}`. A peer may report `busy` before dispatch
-or an `error` correlated to a job. Readiness and acknowledgement are
-backpressure signals, not terminal generation outcomes.
+the version-2 `gen` frame only after observing readiness. That frame includes
+`lease_token`, `lease_path`, and `lease_duration_ms`. The peer runs the durable
+claim helper, then confirms the matching token and exact `lease_expires_at` in
+its version-2 `ack`. It renews before expiry and passes the token to the
+completion or failure helper. A peer may report `busy` before dispatch or an
+`error` correlated to a job. Readiness and acknowledgement are backpressure
+and ownership signals, not terminal generation outcomes.
 
 ## Prompt-card deck
 
@@ -129,9 +141,9 @@ The Preference profile modal has a top-line **Frozen / Guided / Unfettered** fre
 2. Add a Diptych transport adapter behind the existing generation interface while retaining durable job reconciliation. Merged in Diptych Picker PR #8 as an opt-in notification adapter.
 3. Move generation workers to persistent named channels and remove mailbox
    polling only after parity tests pass. In progress: ready/acknowledged
-   multi-channel dispatch and bounded local reservation are implemented;
-   durable claim, terminal result ownership, and restart parity remain on the
-   mailbox path.
+   multi-channel dispatch, durable renewable claim leases, token-gated outcome
+   ownership, and expiry takeover are implemented. Direct live terminal-result
+   ingestion and full restart parity still remain on the mailbox path.
 4. Add deck persistence, weighted draw, winner updates, verdict tracking, and editor suggestions. Implemented.
 5. Add blend, write-from-set, lineage UI, and winner-driven inspiration controls.
 6. Fix export responsiveness during loading and add ten-win champion retirement with focused regression tests.

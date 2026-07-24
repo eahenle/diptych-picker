@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, readdir, rename } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   atomicCreateJson,
+  claimUnleasedJob,
   dataDirectory,
   JOB_ID,
+  leaseRecoveryState,
   parseArgs,
   readJsonIfExists,
+  releaseExpiredJobLease,
   validateJobKind,
 } from "./protocol-utils.mjs";
 
@@ -70,21 +73,28 @@ async function findNextJob() {
 
   if (batchId) {
     const activeJobs = await withTerminalResults(await listJobs(active));
-    return findBatchPartner(activeJobs, pendingJobs, batchId, ownerToken);
+    return findBatchPartner(
+      await prepareBatchEntries(activeJobs),
+      pendingJobs,
+      batchId,
+      ownerToken,
+    );
   }
 
   if (resume) {
     const activeJobs = await withTerminalResults(await listJobs(active));
-    const unterminatedActive = activeJobs
-      .filter(({ terminalResult }) => terminalResult === null)
-      .sort(compareJobs);
+    const unterminatedActive = recoverableEntries(activeJobs, true).sort(
+      compareJobs,
+    );
     const activePriority = unterminatedActive.find(({ job }) => !isRefill(job));
     if (activePriority) {
-      return presentForOwner(activePriority);
+      const [prepared] = await prepareRecoverableEntries([activePriority], 1);
+      if (prepared) return presentForOwner(prepared);
     }
-    const activeRefills = unterminatedActive
-      .filter(({ job }) => isRefill(job))
-      .slice(0, maxRefills);
+    const activeRefills = await prepareRecoverableEntries(
+      unterminatedActive.filter(({ job }) => isRefill(job)),
+      maxRefills,
+    );
     if (activeRefills.length > 0) {
       return presentRefillBatch(activeRefills);
     }
@@ -95,6 +105,23 @@ async function findNextJob() {
       if (!ownership) continue;
       const claimed = await claim(entry);
       if (claimed) return present(claimed, ownership.ownerToken);
+    }
+  } else {
+    const activeJobs = await withTerminalResults(await listJobs(active));
+    const expiredActive = recoverableEntries(activeJobs, false).sort(
+      compareJobs,
+    );
+    const expiredPriority = expiredActive.find(({ job }) => !isRefill(job));
+    if (expiredPriority) {
+      const [prepared] = await prepareRecoverableEntries([expiredPriority], 1);
+      if (prepared) return presentForOwner(prepared);
+    }
+    const expiredRefills = await prepareRecoverableEntries(
+      expiredActive.filter(({ job }) => isRefill(job)),
+      maxRefills,
+    );
+    if (expiredRefills.length > 0) {
+      return presentRefillBatch(expiredRefills);
     }
   }
   const orderedPending = pendingJobs.sort(compareJobs);
@@ -181,11 +208,68 @@ async function findBatchPartner(
 
 async function withTerminalResults(entries) {
   return Promise.all(
-    entries.map(async (entry) => ({
-      ...entry,
-      terminalResult: await terminalResult(entry.job.id),
-    })),
+    entries.map(async (entry) => {
+      const terminal = await terminalResult(entry.job.id);
+      const outcomeReservation =
+        terminal === null
+          ? await readJsonIfExists(
+              join(mailbox, "outcomes", `${entry.job.id}.json`),
+            )
+          : null;
+      return {
+        ...entry,
+        terminalResult: terminal,
+        outcomeReservation,
+        leaseState:
+          terminal === null
+            ? await leaseRecoveryState(mailbox, entry.job.id)
+            : "terminal",
+      };
+    }),
   );
+}
+
+function recoverableEntries(entries, includeUnleased) {
+  return entries.filter(
+    (entry) =>
+      entry.terminalResult === null &&
+      entry.outcomeReservation === null &&
+      (entry.leaseState === "expired" ||
+        (includeUnleased && entry.leaseState === "unleased")),
+  );
+}
+
+async function prepareRecoverableEntries(entries, limit) {
+  const prepared = [];
+  for (const entry of entries) {
+    if (prepared.length === limit) break;
+    if (
+      entry.leaseState === "expired" &&
+      !(await releaseExpiredJobLease(mailbox, entry.job.id))
+    ) {
+      continue;
+    }
+    prepared.push({ ...entry, leaseState: "unleased" });
+  }
+  return prepared;
+}
+
+async function prepareBatchEntries(entries) {
+  const prepared = entries.filter(
+    (entry) =>
+      entry.terminalResult !== null ||
+      (entry.outcomeReservation === null && entry.leaseState === "unleased"),
+  );
+  const expired = entries.filter(
+    (entry) =>
+      entry.terminalResult === null &&
+      entry.outcomeReservation === null &&
+      entry.leaseState === "expired",
+  );
+  return [
+    ...prepared,
+    ...(await prepareRecoverableEntries(expired, Number.POSITIVE_INFINITY)),
+  ];
 }
 
 async function terminalResult(jobId) {
@@ -226,13 +310,14 @@ async function listJobs(directory) {
 }
 
 async function claim(entry) {
-  try {
-    await rename(join(pending, entry.filename), join(active, entry.filename));
-    return entry;
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  }
+  return (await claimUnleasedJob(
+    mailbox,
+    join(pending, entry.filename),
+    join(active, entry.filename),
+    entry.job.id,
+  ))
+    ? entry
+    : null;
 }
 
 function compareJobs(left, right) {

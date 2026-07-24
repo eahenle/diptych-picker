@@ -3,6 +3,7 @@
 The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 
 - [Paths](#paths)
+- [Persistent-worker leases](#persistent-worker-leases)
 - [Job request](#job-request)
 - [Proposal](#proposal)
 - [Completed result](#completed-result)
@@ -13,6 +14,9 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `agent-mailbox/pending/<jobId>.json`: immutable request waiting to be claimed
 - `agent-mailbox/active/<jobId>.json`: request claimed by the coordinator
 - `agent-mailbox/batches/<batchId>.json`: durable initial-batch owner token
+- `agent-mailbox/leases/<jobId>.json`: renewable persistent-worker claim
+- `agent-mailbox/expired-leases/<jobId>.<token>.json`: revoked lease audit
+- `agent-mailbox/lease-locks/<jobId>.lock/`: short-lived ownership lock
 - `agent-mailbox/outcomes/<jobId>.json`: exclusive `completed` or `failed` outcome reservation
 - `agent-mailbox/completed/<jobId>.json`: successful terminal result
 - `agent-mailbox/failed/<jobId>.json`: retryable terminal failure
@@ -27,6 +31,44 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `output/artifacts/<sha256-of-png-bytes>.png`: discoverable immutable export of every completed candidate
 
 Only the helper scripts move or create mailbox artifacts. The app archives terminal artifacts after reconciling them into game state.
+
+## Persistent-worker leases
+
+The optional co-proc path uses a version-2 generation frame with an unguessable
+`lease_token`, an absolute `lease_path`, and `lease_duration_ms` from 10000
+through 600000. The peer must claim before acknowledging:
+
+```bash
+npm run agent:claim-lease -- \
+  --job <id> \
+  --channel <channel> \
+  --lease-token <token> \
+  --lease-ms <duration>
+```
+
+The helper serializes ownership with the per-job lease lock, verifies that no
+terminal result exists, creates an owner-only lease, and atomically moves the
+matching pending file to active. It is idempotent only for the same live token.
+The peer then returns a version-2 `ack` with the same token and the exact
+`expiresAt` printed by the helper. An acknowledgement without that durable
+lease is unconfirmed delivery.
+
+The owner renews before expiry:
+
+```bash
+npm run agent:renew-lease -- \
+  --job <id> \
+  --lease-token <token> \
+  --lease-ms <duration>
+```
+
+Every completion or failure command accepts `--lease-token <token>`. A live
+lease rejects an omitted or different token, and the exclusive outcome
+reservation records the token so a matching idempotent publication retry
+remains possible. The mailbox monitor never creates a lease. `agent:next`
+skips live leases; under the same lock it revokes an expired lease and returns
+that active job during ordinary polling or startup recovery. A stale peer
+cannot reserve an outcome after takeover.
 
 ## Job request
 
@@ -292,6 +334,12 @@ At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 -
 
 Every returned refill must immediately receive its own fresh worker. Before claiming the first side of an initial batch, the helper atomically creates one batch ownership record and includes its unguessable `batchOwnerToken` in the printed request. Other ordinary calls skip the owner's pending partner. A wait must be between 0 and 30000 milliseconds. `--max-refills` is not accepted with owned `--batch` inspection.
 
+Both startup recovery and pending claims exclude jobs with a live
+persistent-worker lease. Ordinary polling also scans active leased work,
+revokes leases whose expiry has passed, and returns those jobs with the same
+priority and refill batching rules. Outcome-reserved jobs remain with their
+recorded publisher instead of being reassigned mid-publication.
+
 After receiving an initial job, use `npm run agent:next -- --wait-ms 30000 --batch <batchId> --owner-token <batchOwnerToken>`. Both arguments are required and the token must match the durable ownership record. If a call times out without JSON, repeat that same owned-batch call; do not make an ordinary next-job call while the partner is pending. Continue until the partner or terminal request appears, or the user stops the runner. For a new batch, this claims or returns the opposite-side partner before exactly two parallel workers start. On recovery, if one partner already has a completed or failed result, batch inspection returns that request with `terminalStatus: "completed"` or `"failed"`; never generate that side again and process only the unfinished request. If the unfinished partner was still pending, startup `--resume` claims it under the recovered owner token before batch inspection reports the terminal side.
 
 ## Proposal
@@ -320,7 +368,7 @@ The four base proposal fields are always required. `preferenceRevision` must be 
 
 ## Completed result
 
-`npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png"` requires the matching active job. It rejects inputs over 50 MB or 4096 by 4096 pixels, then uses Sharp to identify and fully decode exactly one square PNG. It reserves the `completed` outcome, hashes the exact PNG bytes with SHA-256, creates `assets/<sha256>.png` and `output/artifacts/<sha256>.png` without overwriting, and atomically publishes:
+`npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png" [--lease-token <token>]` requires the matching active job. A persistent peer must supply its lease token; mailbox-monitor work is unleased and omits it. The helper rejects inputs over 50 MB or 4096 by 4096 pixels, then uses Sharp to identify and fully decode exactly one square PNG. It reserves the `completed` outcome, hashes the exact PNG bytes with SHA-256, creates `assets/<sha256>.png` and `output/artifacts/<sha256>.png` without overwriting, and atomically publishes:
 
 ```json
 {
@@ -463,7 +511,7 @@ For a prompt-card blender job, write exactly one proposal to `<data-root>/agent-
 
 ## Failed result and heartbeat
 
-Write the reason to `<data-root>/agent-work/<id>/failure.txt`. `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt" --category <category>` requires the matching active job, reserves the `failed` outcome, and atomically publishes a result with `status: "failed"`, an ISO timestamp, the non-empty `message`, `retryable: true`, and its category. Use `moderation` only for a provider safety or moderation block, `invalid-output` for an unusable worker handoff, and `operational` for interruptions or infrastructure failures. The UI surfaces moderation failures so the player can adjust their profile.
+Write the reason to `<data-root>/agent-work/<id>/failure.txt`. `npm run agent:fail -- --job <id> --message-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/failure.txt" --category <category> [--lease-token <token>]` requires the matching active job, reserves the `failed` outcome, and atomically publishes a result with `status: "failed"`, an ISO timestamp, the non-empty `message`, `retryable: true`, and its category. Persistent peers supply their lease token; the mailbox monitor omits it after an expired lease has been revoked. Use `moderation` only for a provider safety or moderation block, `invalid-output` for an unusable worker handoff, and `operational` for interruptions or infrastructure failures. The UI surfaces moderation failures so the player can adjust their profile.
 
 Only one outcome reservation can exist for a job. A retry matching that outcome resumes safely and returns an already-published result unchanged. The opposite outcome is rejected. Completion also resumes when its deterministic asset already exists only if the existing bytes exactly equal the validated source; differing bytes are never overwritten.
 

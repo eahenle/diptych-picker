@@ -1,7 +1,8 @@
 import { constants } from "node:fs";
 import { lstat, open, readFile, type FileHandle } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
@@ -23,6 +24,19 @@ const coProcMetadataSchema = z
     output: z.string().min(1),
   })
   .strict();
+const leaseTokenSchema = z.string().uuid();
+const timestampSchema = z.string().datetime({ offset: true });
+const coProcLeaseSchema = z
+  .object({
+    version: z.literal(1),
+    jobId: z.string().trim().min(1),
+    channel: z.string().regex(channelNamePattern),
+    token: leaseTokenSchema,
+    claimedAt: timestampSchema,
+    renewedAt: timestampSchema,
+    expiresAt: timestampSchema,
+  })
+  .strict();
 const coProcControlFrameSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -40,21 +54,24 @@ const coProcControlFrameSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
-      version: z.literal(1),
+      version: z.literal(2),
       type: z.literal("ack"),
       id: z.string().trim().min(1),
+      lease_token: leaseTokenSchema,
+      lease_expires_at: timestampSchema,
     })
     .strict(),
   z
     .object({
-      version: z.literal(1),
+      version: z.literal(2),
       type: z.literal("result"),
       id: z.string().trim().min(1),
+      lease_token: leaseTokenSchema,
     })
     .passthrough(),
   z
     .object({
-      version: z.literal(1),
+      version: z.union([z.literal(1), z.literal(2)]),
       type: z.literal("error"),
       id: z.string().trim().min(1),
       message: z.string().trim().min(1),
@@ -77,6 +94,7 @@ interface CoProcGenerationTransportOptions {
   maximumFrameBytes?: number;
   readyTimeoutMs?: number;
   acknowledgementTimeoutMs?: number;
+  leaseDurationMs?: number;
 }
 
 export class CoProcChannelUnavailableError extends Error {
@@ -148,6 +166,7 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
   private readonly maximumFrameBytes: number;
   private readonly readyTimeoutMs: number;
   private readonly acknowledgementTimeoutMs: number;
+  private readonly leaseDurationMs: number;
   private outputBuffer = "";
   private serializedNotification: Promise<void> = Promise.resolve();
 
@@ -173,6 +192,16 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
         throw new Error(`${name} must be an integer from 1 through 30000`);
       }
     }
+    if (
+      options.leaseDurationMs !== undefined &&
+      (!Number.isInteger(options.leaseDurationMs) ||
+        options.leaseDurationMs < 10_000 ||
+        options.leaseDurationMs > 600_000)
+    ) {
+      throw new Error(
+        "leaseDurationMs must be an integer from 10000 through 600000",
+      );
+    }
     this.channel = options.channel;
     this.runtimeRoot = resolve(
       /* turbopackIgnore: true */ options.runtimeRoot ??
@@ -181,6 +210,7 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
     this.maximumFrameBytes = options.maximumFrameBytes ?? 4095;
     this.readyTimeoutMs = options.readyTimeoutMs ?? 100;
     this.acknowledgementTimeoutMs = options.acknowledgementTimeoutMs ?? 500;
+    this.leaseDurationMs = options.leaseDurationMs ?? 120_000;
   }
 
   async notify(job: GenerationJob, durableJobPath: string): Promise<void> {
@@ -206,6 +236,21 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
     if (!isAbsolute(durableJobPath) || resolvedJobPath !== durableJobPath) {
       throw new Error("Co-proc job paths must be absolute and normalized");
     }
+    if (
+      basename(dirname(resolvedJobPath)) !== "pending" ||
+      basename(resolvedJobPath) !== `${validatedJob.id}.json`
+    ) {
+      throw new Error(
+        "Co-proc job paths must identify the matching pending mailbox job",
+      );
+    }
+    const mailboxDirectory = dirname(dirname(resolvedJobPath));
+    const leasePath = join(
+      mailboxDirectory,
+      "leases",
+      `${validatedJob.id}.json`,
+    );
+    const leaseToken = randomUUID();
 
     const channelDirectory = join(this.runtimeRoot, this.channel);
     const metadataPath = join(channelDirectory, "metadata.json");
@@ -243,11 +288,14 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
     }
 
     const frame = `${JSON.stringify({
-      version: 1,
+      version: 2,
       type: "gen",
       id: validatedJob.id,
       kind: validatedJob.kind,
       job_path: resolvedJobPath,
+      lease_path: leasePath,
+      lease_token: leaseToken,
+      lease_duration_ms: this.leaseDurationMs,
     })}\n`;
     if (Buffer.byteLength(frame, "utf8") > this.maximumFrameBytes + 1) {
       throw new Error(`Co-proc frame exceeds ${this.maximumFrameBytes} bytes`);
@@ -297,7 +345,17 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
       } finally {
         await input.close();
       }
-      await this.waitForAcknowledgement(output, validatedJob.id);
+      const acknowledgement = await this.waitForAcknowledgement(
+        output,
+        validatedJob.id,
+        leaseToken,
+      );
+      await this.verifyDurableLease(
+        leasePath,
+        validatedJob.id,
+        leaseToken,
+        acknowledgement.lease_expires_at,
+      );
     } finally {
       await output.close();
     }
@@ -334,13 +392,17 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
   private async waitForAcknowledgement(
     output: FileHandle,
     jobId: string,
-  ): Promise<void> {
+    leaseToken: string,
+  ): Promise<Extract<CoProcControlFrame, { type: "ack" }>> {
     const deadline = Date.now() + this.acknowledgementTimeoutMs;
     try {
       while (Date.now() < deadline) {
         const control = await this.readControlFrame(output, deadline);
         if (control.type === "ack" && control.id === jobId) {
-          return;
+          if (control.lease_token !== leaseToken) {
+            throw new Error("acknowledgement used another lease token");
+          }
+          return control;
         }
         if (
           (control.type === "busy" || control.type === "error") &&
@@ -359,6 +421,40 @@ export class CoProcGenerationTransport implements GenerationChannelTransport {
         this.channel,
         jobId,
         error instanceof Error ? error.message : "acknowledgement failed",
+        { cause: error },
+      );
+    }
+  }
+
+  private async verifyDurableLease(
+    leasePath: string,
+    jobId: string,
+    leaseToken: string,
+    acknowledgedExpiry: string,
+  ): Promise<void> {
+    try {
+      await assertOwnedPath(leasePath, 0o600, "file");
+      const lease = coProcLeaseSchema.parse(
+        JSON.parse(
+          await readFile(/* turbopackIgnore: true */ leasePath, "utf8"),
+        ),
+      );
+      if (
+        lease.jobId !== jobId ||
+        lease.channel !== this.channel ||
+        lease.token !== leaseToken ||
+        lease.expiresAt !== acknowledgedExpiry ||
+        Date.parse(lease.expiresAt) <= Date.now()
+      ) {
+        throw new Error("durable lease does not match acknowledgement");
+      }
+    } catch (error) {
+      throw new CoProcDeliveryUnconfirmedError(
+        this.channel,
+        jobId,
+        error instanceof Error
+          ? `durable lease verification failed: ${error.message}`
+          : "durable lease verification failed",
         { cause: error },
       );
     }

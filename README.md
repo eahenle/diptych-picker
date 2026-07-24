@@ -65,25 +65,33 @@ The optional comma-separated `CO_PROC_GENERATION_CHANNELS` setting enables an
 acknowledged persistent-channel pool behind the same durable mailbox interface.
 The legacy singular `CO_PROC_GENERATION_CHANNEL` remains accepted. The app first
 publishes the complete job to the mailbox, selects one locally idle channel,
-waits for its version-1 `ready` frame, then sends a compact `gen` frame
-containing the job ID, kind, and absolute durable job path. Delivery succeeds
-only after the same channel returns `{"version":1,"type":"ack","id":"<job>"}`.
+waits for its version-1 `ready` frame, then sends a version-2 `gen` frame with
+the job ID, kind, absolute durable job and lease paths, a one-use lease token,
+and the lease duration. The peer must atomically move the pending job to active
+with `npm run agent:claim-lease` before returning a version-2 acknowledgement
+containing the matching token and expiry. The app verifies that owner-only
+durable lease before accepting delivery.
 
 Concurrent enqueues reserve different ready channels, so three configured
 channels can accept three independent dispatches without overcommitting one
 worker. A pre-dispatch `busy` frame or unavailable endpoint lets the pool try
 another channel. Once a generation frame has been written, a missing
 acknowledgement is never retried on a second live channel because that could
-duplicate work; the durable mailbox remains available for explicit recovery.
+duplicate work. A persistent peer renews its lease with
+`npm run agent:renew-lease` and supplies `--lease-token` when completing or
+failing the job. The mailbox monitor skips live leases and automatically takes
+over expired leases during its ordinary polling loop, without requiring an app
+or monitor restart.
 
 Set `CO_PROC_RUNTIME_ROOT` only when `co-proc` uses a non-default runtime root.
 `CO_PROC_GENERATION_READY_TIMEOUT_MS` and
 `CO_PROC_GENERATION_ACK_TIMEOUT_MS` tune the bounded handshake and default to
-100 and 500 milliseconds. The adapter revalidates owner-only directory,
-metadata, process, and FIFO state on every dispatch. Mailbox polling and
-terminal publication remain authoritative during this parity stage; moving
-durable claim and result ownership into persistent channel workers remains a
-separate step that requires end-to-end restart and failure parity.
+100 and 500 milliseconds. `CO_PROC_GENERATION_LEASE_MS` defaults to 120000 and
+accepts 10000 through 600000 milliseconds; peers must renew before expiry. The
+adapter revalidates owner-only directory, metadata, process, FIFO, and lease
+state on every dispatch. Exclusive outcome reservations and immutable terminal
+files remain the app reconciliation boundary, while live claim and result
+publication are now token-owned with expiry-based mailbox fallback.
 
 ## Curated and learned pools
 

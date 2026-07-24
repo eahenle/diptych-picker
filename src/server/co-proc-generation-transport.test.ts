@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { chmod, mkdir, mkdtemp, open, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
@@ -69,6 +69,38 @@ async function createSecureChannel(root: string, name: string) {
     input: await open(input, constants.O_RDWR | constants.O_NONBLOCK),
     output: await open(output, constants.O_RDWR | constants.O_NONBLOCK),
   };
+}
+
+function pendingJobPath(root: string, jobId = "job-1"): string {
+  return join(root, "agent-mailbox", "pending", `${jobId}.json`);
+}
+
+async function claimDispatchedLease(
+  dataRoot: string,
+  frame: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [
+      join(
+        process.cwd(),
+        ".agents/skills/run-diptych-picker/scripts/claim-lease.mjs",
+      ),
+      "--job",
+      String(frame.id),
+      "--channel",
+      "gen_a",
+      "--lease-token",
+      String(frame.lease_token),
+      "--lease-ms",
+      String(frame.lease_duration_ms),
+    ],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, LOCAL_DATA_DIR: dataRoot },
+    },
+  );
+  return JSON.parse(stdout);
 }
 
 const job = (): GenerationJob => ({
@@ -182,10 +214,11 @@ describe("TransportNotifyingGenerationMailbox", () => {
 describe("CoProcGenerationTransport", () => {
   it("dispatches after ready and requires a matching acknowledgement", async () => {
     const root = await mkdtemp(join(tmpdir(), "diptych-co-proc-"));
-    const durableJobPath = join(root, "mailbox", "pending", "job-1.json");
+    const dataRoot = join(root, "data");
+    const durableJobPath = pendingJobPath(dataRoot);
     await chmod(root, 0o700);
-    await mkdir(join(root, "mailbox", "pending"), { recursive: true });
-    await writeFile(durableJobPath, "{}\n", "utf8");
+    await mkdir(dirname(durableJobPath), { recursive: true });
+    await writeFile(durableJobPath, `${JSON.stringify(job())}\n`, "utf8");
     const peer = await createSecureChannel(root, "gen_a");
     const transport = new CoProcGenerationTransport({
       channel: "gen_a",
@@ -203,18 +236,25 @@ describe("CoProcGenerationTransport", () => {
         })}\n`,
       );
       const notification = transport.notify(job(), durableJobPath);
-      expect(await readFrame(peer.input)).toEqual({
-        version: 1,
+      const frame = await readFrame(peer.input);
+      expect(frame).toMatchObject({
+        version: 2,
         type: "gen",
         id: "job-1",
         kind: "refill",
         job_path: durableJobPath,
+        lease_path: join(dataRoot, "agent-mailbox", "leases", "job-1.json"),
+        lease_duration_ms: 120_000,
       });
+      expect(frame.lease_token).toEqual(expect.any(String));
+      const lease = await claimDispatchedLease(dataRoot, frame);
       await peer.output.writeFile(
         `${JSON.stringify({
-          version: 1,
+          version: 2,
           type: "ack",
           id: "job-1",
+          lease_token: frame.lease_token,
+          lease_expires_at: lease.expiresAt,
         })}\n`,
       );
       await expect(notification).resolves.toBeUndefined();
@@ -243,7 +283,7 @@ describe("CoProcGenerationTransport", () => {
         })}\n`,
       );
       await expect(
-        transport.notify(job(), join(root, "job.json")),
+        transport.notify(job(), pendingJobPath(root)),
       ).rejects.toBeInstanceOf(CoProcChannelUnavailableError);
     } finally {
       await peer.input.close();
@@ -270,8 +310,47 @@ describe("CoProcGenerationTransport", () => {
           id: "gen_a",
         })}\n`,
       );
-      const notification = transport.notify(job(), join(root, "job.json"));
+      const notification = transport.notify(job(), pendingJobPath(root));
       await readFrame(peer.input);
+      await expect(notification).rejects.toBeInstanceOf(
+        CoProcDeliveryUnconfirmedError,
+      );
+    } finally {
+      await peer.input.close();
+      await peer.output.close();
+    }
+  });
+
+  it("rejects an acknowledgement without its matching durable lease", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-co-proc-"));
+    await chmod(root, 0o700);
+    const peer = await createSecureChannel(root, "gen_a");
+    const transport = new CoProcGenerationTransport({
+      channel: "gen_a",
+      runtimeRoot: root,
+      readyTimeoutMs: 100,
+      acknowledgementTimeoutMs: 100,
+    });
+
+    try {
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 1,
+          type: "ready",
+          id: "gen_a",
+        })}\n`,
+      );
+      const notification = transport.notify(job(), pendingJobPath(root));
+      const frame = await readFrame(peer.input);
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 2,
+          type: "ack",
+          id: "job-1",
+          lease_token: frame.lease_token,
+          lease_expires_at: new Date(Date.now() + 120_000).toISOString(),
+        })}\n`,
+      );
       await expect(notification).rejects.toBeInstanceOf(
         CoProcDeliveryUnconfirmedError,
       );
@@ -399,8 +478,8 @@ describe("CoProcGenerationTransport", () => {
       runtimeRoot: root,
     });
 
-    await expect(
-      transport.notify(job(), join(root, "job.json")),
-    ).rejects.toThrow(/fifo/i);
+    await expect(transport.notify(job(), pendingJobPath(root))).rejects.toThrow(
+      /fifo/i,
+    );
   });
 });

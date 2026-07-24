@@ -20,6 +20,8 @@
     "codex:play": "./dev-and-play",
     "run:production": "./run-only",
     "agent:next": "node .agents/skills/run-diptych-picker/scripts/next-job.mjs",
+    "agent:claim-lease": "node .agents/skills/run-diptych-picker/scripts/claim-lease.mjs",
+    "agent:renew-lease": "node .agents/skills/run-diptych-picker/scripts/renew-lease.mjs",
     "agent:complete": "node .agents/skills/run-diptych-picker/scripts/complete-job.mjs",
     "agent:complete-profile": "node .agents/skills/run-diptych-picker/scripts/complete-source-profile.mjs",
     "agent:complete-card-editor": "node .agents/skills/run-diptych-picker/scripts/complete-prompt-card-editor.mjs",

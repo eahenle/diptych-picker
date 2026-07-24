@@ -958,6 +958,7 @@ export class FileGenerationMailbox
         join(this.rootDirectory, "completed", `${validatedJobId}.json`),
         join(this.rootDirectory, "failed", `${validatedJobId}.json`),
         join(this.rootDirectory, "outcomes", `${validatedJobId}.json`),
+        join(this.rootDirectory, "leases", `${validatedJobId}.json`),
       ].map((path) => rm(path, { force: true })),
     );
   }

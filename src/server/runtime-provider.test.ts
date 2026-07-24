@@ -6,6 +6,7 @@ const originalCoProcChannels = process.env.CO_PROC_GENERATION_CHANNELS;
 const originalReadyTimeout = process.env.CO_PROC_GENERATION_READY_TIMEOUT_MS;
 const originalAcknowledgementTimeout =
   process.env.CO_PROC_GENERATION_ACK_TIMEOUT_MS;
+const originalLeaseDuration = process.env.CO_PROC_GENERATION_LEASE_MS;
 
 function restoreEnvironment(
   name: string,
@@ -32,6 +33,7 @@ describe("runtime generation provider", () => {
       "CO_PROC_GENERATION_ACK_TIMEOUT_MS",
       originalAcknowledgementTimeout,
     );
+    restoreEnvironment("CO_PROC_GENERATION_LEASE_MS", originalLeaseDuration);
   });
 
   it.each([
@@ -77,6 +79,7 @@ describe("runtime generation provider", () => {
     process.env.CO_PROC_GENERATION_CHANNELS = "gen_a, gen_b, gen_c";
     process.env.CO_PROC_GENERATION_READY_TIMEOUT_MS = "125";
     process.env.CO_PROC_GENERATION_ACK_TIMEOUT_MS = "750";
+    process.env.CO_PROC_GENERATION_LEASE_MS = "120000";
     vi.resetModules();
 
     const { TransportNotifyingGenerationMailbox } =
@@ -96,6 +99,17 @@ describe("runtime generation provider", () => {
 
     await expect(import("./runtime")).rejects.toThrow(
       /CO_PROC_GENERATION_READY_TIMEOUT_MS/,
+    );
+  });
+
+  it("rejects an invalid persistent-worker lease duration", async () => {
+    process.env.GENERATION_PROVIDER = "agent";
+    process.env.CO_PROC_GENERATION_CHANNELS = "gen_a";
+    process.env.CO_PROC_GENERATION_LEASE_MS = "9999";
+    vi.resetModules();
+
+    await expect(import("./runtime")).rejects.toThrow(
+      /CO_PROC_GENERATION_LEASE_MS/,
     );
   });
 });

@@ -7,6 +7,7 @@ import {
   assertActiveJob,
   dataDirectory,
   JOB_ID,
+  LEASE_TOKEN,
   parseArgs,
   publishTerminal,
   required,
@@ -28,16 +29,20 @@ const suggestionSchema = z.object({ proposal: proposalSchema }).strict();
 const args = parseArgs(process.argv.slice(2));
 const jobId = required(args, "job");
 if (!JOB_ID.test(jobId)) throw new Error("Invalid prompt-card blender job ID");
+const leaseToken = args["lease-token"];
+if (leaseToken !== undefined && !LEASE_TOKEN.test(leaseToken)) {
+  throw new Error("Invalid lease token");
+}
 const suggestion = suggestionSchema.parse(
   JSON.parse(await readFile(required(args, "suggestion-file"), "utf8")),
 );
 const mailbox = join(dataDirectory(), "agent-mailbox");
-const activeJob = await assertActiveJob(mailbox, jobId);
+const activeJob = await assertActiveJob(mailbox, jobId, leaseToken);
 if (activeJob.kind !== "prompt-card-blender") {
   throw new Error(`Job ${jobId} is not a prompt-card blender request`);
 }
 
-await reserveOutcome(mailbox, jobId, "completed");
+await reserveOutcome(mailbox, jobId, "completed", leaseToken);
 const published = await publishTerminal(mailbox, jobId, "completed", {
   jobId,
   kind: "prompt-card-blender",
