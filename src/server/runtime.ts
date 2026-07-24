@@ -15,6 +15,7 @@ import {
   summarizeDisplayedScores,
   summarizeFavoriteGallery,
   summarizePoolLeaderboard,
+  type CandidateRating,
   type PoolLeaderboardEntry,
 } from "@/domain/challenger-state";
 import { FileGenerationMailbox } from "./agent-mailbox";
@@ -38,12 +39,14 @@ import {
   MockLeaderboardProfileMailbox,
   MockPromptCardBlenderMailbox,
   MockPromptCardEditorMailbox,
+  MockPromptCardWriterMailbox,
   MockSourceProfileMailbox,
 } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
 import { challengerConfig } from "./challenger-config";
 import { SourceProfileService } from "./source-profile-service";
 import { LeaderboardProfileService } from "./leaderboard-profile-service";
+import { PromptCardWriterService } from "./prompt-card-writer-service";
 import {
   CoProcGenerationChannelPool,
   CoProcGenerationTransport,
@@ -239,6 +242,27 @@ const promptCardEditorMailbox = mockAgent
 const promptCardBlenderMailbox = mockAgent
   ? new MockPromptCardBlenderMailbox(fileGenerationMailbox, mockAgent)
   : fileGenerationMailbox;
+const promptCardWriterMailbox = mockAgent
+  ? new MockPromptCardWriterMailbox(fileGenerationMailbox, mockAgent)
+  : fileGenerationMailbox;
+const promptCardWriterService = new PromptCardWriterService({
+  mailbox: promptCardWriterMailbox,
+  sourceDirectory: join(dataDirectory, "profile-sources"),
+  readCandidateImage: async (rating: CandidateRating) => {
+    const match = rating.candidate.imageUrl.match(
+      /^\/api\/assets\/([a-zA-Z0-9-]+\.png)$/,
+    );
+    if (!match) {
+      throw new Error(
+        `Invalid generated prompt-card source URL for ${rating.candidate.id}`,
+      );
+    }
+    return {
+      contents: await assetStore.read(match[1]),
+      contentType: "image/png",
+    };
+  },
+});
 export const gameService = new GameService(
   repository,
   challengerRepository,
@@ -251,6 +275,7 @@ export const gameService = new GameService(
   leaderboardProfileService,
   promptCardEditorMailbox,
   promptCardBlenderMailbox,
+  promptCardWriterService,
 );
 const forceGeneratedInitial =
   process.env.GENERATE_INITIAL_CANDIDATES === "true";
@@ -476,6 +501,12 @@ export async function requestPromptCardBlend(
   ratio: number,
 ): Promise<GameState> {
   return gameService.requestPromptCardBlend(cardIds, ratio);
+}
+
+export async function requestPromptCardWriter(
+  candidateIds: string[],
+): Promise<GameState> {
+  return gameService.requestPromptCardWriter(candidateIds);
 }
 
 export async function updatePromptDeck(

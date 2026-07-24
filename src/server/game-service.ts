@@ -73,6 +73,7 @@ import {
   type RefillContext,
 } from "./game-refill";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
+import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import type { AssetStore } from "./providers";
 import type { GameRepository } from "./repository";
 
@@ -114,6 +115,7 @@ export class GameService {
     private readonly leaderboardProfiles?: LeaderboardProfileCoordinator,
     private readonly promptCardEditor?: PromptCardEditorMailbox,
     private readonly promptCardBlender?: PromptCardBlenderMailbox,
+    private readonly promptCardWriter?: PromptCardWriterCoordinator,
   ) {}
 
   async assertIdle(): Promise<void> {
@@ -294,6 +296,77 @@ export class GameService {
     });
   }
 
+  async requestPromptCardWriter(candidateIds: string[]): Promise<GameState> {
+    return this.withStateLocks(async () => {
+      const [current, challengers] = await Promise.all([
+        this.gameRepository.load(),
+        this.challengerRepository.load(),
+      ]);
+      if (!current || !challengers) {
+        throw new MissingGameError(
+          "Start a game before writing prompt cards from images",
+        );
+      }
+      if (!this.promptCardWriter) {
+        throw new PromptDeckError("Prompt-card writing is unavailable.");
+      }
+      if (
+        candidateIds.length < 3 ||
+        candidateIds.length > 5 ||
+        new Set(candidateIds).size !== candidateIds.length
+      ) {
+        throw new PromptDeckError(
+          "Choose three to five distinct generated favorites.",
+        );
+      }
+      const promptDeck = current.promptDeck ?? emptyPromptDeck();
+      if (promptDeck.writerJob) {
+        throw new PromptDeckError(
+          "Wait for the current image-set draft before starting another.",
+        );
+      }
+      const candidates = candidateIds.map((candidateId) =>
+        challengers.ratings.find(
+          (rating) => rating.candidate.id === candidateId,
+        ),
+      );
+      if (
+        candidates.some(
+          (candidate) =>
+            !candidate ||
+            candidate.source !== "generated" ||
+            !candidate.favorite,
+        )
+      ) {
+        throw new PromptDeckError(
+          "Prompt-card sources must be current generated favorites.",
+        );
+      }
+      const jobId = this.createId();
+      const createdAt = this.now();
+      const job = await this.promptCardWriter.prepare(
+        jobId,
+        createdAt,
+        candidates as NonNullable<(typeof candidates)[number]>[],
+      );
+      const updated: GameState = {
+        ...current,
+        promptDeck: {
+          ...promptDeck,
+          writerJob: {
+            jobId,
+            sourceCandidateIds: [...candidateIds],
+            enqueuedAt: createdAt,
+            expectedJob: job,
+          },
+        },
+      };
+      await this.gameRepository.save(updated);
+      await this.ensurePromptCardWriterEnqueued(job);
+      return updated;
+    });
+  }
+
   async updatePromptDeck(
     update:
       | { kind: "deck"; enabled: boolean }
@@ -340,8 +413,11 @@ export class GameService {
                         weight: 1,
                         tags: suggestion.tags,
                         parents: suggestion.parentCardIds ?? [
-                          suggestion.parentCardId,
+                          ...(suggestion.parentCardId
+                            ? [suggestion.parentCardId]
+                            : []),
                         ],
+                        sourceCandidateIds: suggestion.sourceCandidateIds,
                       },
                       this.createId(),
                       this.now(),
@@ -812,6 +888,7 @@ export class GameService {
 
     game = await this.syncPromptCardEditor(game);
     game = await this.syncPromptCardBlender(game);
+    game = await this.syncPromptCardWriter(game);
 
     if (
       game.round.status === "generating" &&
@@ -1243,6 +1320,75 @@ export class GameService {
       await mailbox.enqueuePromptCardBlender(job);
     } catch (error) {
       const work = await mailbox.readPromptCardBlenderWork(job.id);
+      if (work && isDeepStrictEqual(work, job)) return;
+      throw error;
+    }
+  }
+
+  private async syncPromptCardWriter(game: GameState): Promise<GameState> {
+    const writer = this.promptCardWriter;
+    const deck = game.promptDeck;
+    const record = deck?.writerJob;
+    if (!writer || !deck || !record) return game;
+
+    const [work, result] = await Promise.all([
+      writer.readWork(record.jobId),
+      writer.readResult(record.jobId),
+    ]);
+    if (!result) {
+      if (!work) {
+        await this.ensurePromptCardWriterEnqueued(record.expectedJob);
+      } else if (!isDeepStrictEqual(work, record.expectedJob)) {
+        await writer.archive(record.jobId);
+        const next = {
+          ...game,
+          promptDeck: { ...deck, writerJob: null },
+        };
+        await this.gameRepository.save(next);
+        return next;
+      }
+      return game;
+    }
+
+    const validCompleted =
+      work &&
+      isDeepStrictEqual(work, record.expectedJob) &&
+      result.status === "completed" &&
+      result.kind === "prompt-card-writer" &&
+      isDeepStrictEqual(result.sourceCandidateIds, record.sourceCandidateIds);
+    const suggestions = validCompleted
+      ? [
+          ...(deck.suggestions ?? []),
+          {
+            id: this.createId(),
+            sourceCandidateIds: record.sourceCandidateIds,
+            ...result.proposal,
+            createdAt: result.completedAt,
+          },
+        ].slice(-10)
+      : (deck.suggestions ?? []);
+    await writer.archive(record.jobId);
+    const next = {
+      ...game,
+      promptDeck: {
+        ...deck,
+        writerJob: null,
+        suggestions,
+      },
+    };
+    await this.gameRepository.save(next);
+    return next;
+  }
+
+  private async ensurePromptCardWriterEnqueued(
+    job: Parameters<PromptCardWriterCoordinator["enqueue"]>[0],
+  ): Promise<void> {
+    const writer = this.promptCardWriter;
+    if (!writer) return;
+    try {
+      await writer.enqueue(job);
+    } catch (error) {
+      const work = await writer.readWork(job.id);
       if (work && isDeepStrictEqual(work, job)) return;
       throw error;
     }

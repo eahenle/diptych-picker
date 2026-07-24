@@ -5,6 +5,8 @@ import type {
   PromptCard,
   PromptCardBlendRequest,
   PromptCardEditorRequest,
+  PromptCardWriterRequest,
+  PromptCardWriterSource,
   PromptCardVerdict,
   PromptDeck,
 } from "./game";
@@ -19,6 +21,7 @@ export interface CreatePromptCardInput {
   weight: number;
   tags: string[];
   parents?: string[];
+  sourceCandidateIds?: string[];
 }
 
 export function emptyPromptDeck(): PromptDeck {
@@ -28,6 +31,7 @@ export function emptyPromptDeck(): PromptDeck {
     verdicts: [],
     editorJob: null,
     blendJob: null,
+    writerJob: null,
     suggestions: [],
   };
 }
@@ -45,6 +49,9 @@ export function createPromptCard(
     weight: input.weight,
     tags: input.tags.map((tag) => tag.trim()).filter(Boolean),
     parents: input.parents ?? [],
+    ...(input.sourceCandidateIds
+      ? { sourceCandidateIds: [...input.sourceCandidateIds] }
+      : {}),
     active: true,
     createdAt,
     stats: { wins: 0, rejects: 0 },
@@ -153,6 +160,19 @@ export function createPromptCardBlendRequest(
       GenerationPromptCard,
     ],
     ratio,
+  };
+}
+
+export function createPromptCardWriterRequest(
+  sources: PromptCardWriterSource[],
+  id: string,
+  createdAt: string,
+): PromptCardWriterRequest {
+  return {
+    id,
+    kind: "prompt-card-writer",
+    createdAt,
+    sources,
   };
 }
 

@@ -17,6 +17,7 @@ const deletePreferencePreset = vi.fn();
 const createPromptCard = vi.fn();
 const updatePromptDeck = vi.fn();
 const requestPromptCardBlend = vi.fn();
+const requestPromptCardWriter = vi.fn();
 const dismissGenerationNotice = vi.fn();
 const requestSourceProfile = vi.fn();
 const getSourceProfileStatus = vi.fn();
@@ -39,6 +40,7 @@ vi.mock("@/server/runtime", () => ({
   createPromptCard,
   updatePromptDeck,
   requestPromptCardBlend,
+  requestPromptCardWriter,
   dismissGenerationNotice,
   requestSourceProfile,
   getSourceProfileStatus,
@@ -397,9 +399,11 @@ describe("prompt deck", () => {
     createPromptCard.mockReset();
     updatePromptDeck.mockReset();
     requestPromptCardBlend.mockReset();
+    requestPromptCardWriter.mockReset();
     createPromptCard.mockResolvedValue({ promptDeck: { cards: [] } });
     updatePromptDeck.mockResolvedValue({ promptDeck: { cards: [] } });
     requestPromptCardBlend.mockResolvedValue({ promptDeck: { cards: [] } });
+    requestPromptCardWriter.mockResolvedValue({ promptDeck: { cards: [] } });
   });
 
   it("creates a validated prompt card", async () => {
@@ -436,6 +440,20 @@ describe("prompt deck", () => {
       ["card-1", "card-2"],
       0.5,
     );
+  });
+
+  it("requests a validated prompt card from generated favorites", async () => {
+    const { POST } = await import("./preferences/deck/write/route");
+    const candidateIds = ["generated-1", "generated-2", "generated-3"];
+    const response = await POST(
+      new Request("http://localhost/api/game/preferences/deck/write", {
+        method: "POST",
+        body: JSON.stringify({ candidateIds }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(requestPromptCardWriter).toHaveBeenCalledWith(candidateIds);
   });
 
   it("updates deck and card controls", async () => {

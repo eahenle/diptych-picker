@@ -105,6 +105,7 @@ export function usePreferenceEditor({
     clearError: clearPromptDeckError,
     createPromptCard,
     updatePromptDeck,
+    writePromptCard,
   } = usePromptDeck({ commitGame });
 
   const {
@@ -370,5 +371,6 @@ export function usePreferenceEditor({
     savePreferences,
     analyzeSourceImage,
     updatePromptDeck,
+    writePromptCard,
   };
 }

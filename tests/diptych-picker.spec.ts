@@ -16,8 +16,10 @@ interface StoredChallengerState {
   }>;
   refillJobs: Array<{ jobId: string }>;
   ratings: Array<{
-    candidate: { id: string; promptCardId?: string };
+    candidate: { id: string; concept: string; promptCardId?: string };
     poolMember: boolean;
+    source: "curated" | "generated";
+    favorite?: boolean;
   }>;
   consecutiveFallbackDraws: number;
   nextFallbackAt: string | null;
@@ -797,12 +799,93 @@ test("blends two prompt cards into an approval-gated child", async ({
     timeout: 10_000,
   });
 
+  const acceptResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck") &&
+      response.request().method() === "PATCH",
+  );
   await page.getByRole("button", { name: "Accept as new card" }).click();
+  expect((await acceptResponse).status()).toBe(200);
   const state = await (await request.get("/api/game")).json();
   const child = state.game.promptDeck.cards.at(-1);
   expect(child.title).toBe("Copper nocturne + Glass botany");
   expect(child.parents).toEqual(
     state.game.promptDeck.cards.slice(0, 2).map(({ id }: { id: string }) => id),
+  );
+});
+
+test("writes an approval-gated prompt card from three generated favorites", async ({
+  page,
+  request,
+}) => {
+  for (const round of [2, 3, 4]) {
+    await select(page, "left", round);
+    await reconcileAllRefills(request);
+  }
+
+  const generated = (await challengerState()).ratings
+    .filter(({ source }) => source === "generated")
+    .slice(0, 3);
+  expect(generated).toHaveLength(3);
+  for (const { candidate } of generated) {
+    const response = await request.put("/api/game/favorites", {
+      data: { candidateId: candidate.id, favorite: true },
+    });
+    expect(response.status()).toBe(200);
+  }
+
+  await page.getByRole("button", { name: "Favorites" }).click();
+  const favoritesDialog = page.getByRole("dialog", { name: "Favorites" });
+  await expect(
+    favoritesDialog.getByText("0/5 generated favorites"),
+  ).toBeVisible();
+  const sourceButtons = favoritesDialog.getByRole("button", {
+    name: "Select for card",
+  });
+  await expect(sourceButtons).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    await sourceButtons.first().click();
+  }
+  await expect(
+    favoritesDialog.getByText("3/5 generated favorites"),
+  ).toBeVisible();
+
+  const writerResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck/write") &&
+      response.request().method() === "POST",
+  );
+  await favoritesDialog
+    .getByRole("button", { name: "Draft prompt card" })
+    .click();
+  expect((await writerResponse).status()).toBe(200);
+
+  await page.getByText("Prompt deck").click();
+  await expect(
+    page.getByText("Writer is synthesizing a reviewable card"),
+  ).toBeVisible();
+  await expect(page.getByText("Favorite-set synthesis")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(
+    page.getByText("Written from 3 saved generated images"),
+  ).toBeVisible();
+
+  const acceptWriterResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck") &&
+      response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Accept as new card" }).click();
+  expect((await acceptWriterResponse).status()).toBe(200);
+  const state = await (await request.get("/api/game")).json();
+  const card = state.game.promptDeck.cards.at(-1);
+  expect(card).toMatchObject({
+    title: "Favorite-set synthesis",
+    parents: [],
+  });
+  expect(new Set(card.sourceCandidateIds)).toEqual(
+    new Set(generated.map(({ candidate }) => candidate.id)),
   );
 });
 

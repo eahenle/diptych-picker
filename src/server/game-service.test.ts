@@ -21,6 +21,8 @@ import type {
   PromptCardEditorJob,
   PromptCardEditorMailbox,
   PromptCardEditorResult,
+  PromptCardWriterJob,
+  PromptCardWriterResult,
 } from "./agent-mailbox";
 import {
   MemoryChallengerRepository,
@@ -29,6 +31,7 @@ import {
 import { challengerConfig } from "./challenger-config";
 import { GameService, SelectionConflictError } from "./game-service";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
+import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import type { AssetStore } from "./providers";
 import { MemoryGameRepository, type GameRepository } from "./repository";
 
@@ -287,6 +290,52 @@ function promptCardBlender() {
   };
 }
 
+function promptCardWriter() {
+  const work = new Map<string, PromptCardWriterJob>();
+  const results = new Map<string, PromptCardWriterResult>();
+  const prepare = vi.fn<PromptCardWriterCoordinator["prepare"]>(
+    async (id, createdAt, candidates) => ({
+      id,
+      kind: "prompt-card-writer",
+      createdAt,
+      sources: candidates.map(({ candidate: item }, index) => ({
+        candidateId: item.id,
+        concept: item.concept,
+        style: item.style,
+        sourceImage: {
+          filename: `${String(index + 1).repeat(64)}.png`,
+          path: `profile-sources/${String(index + 1).repeat(64)}.png`,
+          contentType: "image/png",
+          width: 100,
+          height: 100,
+          byteLength: 1024,
+        },
+      })),
+    }),
+  );
+  const enqueue = vi.fn<PromptCardWriterCoordinator["enqueue"]>(async (job) => {
+    work.set(job.id, job);
+  });
+  const coordinator: PromptCardWriterCoordinator = {
+    prepare,
+    enqueue,
+    readWork: async (jobId) => work.get(jobId) ?? null,
+    readResult: async (jobId) => results.get(jobId) ?? null,
+    archive: async (jobId) => {
+      work.delete(jobId);
+      results.delete(jobId);
+    },
+  };
+  return {
+    coordinator,
+    prepare,
+    enqueue,
+    setResult(result: PromptCardWriterResult) {
+      results.set(result.jobId, result);
+    },
+  };
+}
+
 function completedResult(
   jobId: string,
   completedAt = "2026-07-16T01:01:40.000Z",
@@ -337,6 +386,7 @@ function serviceFor(options: {
   leaderboardProfiles?: ReturnType<typeof leaderboardProfiles>;
   promptCardEditor?: ReturnType<typeof promptCardEditor>;
   promptCardBlender?: ReturnType<typeof promptCardBlender>;
+  promptCardWriter?: ReturnType<typeof promptCardWriter>;
 }) {
   const game = options.game ?? gameState();
   const gameRepository =
@@ -365,6 +415,7 @@ function serviceFor(options: {
     options.leaderboardProfiles?.coordinator,
     options.promptCardEditor?.mailbox,
     options.promptCardBlender?.mailbox,
+    options.promptCardWriter?.coordinator,
   );
   return {
     service,
@@ -457,6 +508,83 @@ describe("GameService challenger buffer", () => {
       id: "child-1",
       title: "Copper glasshouse",
       parents: ["card-1", "card-2"],
+    });
+  });
+
+  it("writes an approval-gated card from three generated favorites", async () => {
+    const game = gameState({
+      promptDeck: {
+        enabled: false,
+        cards: [],
+        verdicts: [],
+        suggestions: [],
+      },
+    });
+    const favorites = ["favorite-1", "favorite-2", "favorite-3"].map((id) =>
+      rating(candidate(id), {
+        source: "generated",
+        favorite: true,
+        poolMember: false,
+      }),
+    );
+    const writer = promptCardWriter();
+    const context = serviceFor({
+      game,
+      challengers: challengerState(game, {
+        ratings: [
+          rating(game.round.leftCandidate),
+          rating(game.round.rightCandidate),
+          ...favorites,
+        ],
+      }),
+      promptCardWriter: writer,
+      createId: ids("writer-1", "suggestion-1", "child-1"),
+    });
+
+    const requested = await context.service.requestPromptCardWriter(
+      favorites.map(({ candidate: item }) => item.id),
+    );
+    expect(writer.prepare).toHaveBeenCalledOnce();
+    expect(writer.enqueue).toHaveBeenCalledOnce();
+    expect(requested.promptDeck?.writerJob).toMatchObject({
+      jobId: "writer-1",
+      sourceCandidateIds: ["favorite-1", "favorite-2", "favorite-3"],
+      expectedJob: { kind: "prompt-card-writer" },
+    });
+
+    writer.setResult({
+      jobId: "writer-1",
+      kind: "prompt-card-writer",
+      status: "completed",
+      completedAt: NOW,
+      sourceCandidateIds: ["favorite-1", "favorite-2", "favorite-3"],
+      proposal: {
+        title: "Favorite synthesis",
+        prompt:
+          "A tactile editorial scene that synthesizes the selected lighting, scale, and material qualities.",
+        negativePrompt: "exact copies, readable text, logos",
+        tags: ["editorial", "tactile"],
+        reasoningSummary:
+          "Extracts shared qualities without copying any selected source.",
+      },
+    });
+    const suggested = await context.service.reconcile();
+    expect(suggested?.promptDeck?.writerJob).toBeNull();
+    expect(suggested?.promptDeck?.suggestions?.[0]).toMatchObject({
+      id: "suggestion-1",
+      sourceCandidateIds: ["favorite-1", "favorite-2", "favorite-3"],
+    });
+
+    const accepted = await context.service.updatePromptDeck({
+      kind: "suggestion",
+      suggestionId: "suggestion-1",
+      action: "accept",
+    });
+    expect(accepted.promptDeck?.cards[0]).toMatchObject({
+      id: "child-1",
+      title: "Favorite synthesis",
+      parents: [],
+      sourceCandidateIds: ["favorite-1", "favorite-2", "favorite-3"],
     });
   });
 

@@ -26,6 +26,7 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `agent-work/<jobId>/image.png`: worker-generated standalone image
 - `agent-work/<jobId>/profile.json`: source-profile or leaderboard-profile analysis passed by file
 - `agent-work/<jobId>/suggestions.json`: two prompt-card editor proposals passed by file
+- `agent-work/<jobId>/suggestion.json`: one prompt-card blender or writer proposal passed by file
 - `profile-sources/<sha256-of-normalized-png-bytes>.png`: private, metadata-stripped source upload
 - `assets/<sha256-of-png-bytes>.png`: immutable content-addressed generated candidate asset
 - `output/artifacts/<sha256-of-png-bytes>.png`: discoverable immutable export of every completed candidate
@@ -164,7 +165,7 @@ co-proc terminal frames.
 }
 ```
 
-`kind` is `challenger`, `initial`, `refill`, `source-profile`, `leaderboard-profile`, `prompt-card-editor`, or `prompt-card-blender`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+`kind` is `challenger`, `initial`, `refill`, `source-profile`, `leaderboard-profile`, `prompt-card-editor`, `prompt-card-blender`, or `prompt-card-writer`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
 
 ```json
 {
@@ -320,6 +321,38 @@ An explicit two-card blend enqueues both immutable card snapshots and the reques
 
 The ratio ranges from 0.1 through 0.9 and assigns that share of influence to the first card. One fresh blender worker returns exactly one coherent child proposal; it never mutates either parent or generates an image. The proposal remains approval-gated until accepted or discarded.
 
+An explicit write-from-set request contains three through five unique generated
+favorites with display-safe metadata and immutable normalized source images:
+
+```json
+{
+  "id": "prompt-card-writer-job-1",
+  "kind": "prompt-card-writer",
+  "createdAt": "ISO-8601 timestamp",
+  "sources": [
+    {
+      "candidateId": "generated-favorite-1",
+      "concept": "Copper observatory",
+      "style": ["editorial", "tactile"],
+      "sourceImage": {
+        "filename": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+        "path": "profile-sources/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+        "contentType": "image/png",
+        "width": 1024,
+        "height": 1024,
+        "byteLength": 2048
+      }
+    }
+  ]
+}
+```
+
+The actual request has three through five source objects. One fresh writer
+worker inspects every exact image together and returns one coherent proposal
+grounded only in shared transferable qualities. It never identifies a person,
+copies a source, or generates an image. The proposal remains approval-gated;
+acceptance creates a new immutable card with every source candidate ID.
+
 The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the image proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
 
 New refill jobs include `leaderboardEvidence`, a display-safe sample of at most 12 current reusable candidates. It contains the highest and lowest ranks when the pool is larger than the bound, plus the full pool size; it never contains prompts, image paths, reasoning, or mailbox state. When the cached fingerprint still matches the current leaders, the refill also includes `leaderboardVisualProfile` with the shared visual synthesis, source candidate IDs, reasoning, and analysis timestamp. Rank, Elo, win/loss record, repeated performance, favorites, and the matching visual synthesis are the primary basis for Adaptive steering. High-ranked candidates with repeated success are positive aggregate evidence; repeatedly losing low-ranked candidates are negative aggregate evidence. Omitted middle ranks are neutral, not negative. Recent selections, retained/rejected compatibility fields, and recent concepts are secondary novelty context and may break a tie only when aggregate evidence is sparse.
@@ -346,7 +379,7 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
-`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or interactive source-profile request, then prompt-card editor or blender work, then cached leaderboard-profile analysis. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
+`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or interactive source-profile request, then prompt-card editor, blender, or writer work, then cached leaderboard-profile analysis. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
 
 ```json
 {
@@ -528,6 +561,32 @@ For a prompt-card blender job, write exactly one proposal to `<data-root>/agent-
     "negativePrompt": "readable text, logos, hard shadows",
     "tags": ["industrial", "nocturne", "botanical", "glass"],
     "reasoningSummary": "Balances the two immutable source directions at the requested ratio."
+  }
+}
+```
+
+For a prompt-card writer job, write exactly one proposal to
+`<data-root>/agent-work/<jobId>/suggestion.json`, then run
+`npm run agent:complete-card-writer -- --job <id> --suggestion-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/suggestion.json"`.
+The helper preserves the request's exact source lineage and publishes:
+
+```json
+{
+  "jobId": "prompt-card-writer-job-1",
+  "kind": "prompt-card-writer",
+  "status": "completed",
+  "completedAt": "ISO-8601 timestamp",
+  "sourceCandidateIds": [
+    "generated-favorite-1",
+    "generated-favorite-2",
+    "generated-favorite-3"
+  ],
+  "proposal": {
+    "title": "Copper ecology",
+    "prompt": "A tactile editorial ecology with copper edge light, generous negative space, and monumental organic forms.",
+    "negativePrompt": "exact copies, recognizable identity, readable text, logos",
+    "tags": ["editorial", "tactile", "copper", "organic"],
+    "reasoningSummary": "Synthesizes shared lighting, scale, and material qualities while remaining distinct from every source."
   }
 }
 ```

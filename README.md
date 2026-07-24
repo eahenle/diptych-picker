@@ -141,6 +141,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Click the complete A or B card.
 - Read each established candidate's rounded Elo score from its lower-left overlay. `✦` marks a first appearance; `⊖` warns that losing the current comparison would remove that candidate from the reusable pool.
 - Select the **Round** metric to review up to fifty recent decisions, newest first, with winner and rejected-candidate thumbnails and no generation prompts. Select an available thumbnail to inspect the immutable image at full size. Favorite exceptional candidates from history or the pool; favorites persist independently of Elo and pool membership. The header's **Favorites** control opens every saved candidate in deterministic Elo order, including images that have left the reusable pool, with inspection, removal, and variation-exploration actions.
+- In **Favorites**, select three to five generated images to draft a prompt card from their shared transferable qualities. Curated seeds and private uploads are ineligible. The writer preserves every source image and returns a review-only proposal; accepting it in Preferences creates an immutable card with all source candidate IDs recorded.
 - Every expanded image offers **Explore variations**. The app privately runs that candidate through the same source-analysis path, opens the resulting profile as an editable draft, and saves no change until you confirm it. Generated descendants retain the canonical parent plus a fingerprint of the exact preference profile used.
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
@@ -162,7 +163,7 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, preference revisions and presets, five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
+Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, preference revisions and presets, weighted prompt cards, two-card blending, favorite-set card writing, five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
 
 ## Architecture
 
@@ -185,6 +186,7 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `GET /api/game/history`: up to fifty newest-first decisions with display-safe winner and rejected-candidate metadata plus the full decision count.
 - `GET /api/game/favorites`: every favorited candidate ranked by Elo with display-safe metadata, including whether it remains in the reusable pool.
 - `PUT /api/game/favorites`: persist or remove a candidate favorite under the challenger-state lock without changing its rating or pool membership.
+- `POST /api/game/preferences/deck/write`: request one approval-gated prompt-card proposal from three to five distinct generated favorites.
 - `GET` and `PUT /api/game/snapshot`: download and restore validated local game saves.
 
 The latest comprehensive maintainability audit and its deferred structural work

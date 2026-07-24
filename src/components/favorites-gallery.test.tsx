@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FavoriteGalleryEntry } from "@/domain/challenger-state";
 import { FavoritesGallery } from "./favorites-gallery";
@@ -34,10 +40,14 @@ function renderGallery(
     error: null,
     favoriteError: null,
     favoriteSaving: null,
+    writerActive: false,
+    writerBusy: false,
+    writerError: null,
     onClose: vi.fn(),
     onInspect: vi.fn(),
     onExplore: vi.fn(),
     onRemoveFavorite: vi.fn(),
+    onWritePromptCard: vi.fn(async () => true),
     ...overrides,
   };
   render(<FavoritesGallery {...props} />);
@@ -63,6 +73,34 @@ describe("FavoritesGallery", () => {
     expect(props.onRemoveFavorite).toHaveBeenCalledWith("favorite");
     fireEvent.click(screen.getByRole("button", { name: "Close favorites" }));
     expect(props.onClose).toHaveBeenCalledOnce();
+  });
+
+  it("drafts from three selected generated favorites", async () => {
+    const generated = ["favorite", "second", "third"].map((id, index) => ({
+      ...entries[0],
+      rank: index + 1,
+      candidate: {
+        ...entries[0].candidate,
+        id,
+        concept: `${id} concept`,
+      },
+    }));
+    const props = renderGallery({ entries: generated });
+
+    for (const button of screen.getAllByRole("button", {
+      name: "Select for card",
+    })) {
+      fireEvent.click(button);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Draft prompt card" }));
+
+    await waitFor(() =>
+      expect(props.onWritePromptCard).toHaveBeenCalledWith([
+        "favorite",
+        "second",
+        "third",
+      ]),
+    );
   });
 
   it.each([

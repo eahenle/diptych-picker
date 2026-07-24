@@ -16,6 +16,7 @@ Keep the root interactive session responsive as supervisor. Start and verify the
 - **Leaderboard-profile workers (fresh subagents):** Inspect one immutable, content-addressed set of two through four current pool leaders, write only their assigned `profile.json`, report its path to the monitor, and exit. They synthesize shared visual qualities without modifying or regenerating any source.
 - **Prompt-card editor workers (fresh subagents):** Review one repeatedly rejected prompt card plus its bounded rejection evidence, write only two approval-gated alternatives to `suggestions.json`, report its path to the monitor, and exit. They never edit the source card or generate an image.
 - **Prompt-card blender workers (fresh subagents):** Blend two immutable prompt cards at the requested ratio, write one approval-gated child proposal to `suggestion.json`, report its path to the monitor, and exit. They never edit either parent or generate an image.
+- **Prompt-card writer workers (fresh subagents):** Inspect three through five immutable generated favorites, synthesize their shared transferable aesthetics into one approval-gated card proposal in `suggestion.json`, report its path to the monitor, and exit. They never edit a source or generate an image.
 
 Before spawning the monitor, determine how many child-agent slots can remain available beneath it while the root session and monitor are active. Set `workerLimit` to that count capped at 3. When the launch prompt supplies `workerLimit=3`, use all three slots after confirming that the current session exposes them. Require `workerLimit >= 2` because a new initial pair must start together. Pass the limit to the monitor. The monitor must use `--max-refills <workerLimit>` and must never claim a refill it cannot immediately delegate. Do not count terminal recovery entries as workers. `agents.max_threads` is only a concurrency ceiling, so the monitor must explicitly spawn one worker per independent claimed job; with at least three pending refills, a three-worker limit means three worker subagents, not two.
 
@@ -62,12 +63,13 @@ The monitor inspects each claimed job's `kind`. A missing `kind` is a legacy cha
 - For `kind: "leaderboard-profile"`, process the one claimed job with one fresh leaderboard-profile worker. Require two through four unique ranked `sources`, resolve every `sourceImage.path` beneath the data root, give the worker all and only those local images plus their rank metadata, and do not call image generation.
 - For `kind: "prompt-card-editor"`, process the one claimed job with one fresh prompt-card editor worker. Require one immutable `card` plus four through twelve `recentRejections`; give the worker only that bounded evidence and do not call image generation.
 - For `kind: "prompt-card-blender"`, process the one claimed job with one fresh prompt-card blender worker. Require exactly two distinct immutable `cards` and a ratio from 0.1 through 0.9; give the worker only those inputs and do not call image generation.
+- For `kind: "prompt-card-writer"`, process the one claimed job with one fresh prompt-card writer worker. Require three through five unique generated `sources`, resolve every `sourceImage.path` beneath the data root, give the worker all and only those local images plus their display-safe concept and style metadata, and do not call image generation.
 - For `kind: "initial"`, require `batchId`, `initialSide`, and `batchOwnerToken`. Before spawning a worker, run `npm run agent:next -- --wait-ms 30000 --batch <batchId> --owner-token <batchOwnerToken>` to claim or inspect the other side. An ordinary `agent:next` call cannot claim that owner's pending partner. If no partner JSON is printed, spawn nothing. Keep repeating this owned batch command with the same batch ID, owner token, and 30000 ms wait until partner or terminal JSON appears, or until the user stops the runner. Do not return to ordinary polling while an owned initial partner is pending. For a new pair, start exactly two fresh subagents in parallel only after both unfinished sides are available. If batch inspection returns the other side with `terminalStatus: "completed"` or `"failed"`, do not spawn a worker for that terminal side; start one fresh worker for the claimed unfinished side only.
 - For `kind: "refill-batch"`, require a non-empty `jobs` array of at most `workerLimit` entries and require every entry to have `kind: "refill"`. Spawn exactly one fresh native image-generation worker per entry, together in parallel. Give each worker only its complete job JSON and its own work directory. Never combine refill prompts or images. Complete or fail every claimed refill independently even if a sibling worker fails, then return to waiting.
 
 Resolve the data root as `${LOCAL_DATA_DIR:-.local-data}`. Create `<data-root>/agent-work/<jobId>/` for each worker. Have the worker save its native image-generation output as `image.png` and its strict proposal JSON as `proposal.json` there. Do not pass proposal JSON or failure text directly as command-line arguments.
 
-For a source-profile or leaderboard-profile job, create the same work directory and have the worker save only `profile.json`. Normalized analysis sources remain private under `<data-root>/profile-sources/` and are never copied to `assets/` or `output/artifacts/`. For a prompt-card editor job, have the worker save only `suggestions.json`. For a prompt-card blender job, have the worker save only `suggestion.json`. Do not pass analysis JSON directly as a command-line argument.
+For a source-profile or leaderboard-profile job, create the same work directory and have the worker save only `profile.json`. Normalized analysis sources remain private under `<data-root>/profile-sources/` and are never copied to `assets/` or `output/artifacts/`. For a prompt-card editor job, have the worker save only `suggestions.json`. For a prompt-card blender or writer job, have the worker save only `suggestion.json`. Do not pass analysis JSON directly as a command-line argument.
 
 Give each worker the complete job JSON and these constraints:
 
@@ -108,6 +110,13 @@ For a prompt-card blender worker instead:
 - Write `suggestion.json` with exactly `proposal`, an object containing `title`, `prompt`, `negativePrompt`, `tags`, and `reasoningSummary` under the normal card limits. Produce one concise, coherent direction rather than concatenating contradictory clauses; combine applicable negatives and tags without duplication.
 - Never overwrite or archive either parent, invent identity or likeness instructions, or generate an image. The blend remains an inactive proposal until the user accepts it as a new immutable child with both parent IDs.
 
+For a prompt-card writer worker instead:
+
+- Inspect every exact local PNG in `sources` together; do not generate, edit, rank, or copy an image.
+- Extract only visibly shared, transferable subject relationships, composition, scale, lighting, mood, medium, material, style, and palette. Produce one coherent new direction rather than an exact reproduction or collage.
+- Write `suggestion.json` with exactly `proposal`, using the same `title`, `prompt`, `negativePrompt`, `tags`, and `reasoningSummary` limits as a blender proposal. State which shared qualities support the proposal and how it remains distinct from every source.
+- Never identify a depicted person, infer sensitive traits, request identity or likeness, reproduce readable text or logos, or generate an image. The selected generated favorites remain immutable; the proposal remains inactive until the user accepts it as a new card with all source candidate IDs.
+
 For each claimed candidate-generation job (including every entry in a refill batch):
 
 1. Record `npm run agent:heartbeat -- --status generating --job <id>`.
@@ -135,6 +144,13 @@ For each claimed prompt-card blender job:
 1. Record `npm run agent:heartbeat -- --status analyzing --job <id>`.
 2. Delegate to one fresh prompt-card blender worker and inspect its `suggestion.json`. Require one valid, coherent proposal honoring both parents and the requested ratio; ask the same worker to revise once, then fail invalid output if it cannot comply.
 3. Complete with `npm run agent:complete-card-blender -- --job <id> --suggestion-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/suggestion.json"`.
+4. On failure, use the same file-backed `agent:fail` command and categories as generation jobs. Return the heartbeat to `waiting` and continue the loop.
+
+For each claimed prompt-card writer job:
+
+1. Record `npm run agent:heartbeat -- --status analyzing --job <id>`.
+2. Delegate to one fresh prompt-card writer worker and inspect its `suggestion.json`. Require one valid, coherent proposal visibly grounded in qualities shared by the three through five immutable sources; ask the same worker to revise once, then fail invalid output if it cannot comply.
+3. Complete with `npm run agent:complete-card-writer -- --job <id> --suggestion-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/suggestion.json"`.
 4. On failure, use the same file-backed `agent:fail` command and categories as generation jobs. Return the heartbeat to `waiting` and continue the loop.
 
 Do not exit after a successful or failed job. The mailbox is durable: startup `--resume` recovers unterminated active work, matching outcome retries safely continue after interruption, and terminal artifacts remain until the app reconciles and archives them.

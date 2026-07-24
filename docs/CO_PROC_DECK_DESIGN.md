@@ -5,10 +5,11 @@ are merged into their repositories' main branches. The Diptych adapter now has
 an opt-in ready/acknowledged multi-channel dispatch stage while durable mailbox
 claim leases, token-gated terminal publication, and correlated live terminal
 signals are staged on top of that pool, with expiry takeover by the mailbox
-monitor. Prompt-card persistence, weighted draws, candidate attribution, and
-win/reject statistics are implemented, including approval-gated editor
-suggestions after repeated card rejections; removing mailbox reconciliation
-remains a staged follow-up.
+monitor. Prompt-card persistence, weighted draws, candidate attribution,
+win/reject statistics, two-card blending, and approval-gated
+write-from-favorites are implemented, including editor suggestions after
+repeated card rejections; removing mailbox reconciliation remains a staged
+follow-up.
 
 ## Objective
 
@@ -127,7 +128,12 @@ Rules:
 
 Record verdicts as `{ card_id, result_id, verdict, reason }`. When a card exceeds three rejects inside the configured recent window, send `suggest_edits` to the editor agent. It returns two concise card proposals that preserve the intended vibe while addressing the repeated rejection reason. The developer approves, edits, or discards them before they enter the deck.
 
-The blender agent combines two cards into one prompt and records both parents. The writer agent accepts three to five existing generated image IDs, extracts shared aesthetic properties rather than identity, and returns a new card with source lineage. Private uploads are not eligible sources.
+The blender agent combines two cards into one prompt and records both parents.
+The writer agent accepts three to five favorited generated image IDs, receives
+content-addressed normalized read-only sources, extracts shared aesthetic
+properties rather than identity, and returns one approval-gated card proposal.
+Acceptance records every source candidate ID. Curated seeds and private uploads
+are not eligible sources.
 
 ## Winner-driven inspiration
 
@@ -154,5 +160,7 @@ The Preference profile modal has a top-line **Frozen / Guided / Unfettered** fre
    implemented. Immutable mailbox results still provide full restart parity
    and fallback reconciliation.
 4. Add deck persistence, weighted draw, winner updates, verdict tracking, and editor suggestions. Implemented.
-5. Add blend, write-from-set, lineage UI, and winner-driven inspiration controls.
-6. Fix export responsiveness during loading and add ten-win champion retirement with focused regression tests.
+5. Add blend, write-from-set, and lineage UI. Implemented for two-card blends
+   and three-to-five-image favorite sets.
+6. Add winner-driven inspiration controls.
+7. Fix export responsiveness during loading and add ten-win champion retirement with focused regression tests.
