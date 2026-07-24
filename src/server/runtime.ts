@@ -45,9 +45,24 @@ import { challengerConfig } from "./challenger-config";
 import { SourceProfileService } from "./source-profile-service";
 import { LeaderboardProfileService } from "./leaderboard-profile-service";
 import {
+  CoProcGenerationChannelPool,
   CoProcGenerationTransport,
   TransportNotifyingGenerationMailbox,
 } from "./co-proc-generation-transport";
+
+function optionalPositiveInteger(
+  name: string,
+  value: string | undefined,
+): number | undefined {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 30_000) {
+    throw new Error(`${name} must be an integer from 1 through 30000`);
+  }
+  return parsed;
+}
 
 const dataDirectory = join(
   /* turbopackIgnore: true */ process.cwd(),
@@ -75,7 +90,22 @@ export const initialBootstrapRepository = new JsonInitialBootstrapRepository(
 );
 const mailboxDirectory = join(dataDirectory, "agent-mailbox");
 const fileGenerationMailbox = new FileGenerationMailbox(mailboxDirectory);
-const coProcGenerationChannel = process.env.CO_PROC_GENERATION_CHANNEL?.trim();
+const coProcGenerationChannels = (
+  process.env.CO_PROC_GENERATION_CHANNELS ??
+  process.env.CO_PROC_GENERATION_CHANNEL ??
+  ""
+)
+  .split(",")
+  .map((channel) => channel.trim())
+  .filter(Boolean);
+const coProcReadyTimeout = optionalPositiveInteger(
+  "CO_PROC_GENERATION_READY_TIMEOUT_MS",
+  process.env.CO_PROC_GENERATION_READY_TIMEOUT_MS,
+);
+const coProcAcknowledgementTimeout = optionalPositiveInteger(
+  "CO_PROC_GENERATION_ACK_TIMEOUT_MS",
+  process.env.CO_PROC_GENERATION_ACK_TIMEOUT_MS,
+);
 if (mockMode && process.env.NODE_ENV === "production") {
   throw new Error("The deterministic mock worker is test-only");
 }
@@ -101,13 +131,20 @@ const durableGenerationMailbox = mockAgent
   ? new MockGenerationMailbox(fileGenerationMailbox, mockAgent)
   : fileGenerationMailbox;
 export const generationMailbox =
-  !mockAgent && coProcGenerationChannel
+  !mockAgent && coProcGenerationChannels.length > 0
     ? new TransportNotifyingGenerationMailbox(
         durableGenerationMailbox,
-        new CoProcGenerationTransport({
-          channel: coProcGenerationChannel,
-          runtimeRoot: process.env.CO_PROC_RUNTIME_ROOT,
-        }),
+        new CoProcGenerationChannelPool(
+          coProcGenerationChannels.map(
+            (channel) =>
+              new CoProcGenerationTransport({
+                channel,
+                runtimeRoot: process.env.CO_PROC_RUNTIME_ROOT,
+                readyTimeoutMs: coProcReadyTimeout,
+                acknowledgementTimeoutMs: coProcAcknowledgementTimeout,
+              }),
+          ),
+        ),
         {
           durableJobPath: (job) =>
             join(mailboxDirectory, "pending", `${job.id}.json`),

@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { chmod, mkdir, mkdtemp, open, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
@@ -11,12 +12,64 @@ import type {
   GenerationResult,
 } from "./agent-mailbox";
 import {
+  CoProcChannelUnavailableError,
+  CoProcDeliveryUnconfirmedError,
+  CoProcGenerationChannelPool,
   CoProcGenerationTransport,
   TransportNotifyingGenerationMailbox,
+  type GenerationChannelTransport,
   type GenerationTransport,
 } from "./co-proc-generation-transport";
 
 const execFileAsync = promisify(execFile);
+const frameBufferSize = 4096;
+
+async function readFrame(
+  handle: Awaited<ReturnType<typeof open>>,
+): Promise<Record<string, unknown>> {
+  const buffer = Buffer.alloc(frameBufferSize);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead > 0) {
+        return JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EAGAIN") {
+        throw error;
+      }
+    }
+    await delay(2);
+  }
+  throw new Error("Timed out waiting for co-proc test frame");
+}
+
+async function createSecureChannel(root: string, name: string) {
+  const channel = join(root, name);
+  const input = join(channel, "input");
+  const output = join(channel, "output");
+  await mkdir(channel, { mode: 0o700 });
+  await execFileAsync("mkfifo", [input, output]);
+  await chmod(input, 0o600);
+  await chmod(output, 0o600);
+  await writeFile(
+    join(channel, "metadata.json"),
+    `${JSON.stringify({
+      version: 1,
+      name,
+      pid: process.pid,
+      owner_uid: process.getuid?.(),
+      started: 1,
+      input,
+      output,
+    })}\n`,
+    { mode: 0o600 },
+  );
+  return {
+    input: await open(input, constants.O_RDWR | constants.O_NONBLOCK),
+    output: await open(output, constants.O_RDWR | constants.O_NONBLOCK),
+  };
+}
 
 const job = (): GenerationJob => ({
   id: "job-1",
@@ -48,6 +101,17 @@ const job = (): GenerationJob => ({
   sessionId: "session-1",
   pinnedWinnerId: "winner",
 });
+
+function deferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 class MemoryMailbox implements GenerationMailbox {
   enqueued: GenerationJob[] = [];
@@ -116,54 +180,197 @@ describe("TransportNotifyingGenerationMailbox", () => {
 });
 
 describe("CoProcGenerationTransport", () => {
-  it("writes one compact notification to a secure live FIFO", async () => {
+  it("dispatches after ready and requires a matching acknowledgement", async () => {
     const root = await mkdtemp(join(tmpdir(), "diptych-co-proc-"));
-    const channel = join(root, "gen_a");
-    const input = join(channel, "input");
-    const output = join(channel, "output");
     const durableJobPath = join(root, "mailbox", "pending", "job-1.json");
     await chmod(root, 0o700);
-    await mkdir(channel, { mode: 0o700 });
-    await execFileAsync("mkfifo", [input, output]);
-    await chmod(input, 0o600);
-    await chmod(output, 0o600);
     await mkdir(join(root, "mailbox", "pending"), { recursive: true });
     await writeFile(durableJobPath, "{}\n", "utf8");
-    await writeFile(
-      join(channel, "metadata.json"),
-      `${JSON.stringify({
-        version: 1,
-        name: "gen_a",
-        pid: process.pid,
-        owner_uid: process.getuid?.(),
-        started: 1,
-        input,
-        output,
-      })}\n`,
-      { mode: 0o600 },
-    );
-    const reader = await open(input, constants.O_RDONLY | constants.O_NONBLOCK);
+    const peer = await createSecureChannel(root, "gen_a");
     const transport = new CoProcGenerationTransport({
       channel: "gen_a",
       runtimeRoot: root,
+      readyTimeoutMs: 100,
+      acknowledgementTimeoutMs: 100,
     });
 
     try {
-      await transport.notify(job(), durableJobPath);
-      const buffer = Buffer.alloc(4096);
-      const { bytesRead } = await reader.read(buffer, 0, buffer.length, null);
-      expect(
-        JSON.parse(buffer.subarray(0, bytesRead).toString("utf8")),
-      ).toEqual({
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 1,
+          type: "ready",
+          id: "gen_a",
+        })}\n`,
+      );
+      const notification = transport.notify(job(), durableJobPath);
+      expect(await readFrame(peer.input)).toEqual({
         version: 1,
         type: "gen",
         id: "job-1",
         kind: "refill",
         job_path: durableJobPath,
       });
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 1,
+          type: "ack",
+          id: "job-1",
+        })}\n`,
+      );
+      await expect(notification).resolves.toBeUndefined();
     } finally {
-      await reader.close();
+      await peer.input.close();
+      await peer.output.close();
     }
+  });
+
+  it("does not dispatch when a persistent worker is busy", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-co-proc-"));
+    await chmod(root, 0o700);
+    const peer = await createSecureChannel(root, "gen_a");
+    const transport = new CoProcGenerationTransport({
+      channel: "gen_a",
+      runtimeRoot: root,
+      readyTimeoutMs: 100,
+    });
+
+    try {
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 1,
+          type: "busy",
+          id: "gen_a",
+        })}\n`,
+      );
+      await expect(
+        transport.notify(job(), join(root, "job.json")),
+      ).rejects.toBeInstanceOf(CoProcChannelUnavailableError);
+    } finally {
+      await peer.input.close();
+      await peer.output.close();
+    }
+  });
+
+  it("reports an unconfirmed delivery after dispatch without acknowledgement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-co-proc-"));
+    await chmod(root, 0o700);
+    const peer = await createSecureChannel(root, "gen_a");
+    const transport = new CoProcGenerationTransport({
+      channel: "gen_a",
+      runtimeRoot: root,
+      readyTimeoutMs: 100,
+      acknowledgementTimeoutMs: 20,
+    });
+
+    try {
+      await peer.output.writeFile(
+        `${JSON.stringify({
+          version: 1,
+          type: "ready",
+          id: "gen_a",
+        })}\n`,
+      );
+      const notification = transport.notify(job(), join(root, "job.json"));
+      await readFrame(peer.input);
+      await expect(notification).rejects.toBeInstanceOf(
+        CoProcDeliveryUnconfirmedError,
+      );
+    } finally {
+      await peer.input.close();
+      await peer.output.close();
+    }
+  });
+
+  it("does not retry another channel after an unacknowledged dispatch", async () => {
+    const first: GenerationChannelTransport = {
+      channel: "gen_a",
+      notify: vi.fn(async () => {
+        throw new CoProcDeliveryUnconfirmedError(
+          "gen_a",
+          "job-1",
+          "acknowledgement timed out",
+        );
+      }),
+    };
+    const second: GenerationChannelTransport = {
+      channel: "gen_b",
+      notify: vi.fn(async () => {}),
+    };
+    const transport = new CoProcGenerationChannelPool([first, second]);
+
+    await expect(
+      transport.notify(job(), "/mailbox/pending/job-1.json"),
+    ).rejects.toBeInstanceOf(CoProcDeliveryUnconfirmedError);
+    expect(first.notify).toHaveBeenCalledOnce();
+    expect(second.notify).not.toHaveBeenCalled();
+  });
+
+  it("routes around an unavailable channel without overcommitting a busy one", async () => {
+    const first: GenerationChannelTransport = {
+      channel: "gen_a",
+      notify: vi.fn(async () => {
+        throw new CoProcChannelUnavailableError("gen_a", "worker is busy");
+      }),
+    };
+    const second: GenerationChannelTransport = {
+      channel: "gen_b",
+      notify: vi.fn(async () => {}),
+    };
+    const transport = new CoProcGenerationChannelPool([first, second]);
+
+    await expect(
+      transport.notify(job(), "/mailbox/pending/job-1.json"),
+    ).resolves.toBeUndefined();
+    expect(first.notify).toHaveBeenCalledOnce();
+    expect(second.notify).toHaveBeenCalledOnce();
+  });
+
+  it("uses every ready channel once before reporting the pool busy", async () => {
+    const gates = [deferred(), deferred(), deferred()];
+    const channels = gates.map((gate, index): GenerationChannelTransport => ({
+      channel: `gen_${index + 1}`,
+      notify: vi.fn(async () => gate.promise),
+    }));
+    const transport = new CoProcGenerationChannelPool(channels);
+    const notifications = channels.map((_, index) =>
+      transport.notify(
+        { ...job(), id: `job-${index + 1}` },
+        `/mailbox/pending/job-${index + 1}.json`,
+      ),
+    );
+
+    await expect(
+      transport.notify(
+        { ...job(), id: "job-4" },
+        "/mailbox/pending/job-4.json",
+      ),
+    ).rejects.toBeInstanceOf(CoProcChannelUnavailableError);
+    for (const channel of channels) {
+      expect(channel.notify).toHaveBeenCalledOnce();
+    }
+
+    for (const gate of gates) {
+      gate.resolve();
+    }
+    await expect(Promise.all(notifications)).resolves.toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("keeps the persistent generation pool within the worker limit", () => {
+    expect(
+      () =>
+        new CoProcGenerationChannelPool(
+          ["gen_1", "gen_2", "gen_3", "gen_4"].map(
+            (channel): GenerationChannelTransport => ({
+              channel,
+              notify: vi.fn(async () => {}),
+            }),
+          ),
+        ),
+    ).toThrow(/at most three/i);
   });
 
   it("rejects an insecure or non-FIFO endpoint", async () => {

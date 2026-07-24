@@ -31,6 +31,20 @@ not sufficient reason to introduce a breaking save, API, or workflow change.
 Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
 
+## 2026-07-23
+
+### Acknowledged persistent-channel dispatch
+
+The opt-in `co-proc` generation adapter now accepts a comma-separated pool of
+persistent named channels. It reserves distinct channels for concurrent
+enqueues, waits for explicit readiness, sends only an absolute durable job
+reference, and requires a matching acknowledgement. Busy or unavailable peers
+can be skipped before dispatch, while an unacknowledged frame is never retried
+to a second live peer because that could duplicate work. The filesystem mailbox
+is still written first and remains the authority for claim, completion,
+failure, and restart recovery. Moving those ownership boundaries onto the live
+transport remains an unchecked roadmap step pending end-to-end parity.
+
 ## 2026-07-22
 
 ### Dedicated favorites gallery

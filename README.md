@@ -61,19 +61,29 @@ If Codex closes during a job, the current images, ready queue, pool, and mailbox
 
 ### Staged co-proc transport
 
-The optional `CO_PROC_GENERATION_CHANNEL` setting enables a low-latency
-notification adapter behind the same durable mailbox interface. The app first
-publishes the complete job to the mailbox, then sends a compact version-1
-NDJSON frame containing its ID, kind, and absolute job path to the named
-attachable `co-proc` channel. If the live channel is absent or backpressured,
-the durable enqueue still succeeds and ordinary mailbox polling recovers the
-job.
+The optional comma-separated `CO_PROC_GENERATION_CHANNELS` setting enables an
+acknowledged persistent-channel pool behind the same durable mailbox interface.
+The legacy singular `CO_PROC_GENERATION_CHANNEL` remains accepted. The app first
+publishes the complete job to the mailbox, selects one locally idle channel,
+waits for its version-1 `ready` frame, then sends a compact `gen` frame
+containing the job ID, kind, and absolute durable job path. Delivery succeeds
+only after the same channel returns `{"version":1,"type":"ack","id":"<job>"}`.
+
+Concurrent enqueues reserve different ready channels, so three configured
+channels can accept three independent dispatches without overcommitting one
+worker. A pre-dispatch `busy` frame or unavailable endpoint lets the pool try
+another channel. Once a generation frame has been written, a missing
+acknowledgement is never retried on a second live channel because that could
+duplicate work; the durable mailbox remains available for explicit recovery.
 
 Set `CO_PROC_RUNTIME_ROOT` only when `co-proc` uses a non-default runtime root.
-The adapter revalidates owner-only directory, metadata, and FIFO permissions on
-every notification. Mailbox polling remains active during this parity stage;
-persistent named workers can replace it only after end-to-end result parity is
-covered.
+`CO_PROC_GENERATION_READY_TIMEOUT_MS` and
+`CO_PROC_GENERATION_ACK_TIMEOUT_MS` tune the bounded handshake and default to
+100 and 500 milliseconds. The adapter revalidates owner-only directory,
+metadata, process, and FIFO state on every dispatch. Mailbox polling and
+terminal publication remain authoritative during this parity stage; moving
+durable claim and result ownership into persistent channel workers remains a
+separate step that requires end-to-end restart and failure parity.
 
 ## Curated and learned pools
 

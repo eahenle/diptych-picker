@@ -1,10 +1,12 @@
 # Co-proc Agent Transport and Prompt Deck
 
 Status: co-proc attachable transport and the opt-in durable-notification adapter
-are merged into their repositories' main branches. Prompt-card persistence,
-weighted draws, candidate attribution, and win/reject statistics are now
+are merged into their repositories' main branches. The Diptych adapter now has
+an opt-in ready/acknowledged multi-channel dispatch stage while durable mailbox
+claim and terminal publication remain authoritative. Prompt-card persistence,
+weighted draws, candidate attribution, and win/reject statistics are
 implemented, including approval-gated editor suggestions after repeated card
-rejections; persistent channel workers remain staged follow-ups.
+rejections; persistent channel ownership remains a staged follow-up.
 
 ## Objective
 
@@ -33,6 +35,14 @@ Next.js main/deck authority <-> attachable co-proc channels <-> persistent agent
 ```
 
 The live socket or pipe layer replaces polling, lock files, and outcome-file signaling. Durable app state must still record outstanding job IDs and terminal reconciliation so a process restart can recover safely; transport availability is not durability.
+
+The current parity stage deliberately stops short of that target. A configured
+pool reserves one ready named channel per concurrent enqueue, writes the
+durable job reference, and requires a matching acknowledgement. Pre-dispatch
+busy or unavailable channels can be skipped; an unacknowledged post-dispatch
+frame is not sent to a second channel. Filesystem claim, completion, failure,
+and restart recovery remain authoritative until the live path proves equivalent
+behavior.
 
 ## Co-proc prerequisite
 
@@ -63,6 +73,13 @@ Every message includes `version`, `type`, and a correlation `id`. Examples omit 
 ```
 
 Generation results must name a fully decoded standalone square image at an absolute path. The existing immutable asset validation and SHA-256 publication rules remain the terminal acceptance boundary.
+
+During dispatch staging, a persistent generation peer writes
+`{"type":"ready","id":"gen_a"}` before accepting work. The app responds with
+the `gen` frame only after observing readiness, and the peer confirms receipt
+with `{"type":"ack","id":"job-123"}`. A peer may report `busy` before dispatch
+or an `error` correlated to a job. Readiness and acknowledgement are
+backpressure signals, not terminal generation outcomes.
 
 ## Prompt-card deck
 
@@ -110,7 +127,11 @@ The Preference profile modal has a top-line **Frozen / Guided / Unfettered** fre
 
 1. Extend `co-proc` with attachable, buffered, cross-process IPC and its own tests. Merged in `co-proc` PR #4.
 2. Add a Diptych transport adapter behind the existing generation interface while retaining durable job reconciliation. Merged in Diptych Picker PR #8 as an opt-in notification adapter.
-3. Move generation workers to persistent named channels and remove mailbox polling only after parity tests pass.
+3. Move generation workers to persistent named channels and remove mailbox
+   polling only after parity tests pass. In progress: ready/acknowledged
+   multi-channel dispatch and bounded local reservation are implemented;
+   durable claim, terminal result ownership, and restart parity remain on the
+   mailbox path.
 4. Add deck persistence, weighted draw, winner updates, verdict tracking, and editor suggestions. Implemented.
 5. Add blend, write-from-set, lineage UI, and winner-driven inspiration controls.
 6. Fix export responsiveness during loading and add ten-win champion retirement with focused regression tests.
