@@ -175,6 +175,7 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/co-proc-generation-transport.ts`: opt-in live NDJSON notification over secure attachable `co-proc` endpoints, with durable mailbox fallback.
 - `src/server/game-service.ts`: transactional lock, persistence, mailbox, reconciliation, and cleanup orchestration.
 - `src/server/game-adaptation.ts`: winner-gated profile adoption, rejection provenance, revision history, and stale-capacity invalidation.
+- `src/server/refill-result-reconciler.ts`: ordered refill-result validation, recovery, admission, moderation notices, and terminal cleanup.
 - `src/server/prompt-card-reconciler.ts`: durable editor, blender, and favorite-set writer recovery, terminal reconciliation, and suggestion creation.
 - `src/server/leaderboard-profile-reconciler.ts`: adaptive leaderboard analysis scheduling, durable result recovery, and current-cohort cache selection.
 - `src/server/game-comparison.ts` and `game-refill.ts`: comparison rating/receipt rules and deterministic refill context, planning, and work validation.

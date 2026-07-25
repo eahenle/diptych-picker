@@ -1,17 +1,13 @@
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   drawFallback,
   drawFallbackBatch,
   popReady,
   backfillGeneratedPool,
-  recordGenerationTurnaround,
-  refillJobMatchesGenerationPreferences,
   type BufferedCandidate,
   type ChallengerState,
   type PendingComparisonReceipt,
   type PendingSelectionBaseline,
-  type RefillJobRecord,
 } from "@/domain/challenger-state";
 import {
   beginChampionRetirement,
@@ -45,7 +41,6 @@ import {
 import type {
   GenerationJob,
   GenerationMailbox,
-  GenerationResult,
   PromptCardBlenderMailbox,
   PromptCardEditorMailbox,
 } from "./agent-mailbox";
@@ -57,7 +52,6 @@ import {
 } from "./game-adaptation";
 import {
   comparisonReceipt,
-  createCandidateRating,
   recordBothLose,
   recordComparison,
   recordTie,
@@ -66,8 +60,6 @@ import {
 import {
   planRefillCapacity,
   refillContext,
-  validRefillWork,
-  withoutRefillRecord,
   type RefillCapacityResult,
   type RefillContext,
 } from "./game-refill";
@@ -77,6 +69,10 @@ import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-servic
 import { PromptCardReconciler } from "./prompt-card-reconciler";
 import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import type { AssetStore } from "./providers";
+import {
+  candidateFromGenerationResult,
+  RefillResultReconciler,
+} from "./refill-result-reconciler";
 import type { GameRepository } from "./repository";
 
 export class SelectionConflictError extends Error {}
@@ -96,17 +92,11 @@ export interface GameServiceConfig {
   fallbackMaximumConsecutive: number;
 }
 
-interface RefillObservation {
-  record: RefillJobRecord;
-  work: GenerationJob | null;
-  result: GenerationResult | null;
-  recordIndex: number;
-}
-
 export class GameService {
   private reconciliation: Promise<GameState | null> | null = null;
   private readonly leaderboardProfileReconciler: LeaderboardProfileReconciler;
   private readonly promptCardReconciler: PromptCardReconciler;
+  private readonly refillResultReconciler: RefillResultReconciler;
 
   constructor(
     private readonly gameRepository: GameRepository,
@@ -135,6 +125,19 @@ export class GameService {
       writer: this.promptCardWriter,
       createId: this.createId,
       now: this.now,
+    });
+    this.refillResultReconciler = new RefillResultReconciler({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      mailbox: this.mailbox,
+      assetVerifier: this.assetVerifier,
+      initialRating: this.config.initialRating,
+      turnaroundEmaAlpha: this.config.turnaroundEmaAlpha,
+      ensureEnqueued: (job) => this.ensureEnqueued(job),
+      completePreparedSelection: (game, challengers) =>
+        this.completePreparedSelection(game, challengers),
+      removeDisplayedCandidatesFromReady: (game, challengers) =>
+        this.removeDisplayedCandidatesFromReady(game, challengers),
     });
   }
 
@@ -985,37 +988,12 @@ export class GameService {
       prepared.challengers,
     );
 
-    const observations = await Promise.all(
-      challengers.refillJobs.map(async (record, recordIndex) => {
-        const [work, result] = await Promise.all([
-          this.mailbox.readWork(record.jobId),
-          this.mailbox.readResult(record.jobId),
-        ]);
-        return { record, work, result, recordIndex };
-      }),
+    const refills = await this.refillResultReconciler.reconcile(
+      game,
+      challengers,
     );
-    observations.sort((left, right) => {
-      const leftCompletedAt = left.result
-        ? Date.parse(left.result.completedAt)
-        : Number.POSITIVE_INFINITY;
-      const rightCompletedAt = right.result
-        ? Date.parse(right.result.completedAt)
-        : Number.POSITIVE_INFINITY;
-      return (
-        leftCompletedAt - rightCompletedAt ||
-        left.recordIndex - right.recordIndex
-      );
-    });
-
-    for (const observation of observations) {
-      const outcome = await this.reconcileRefillRecord(
-        game,
-        challengers,
-        observation,
-      );
-      game = outcome.game;
-      challengers = outcome.challengers;
-    }
+    game = refills.game;
+    challengers = refills.challengers;
 
     if (
       game.round.status === "generating" &&
@@ -1052,181 +1030,6 @@ export class GameService {
     }
 
     return game;
-  }
-
-  private async reconcileRefillRecord(
-    game: GameState,
-    challengers: ChallengerState,
-    observation: RefillObservation,
-  ): Promise<{ game: GameState; challengers: ChallengerState }> {
-    const { record, work, result } = observation;
-    const expected = record.expectedJob;
-
-    if (!refillJobMatchesGenerationPreferences(expected, game)) {
-      // Do not interrupt a worker that already owns the old request. Once it
-      // terminates, archive the result without admitting it to the ready FIFO.
-      if (work && !result) return { game, challengers };
-      return {
-        game,
-        challengers: await this.archiveInvalidRefill(challengers, record),
-      };
-    }
-
-    if (!result) {
-      if (!work) {
-        await this.ensureEnqueued(expected);
-        return { game, challengers };
-      }
-      if (
-        !validRefillWork(work, record, challengers.sessionId) ||
-        !this.sameJob(work, expected)
-      ) {
-        return {
-          game,
-          challengers: await this.archiveInvalidRefill(challengers, record),
-        };
-      }
-      return { game, challengers };
-    }
-
-    if (
-      result.jobId !== record.jobId ||
-      !work ||
-      !validRefillWork(work, record, challengers.sessionId) ||
-      !this.sameJob(work, expected)
-    ) {
-      return {
-        game,
-        challengers: await this.archiveInvalidRefill(challengers, record),
-      };
-    }
-
-    if (result.status === "failed") {
-      let notifiedGame = game;
-      if (this.isModerationFailure(result)) {
-        notifiedGame = {
-          ...game,
-          generationNotice: {
-            kind: "moderation-block",
-            jobId: result.jobId,
-            occurredAt: result.completedAt,
-            occurrenceCount: (game.generationNotice?.occurrenceCount ?? 0) + 1,
-          },
-        };
-        await this.gameRepository.save(notifiedGame);
-      }
-      return {
-        game: notifiedGame,
-        challengers: await this.archiveInvalidRefill(challengers, record),
-      };
-    }
-
-    const generated = this.candidateFromResult(result, expected);
-    if (!generated) {
-      return {
-        game,
-        challengers: await this.archiveInvalidRefill(challengers, record),
-      };
-    }
-
-    const existingRating = challengers.ratings.find(
-      ({ candidate }) => candidate.id === generated.id,
-    );
-    if (existingRating) {
-      if (!isDeepStrictEqual(existingRating.candidate, generated)) {
-        return {
-          game,
-          challengers: await this.archiveInvalidRefill(challengers, record),
-        };
-      }
-      const candidateIsReady = challengers.ready.some(
-        ({ candidate }) => candidate.id === generated.id,
-      );
-      const candidateIsDisplayed =
-        game.round.leftCandidate.id === generated.id ||
-        game.round.rightCandidate.id === generated.id;
-      if (!candidateIsReady && !candidateIsDisplayed) {
-        return {
-          game,
-          challengers: await this.archiveInvalidRefill(challengers, record),
-        };
-      }
-
-      const replayed = await this.completePreparedSelection(game, challengers);
-      game = replayed.game;
-      challengers = await this.removeDisplayedCandidatesFromReady(
-        replayed.game,
-        replayed.challengers,
-      );
-      await this.mailbox.archive(record.jobId);
-      const cleaned = withoutRefillRecord(challengers, record.jobId);
-      await this.challengerRepository.save(cleaned);
-      return { game, challengers: cleaned };
-    }
-
-    if (this.candidateIdExists(challengers, game, generated.id)) {
-      return {
-        game,
-        challengers: await this.archiveInvalidRefill(challengers, record),
-      };
-    }
-
-    try {
-      await this.assetVerifier.verify(result.asset);
-    } catch {
-      return {
-        game,
-        challengers: await this.archiveInvalidRefill(challengers, record),
-      };
-    }
-
-    let applied = recordGenerationTurnaround(
-      {
-        ...challengers,
-        ready: [
-          ...challengers.ready,
-          {
-            candidate: generated,
-            source: "generated",
-            pinnedWinnerId: record.pinnedWinnerId,
-            enqueuedAt: result.completedAt,
-          },
-        ],
-        ratings: [
-          ...challengers.ratings,
-          createCandidateRating(
-            generated,
-            "generated",
-            false,
-            this.config.initialRating,
-          ),
-        ],
-      },
-      record.enqueuedAt,
-      result.completedAt,
-      this.config.turnaroundEmaAlpha,
-    );
-
-    // Keep the refill record until cleanup succeeds. If archive fails, the
-    // rating entry proves this result was already applied on the next pass.
-    await this.challengerRepository.save(applied);
-    const replayed = await this.completePreparedSelection(game, applied);
-    game = replayed.game;
-    applied = replayed.challengers;
-    await this.mailbox.archive(record.jobId);
-    const cleaned = withoutRefillRecord(applied, record.jobId);
-    await this.challengerRepository.save(cleaned);
-    return { game, challengers: cleaned };
-  }
-
-  private async archiveInvalidRefill(
-    state: ChallengerState,
-    record: RefillJobRecord,
-  ): Promise<ChallengerState> {
-    await this.mailbox.archive(record.jobId);
-    const cleaned = withoutRefillRecord(state, record.jobId);
-    await this.challengerRepository.save(cleaned);
-    return cleaned;
   }
 
   private addRefillCapacity(
@@ -1546,56 +1349,6 @@ export class GameService {
     };
   }
 
-  private candidateFromResult(
-    result: Extract<GenerationResult, { status: "completed" }>,
-    expectedJob?: Pick<
-      GenerationJob,
-      "preferenceSeed" | "promptCard" | "variationSource"
-    >,
-  ): Candidate | null {
-    const expectedCandidateId = `challenger-${result.jobId}`;
-    if (result.asset.candidateId !== expectedCandidateId) return null;
-    return {
-      id: result.asset.candidateId,
-      imageUrl: result.asset.imageUrl,
-      prompt: result.proposal.visualPrompt,
-      concept: result.proposal.concept,
-      style: result.proposal.styleTags,
-      reasoningSummary: result.proposal.reasoningSummary,
-      preferenceRevision: result.proposal.preferenceRevision,
-      ...(expectedJob?.promptCard
-        ? { promptCardId: expectedJob.promptCard.id }
-        : {}),
-      ...(expectedJob?.variationSource
-        ? {
-            lineage: {
-              kind: "variation" as const,
-              parentCandidateId: expectedJob.variationSource.candidateId,
-              parentConcept: expectedJob.variationSource.concept,
-              preferenceFingerprint: createHash("sha256")
-                .update(expectedJob.preferenceSeed)
-                .digest("hex"),
-            },
-          }
-        : {}),
-      createdAt: result.completedAt,
-      winCount: 0,
-    };
-  }
-
-  private candidateIdExists(
-    state: ChallengerState,
-    game: GameState,
-    candidateId: string,
-  ): boolean {
-    return (
-      game.round.leftCandidate.id === candidateId ||
-      game.round.rightCandidate.id === candidateId ||
-      state.ready.some(({ candidate }) => candidate.id === candidateId) ||
-      state.ratings.some(({ candidate }) => candidate.id === candidateId)
-    );
-  }
-
   private resolveVariationSource(
     game: GameState,
     challengers: ChallengerState | null,
@@ -1633,17 +1386,6 @@ export class GameService {
 
   private sameJob(left: GenerationJob, right: GenerationJob): boolean {
     return isDeepStrictEqual(left, right);
-  }
-
-  private isModerationFailure(
-    result: Extract<GenerationResult, { status: "failed" }>,
-  ): boolean {
-    return (
-      result.category === "moderation" ||
-      /moderation|content policy|safety (?:policy|filter)|blocked by (?:a )?(?:policy|safety)/i.test(
-        result.message,
-      )
-    );
   }
 
   private withoutGenerationNotice(game: GameState): GameState {
@@ -1687,7 +1429,7 @@ export class GameService {
     } else if (result.status === "failed") {
       terminal = failSelection(current, `Generation failed: ${result.message}`);
     } else {
-      const generated = this.candidateFromResult(result);
+      const generated = candidateFromGenerationResult(result);
       if (!generated || this.candidateIdExistsInRound(current, generated.id)) {
         terminal = failSelection(
           current,

@@ -36,6 +36,15 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-25
 
+### Refill-result reconciliation boundary
+
+Ordered refill observations, missing-publication recovery, strict durable-intent
+validation, candidate construction and lineage, asset verification, moderation
+notices, idempotent replay, rating admission, and terminal cleanup now share one
+focused coordinator. `GameService` still owns the outer locked transaction and
+prepared-selection timing. Mailbox priority, persistence shape, result
+acceptance, and visible comparison behavior are unchanged.
+
 ### Adaptive preference application boundary
 
 Winner-gated profile adoption, generated-loser and both-lose provenance,
