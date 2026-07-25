@@ -92,6 +92,10 @@ and a Next.js production build.
   `GameService` supplies the current game and challenger transaction while job
   recovery, cohort fingerprint attempts, result caching, and refill-facing
   current-profile selection stay behind the focused coordinator.
+- Adaptive preference application and shared revision-history construction now
+  live in a focused pure domain boundary. `GameService` retains transaction
+  timing while winner cadence, generated-rejection provenance, variation
+  lineage, and stale ready-capacity invalidation remain characterized together.
 - The manifest's discovery ranges and lockfile authority are now governed by
   [Dependency update policy](DEPENDENCY_POLICY.md), including isolated updates
   and the full validation gate.

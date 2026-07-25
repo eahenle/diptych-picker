@@ -34,6 +34,17 @@ not sufficient reason to introduce a breaking save, API, or workflow change.
 Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
 
+## 2026-07-25
+
+### Adaptive preference application boundary
+
+Winner-gated profile adoption, generated-loser and both-lose provenance,
+preference-seed recomposition, bounded revision history, variation-source
+lineage, and stale ready-capacity invalidation now share one pure server
+boundary. Manual profile saves reuse the same revision-history constructor.
+Selection timing, persistence shape, adaptation cadence, and refill behavior are
+unchanged.
+
 ## 2026-07-24
 
 ### Editable per-game rules

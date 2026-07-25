@@ -18,9 +18,7 @@ import {
   beginBothLose,
   beginBufferedSelection,
   beginTie,
-  applyWinnerPreferenceRevision,
   candidateAt,
-  composePreferenceSeed,
   completeChampionRetirement,
   completeBothLose,
   completeSelection,
@@ -28,7 +26,6 @@ import {
   failSelection,
   oppositeSide,
   recentConcepts,
-  recordRejectedPreferenceEvidence,
   preferenceProfileFromSeed,
   willRetireChampion,
   type Candidate,
@@ -36,7 +33,6 @@ import {
   type GameState,
   type PreferenceProfile,
   type PreferencePreset,
-  type PreferenceProfileSnapshot,
   type Side,
 } from "@/domain/game";
 import {
@@ -55,6 +51,10 @@ import type {
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
+import {
+  appendPreferenceRevision,
+  applyAdaptivePreferences,
+} from "./game-adaptation";
 import {
   comparisonReceipt,
   createCandidateRating,
@@ -577,7 +577,7 @@ export class GameService {
         current.variationSource?.candidateId !== variationSource?.candidateId;
       const preferenceRevisions =
         profileChanged || variationSourceChanged
-          ? this.appendPreferenceRevision(
+          ? appendPreferenceRevision(
               current,
               preferenceProfile,
               variationSource ? "variation" : "manual",
@@ -716,7 +716,7 @@ export class GameService {
         selectedAt,
         "Selected comparison winner",
       );
-      const adapted = this.applyAdaptivePreferences(nextGame, nextChallengers);
+      const adapted = applyAdaptivePreferences(nextGame, nextChallengers);
       nextGame = adapted.game;
       nextChallengers = adapted.challengers;
       const capacity = this.addRefillCapacity(nextChallengers, {
@@ -861,10 +861,7 @@ export class GameService {
       }
 
       if (outcome === "both-lose" && nextGame.round.status === "idle") {
-        const adapted = this.applyAdaptivePreferences(
-          nextGame,
-          nextChallengers,
-        );
+        const adapted = applyAdaptivePreferences(nextGame, nextChallengers);
         nextGame = adapted.game;
         nextChallengers = adapted.challengers;
       }
@@ -1028,7 +1025,7 @@ export class GameService {
       if (!draw.candidate) draw = this.drawFallback(challengers, game);
       challengers = draw.state;
       if (draw.candidate) {
-        const adapted = this.applyAdaptivePreferences(
+        const adapted = applyAdaptivePreferences(
           completeSelection(game, draw.candidate),
           challengers,
         );
@@ -1347,7 +1344,7 @@ export class GameService {
       if (challengers.ready.length < 2) return { game, challengers };
       const leftDraw = popReady(challengers);
       const rightDraw = popReady(leftDraw.state);
-      const adapted = this.applyAdaptivePreferences(
+      const adapted = applyAdaptivePreferences(
         completeChampionRetirement(
           game,
           leftDraw.candidate!,
@@ -1383,7 +1380,7 @@ export class GameService {
           : completeBothLose(game, ...replacements.candidates);
       const adapted =
         outcome === "both-lose"
-          ? this.applyAdaptivePreferences(completed, replacements.state)
+          ? applyAdaptivePreferences(completed, replacements.state)
           : { game: completed, challengers: replacements.state };
       await this.gameRepository.save(adapted.game);
       const finalized = {
@@ -1416,7 +1413,7 @@ export class GameService {
     }
     if (!draw.candidate) return { game, challengers };
 
-    const adapted = this.applyAdaptivePreferences(
+    const adapted = applyAdaptivePreferences(
       completeSelection(game, draw.candidate),
       draw.state,
     );
@@ -1433,85 +1430,6 @@ export class GameService {
       await this.challengerRepository.save(finalized);
     }
     return { game: adapted.game, challengers: finalized };
-  }
-
-  private applyAdaptivePreferences(
-    game: GameState,
-    challengers: ChallengerState,
-  ): { game: GameState; challengers: ChallengerState } {
-    const selection = game.history.at(-1);
-    const profile = game.preferenceProfile;
-    if (
-      !selection ||
-      selection.outcome === "tie" ||
-      !profile ||
-      profile.adaptationMode !== "adaptive"
-    ) {
-      return { game, challengers };
-    }
-    let nextProfile = profile;
-    if (selection.outcome === "both-lose") {
-      for (const rejectedId of [selection.leftId, selection.rightId]) {
-        const rejected = challengers.ratings.find(
-          ({ candidate }) => candidate.id === rejectedId,
-        );
-        if (rejected?.source === "generated") {
-          nextProfile = recordRejectedPreferenceEvidence(
-            nextProfile,
-            rejected.candidate.id,
-          );
-        }
-      }
-    } else {
-      const winner = challengers.ratings.find(
-        ({ candidate }) => candidate.id === selection.winnerId,
-      );
-      const rejected = challengers.ratings.find(
-        ({ candidate }) => candidate.id === selection.loserId,
-      );
-      nextProfile = winner
-        ? applyWinnerPreferenceRevision(
-            profile,
-            winner.candidate,
-            game.history.length,
-          )
-        : profile;
-      if (rejected?.source === "generated") {
-        nextProfile = recordRejectedPreferenceEvidence(
-          nextProfile,
-          rejected.candidate.id,
-        );
-      }
-    }
-    if (nextProfile === profile) return { game, challengers };
-    const composedProfile = composePreferenceSeed(profile);
-    const composedNextProfile = composePreferenceSeed(nextProfile);
-    const preferenceSeed =
-      composedNextProfile === composedProfile
-        ? game.preferenceSeed
-        : composedNextProfile;
-    const preferenceRevisions =
-      preferenceSeed === game.preferenceSeed
-        ? game.preferenceRevisions
-        : this.appendPreferenceRevision(
-            game,
-            nextProfile,
-            "adaptive",
-            selection.selectedAt,
-            game.variationSource,
-          );
-    return {
-      game: {
-        ...game,
-        preferenceProfile: nextProfile,
-        preferenceSeed,
-        ...(preferenceRevisions ? { preferenceRevisions } : {}),
-      },
-      challengers:
-        preferenceSeed === game.preferenceSeed
-          ? challengers
-          : { ...challengers, ready: [] },
-    };
   }
 
   private async removeDisplayedCandidatesFromReady(
@@ -1697,40 +1615,6 @@ export class GameService {
       );
     }
     return { candidateId: source.id, concept: source.concept };
-  }
-
-  private appendPreferenceRevision(
-    game: GameState,
-    profile: PreferenceProfile,
-    source: PreferenceProfileSnapshot["source"],
-    createdAt: string,
-    variationSource = game.variationSource,
-  ): PreferenceProfileSnapshot[] {
-    const previous = game.preferenceRevisions ?? [];
-    const baseline: PreferenceProfileSnapshot[] =
-      previous.length > 0
-        ? previous
-        : [
-            {
-              createdAt,
-              source: "initial",
-              profile:
-                game.preferenceProfile ??
-                preferenceProfileFromSeed(game.preferenceSeed),
-              ...(game.variationSource
-                ? { variationSource: game.variationSource }
-                : {}),
-            },
-          ];
-    return [
-      ...baseline,
-      {
-        createdAt,
-        source,
-        profile,
-        ...(variationSource ? { variationSource } : {}),
-      },
-    ].slice(-25);
   }
 
   private async ensureJobsEnqueued(jobs: readonly GenerationJob[]) {
