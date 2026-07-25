@@ -96,6 +96,10 @@ and a Next.js production build.
   live in a focused pure domain boundary. `GameService` retains transaction
   timing while winner cadence, generated-rejection provenance, variation
   lineage, and stale ready-capacity invalidation remain characterized together.
+- Refill-result reconciliation now has its own coordinator. Completion ordering,
+  durable-intent recovery, strict work/result validation, candidate admission,
+  moderation notices, idempotent replay, and terminal archival stay together
+  while `GameService` retains transaction and prepared-selection timing.
 - The manifest's discovery ranges and lockfile authority are now governed by
   [Dependency update policy](DEPENDENCY_POLICY.md), including isolated updates
   and the full validation gate.
