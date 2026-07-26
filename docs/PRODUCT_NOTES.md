@@ -36,6 +36,15 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-25
 
+### Prompt-deck command boundary
+
+Prompt-card creation, weighted-deck and card edits, approval-gated suggestion
+decisions, two-card blend requests, and favorite-set writer requests now share
+one focused service. It preserves repository lock order, durable job intent,
+exact lineage, validation messages, and lost-enqueue recovery through the
+existing prompt-card reconciler. `GameService` retains its public API, while
+visible deck behavior and mailbox priority remain unchanged.
+
 ### Legacy generation-selection reconciliation boundary
 
 Pre-buffer saves that still contain a single pending challenger job now recover
