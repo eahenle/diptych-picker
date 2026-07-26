@@ -104,6 +104,10 @@ and a Next.js production build.
   receipts and baselines, crash-replay completion, retirement and tie
   replacement draws, and displayed-ready cleanup stay together while
   `GameService` retains transaction timing and immediate user-action commits.
+- Pre-buffer single-challenger saves now recover through a focused compatibility
+  coordinator. Exact intent reconstruction, work/result validation, asset
+  verification, terminal completion, and two-phase mailbox cleanup stay out of
+  `GameService` while preserving load compatibility.
 - The manifest's discovery ranges and lockfile authority are now governed by
   [Dependency update policy](DEPENDENCY_POLICY.md), including isolated updates
   and the full validation gate.

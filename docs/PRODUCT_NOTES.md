@@ -36,6 +36,15 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-25
 
+### Legacy generation-selection reconciliation boundary
+
+Pre-buffer saves that still contain a single pending challenger job now recover
+through a focused compatibility coordinator. Exact intent reconstruction,
+missing-publication recovery, strict work and result validation, asset
+verification, candidate-collision rejection, round completion, and two-phase
+mailbox cleanup remain behaviorally unchanged. Current buffered selection and
+refill jobs continue through their existing durable paths.
+
 ### Prepared-selection reconciliation boundary
 
 Prepared comparison receipts and baselines, restart-safe completion, champion
