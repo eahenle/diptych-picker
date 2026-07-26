@@ -36,6 +36,16 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-25
 
+### Durable generation-capacity boundary
+
+Explicit and transaction-driven refill-capacity checks now share one focused
+service. It reads the saved queue target, attaches only the current matching
+leaderboard visual profile, persists exact refill intent before publication,
+and preserves game-before-challenger lock order. A companion durable publisher
+handles ordered enqueue plus the case where mailbox work was written but its
+acknowledgement was lost. Selection, preference, rule-edit, reconciliation, and
+refill-result behavior remain unchanged behind the existing `GameService` API.
+
 ### Manual-preference command boundary
 
 Manual Preference saves, optimistic stale-editor rejection, candidate-derived
