@@ -1,0 +1,315 @@
+import { isDeepStrictEqual } from "node:util";
+import {
+  drawFallbackBatch,
+  popReady,
+  type BufferedCandidate,
+  type ChallengerState,
+  type PendingComparisonReceipt,
+  type PendingSelectionBaseline,
+} from "@/domain/challenger-state";
+import {
+  candidateAt,
+  completeBothLose,
+  completeChampionRetirement,
+  completeSelection,
+  completeTie,
+  oppositeSide,
+  type Candidate,
+  type GameRules,
+  type GameState,
+} from "@/domain/game";
+import type { ChallengerRepository } from "./challenger-repository";
+import { applyAdaptivePreferences } from "./game-adaptation";
+import {
+  comparisonReceipt,
+  recordBothLose,
+  recordComparison,
+  recordTie,
+} from "./game-comparison";
+import type { GameRepository } from "./repository";
+
+interface PreparedSelectionReconcilerOptions {
+  gameRepository: GameRepository;
+  challengerRepository: ChallengerRepository;
+  initialRating: number;
+  eloKFactor: number;
+  fallbackDelayMs: number;
+  now: () => string;
+  random: () => number;
+  rulesFor: (game: GameState) => GameRules;
+}
+
+export class PreparedSelectionReconciler {
+  constructor(private readonly options: PreparedSelectionReconcilerOptions) {}
+
+  async prepare(
+    game: GameState,
+    challengers: ChallengerState,
+  ): Promise<ChallengerState> {
+    const pending = game.pendingSelection;
+    if (
+      game.round.status !== "generating" ||
+      !pending ||
+      (pending.kind !== "buffer" &&
+        pending.kind !== "retirement" &&
+        pending.kind !== "tie" &&
+        pending.kind !== "both-lose")
+    ) {
+      if (
+        challengers.pendingComparison === null &&
+        !challengers.pendingSelectionBaseline
+      ) {
+        return challengers;
+      }
+      const cleaned = {
+        ...challengers,
+        pendingComparison: null,
+        pendingSelectionBaseline: null,
+      };
+      await this.options.challengerRepository.save(cleaned);
+      return cleaned;
+    }
+
+    const receipt: PendingComparisonReceipt =
+      pending.kind === "tie" || pending.kind === "both-lose"
+        ? {
+            kind: pending.kind,
+            selectedAt: pending.selectedAt,
+            roundNumber: game.round.roundNumber,
+            leftId: game.round.leftCandidate.id,
+            rightId: game.round.rightCandidate.id,
+          }
+        : comparisonReceipt(game, pending.winnerSide, pending.selectedAt);
+    if (isDeepStrictEqual(challengers.pendingComparison, receipt)) {
+      return challengers;
+    }
+    if (challengers.pendingComparison !== null) {
+      throw new Error(
+        "Persisted comparison receipt does not match the pending selection",
+      );
+    }
+
+    const baseline = challengers.pendingSelectionBaseline
+      ? challengers
+      : {
+          ...challengers,
+          pendingSelectionBaseline: this.baseline(challengers),
+        };
+    const ratingConfig = {
+      initialRating: this.options.initialRating,
+      eloKFactor: this.options.eloKFactor,
+      poolMaximum: this.options.rulesFor(game).poolMaximum,
+    };
+    const compared =
+      pending.kind === "tie"
+        ? recordTie(
+            baseline,
+            game.round.leftCandidate,
+            game.round.rightCandidate,
+            receipt,
+            ratingConfig,
+          )
+        : pending.kind === "both-lose"
+          ? recordBothLose(
+              baseline,
+              game.round.leftCandidate,
+              game.round.rightCandidate,
+              receipt,
+              this.options.initialRating,
+            )
+          : recordComparison(
+              baseline,
+              candidateAt(game.round, pending.winnerSide),
+              candidateAt(game.round, oppositeSide(pending.winnerSide)),
+              receipt,
+              ratingConfig,
+            );
+    await this.options.challengerRepository.save(compared);
+    return compared;
+  }
+
+  async complete(
+    game: GameState,
+    challengers: ChallengerState,
+  ): Promise<{ game: GameState; challengers: ChallengerState }> {
+    if (game.round.status !== "generating" || !game.pendingSelection) {
+      return { game, challengers };
+    }
+
+    if (game.pendingSelection.kind === "retirement") {
+      if (challengers.ready.length < 2) return { game, challengers };
+      const leftDraw = popReady(challengers);
+      const rightDraw = popReady(leftDraw.state);
+      const adapted = applyAdaptivePreferences(
+        completeChampionRetirement(
+          game,
+          leftDraw.candidate!,
+          rightDraw.candidate!,
+        ),
+        rightDraw.state,
+      );
+      await this.options.gameRepository.save(adapted.game);
+      const finalized = this.finalize(adapted.challengers);
+      await this.options.challengerRepository.save(finalized);
+      return { game: adapted.game, challengers: finalized };
+    }
+
+    if (
+      game.pendingSelection.kind === "tie" ||
+      game.pendingSelection.kind === "both-lose"
+    ) {
+      const outcome = game.pendingSelection.kind;
+      const replacements = this.drawPairReplacements(challengers, game);
+      if (!replacements.candidates) {
+        if (replacements.state !== challengers) {
+          await this.options.challengerRepository.save(replacements.state);
+        }
+        return { game, challengers: replacements.state };
+      }
+      const completed =
+        outcome === "tie"
+          ? completeTie(game, ...replacements.candidates)
+          : completeBothLose(game, ...replacements.candidates);
+      const adapted =
+        outcome === "both-lose"
+          ? applyAdaptivePreferences(completed, replacements.state)
+          : { game: completed, challengers: replacements.state };
+      await this.options.gameRepository.save(adapted.game);
+      const finalized = this.finalize(adapted.challengers);
+      await this.options.challengerRepository.save(finalized);
+      return { game: adapted.game, challengers: finalized };
+    }
+
+    if (game.pendingSelection.kind !== "buffer") {
+      return { game, challengers };
+    }
+
+    let draw = popReady(challengers);
+    if (!draw.candidate) {
+      const currentIds = new Set([
+        game.round.leftCandidate.id,
+        game.round.rightCandidate.id,
+      ]);
+      const preparedFallback = challengers.ratings.find(
+        ({ candidate, lastServedAt }) =>
+          lastServedAt === game.pendingSelection?.selectedAt &&
+          !currentIds.has(candidate.id),
+      )?.candidate;
+      if (preparedFallback) {
+        draw = { candidate: preparedFallback, state: challengers };
+      }
+    }
+    if (!draw.candidate) return { game, challengers };
+
+    const adapted = applyAdaptivePreferences(
+      completeSelection(game, draw.candidate),
+      draw.state,
+    );
+    await this.options.gameRepository.save(adapted.game);
+    const finalized = this.finalize(adapted.challengers);
+    if (
+      adapted.challengers !== challengers ||
+      challengers.pendingComparison !== null
+    ) {
+      await this.options.challengerRepository.save(finalized);
+    }
+    return { game: adapted.game, challengers: finalized };
+  }
+
+  async removeDisplayedCandidatesFromReady(
+    game: GameState,
+    challengers: ChallengerState,
+  ): Promise<ChallengerState> {
+    if (game.round.status !== "idle") return challengers;
+    const displayedIds = new Set([
+      game.round.leftCandidate.id,
+      game.round.rightCandidate.id,
+    ]);
+    const ready = challengers.ready.filter(
+      ({ candidate }) => !displayedIds.has(candidate.id),
+    );
+    if (ready.length === challengers.ready.length) return challengers;
+    const cleaned = { ...challengers, ready };
+    await this.options.challengerRepository.save(cleaned);
+    return cleaned;
+  }
+
+  drawPairReplacements(
+    state: ChallengerState,
+    game: GameState,
+  ): {
+    candidates: [Candidate, Candidate] | null;
+    readyHeads: BufferedCandidate[];
+    state: ChallengerState;
+  } {
+    const readyHeads = state.ready.slice(0, 2);
+    const fallbackCount = 2 - readyHeads.length;
+    if (fallbackCount === 0) {
+      const leftDraw = popReady(state);
+      const rightDraw = popReady(leftDraw.state);
+      return {
+        candidates: [leftDraw.candidate!, rightDraw.candidate!],
+        readyHeads,
+        state: rightDraw.state,
+      };
+    }
+
+    const recentCandidateIds = game.history
+      .slice(-10)
+      .flatMap((decision) =>
+        decision.outcome === "tie" || decision.outcome === "both-lose"
+          ? [decision.leftId, decision.rightId]
+          : [decision.winnerId, decision.loserId],
+      );
+    const rules = this.options.rulesFor(game);
+    const fallback = drawFallbackBatch(
+      state,
+      {
+        now: this.options.now(),
+        currentCandidateIds: [
+          game.round.leftCandidate.id,
+          game.round.rightCandidate.id,
+          ...readyHeads.map(({ candidate }) => candidate.id),
+        ],
+        recentCandidateIds,
+        random: this.options.random,
+        delayMs: this.options.fallbackDelayMs,
+        maximumConsecutiveDraws: rules.fallbackMaximumConsecutive,
+      },
+      fallbackCount,
+    );
+    if (fallback.candidates.length < fallbackCount) {
+      return { candidates: null, readyHeads: [], state: fallback.state };
+    }
+
+    return {
+      candidates: [
+        ...readyHeads.map(({ candidate }) => candidate),
+        ...fallback.candidates,
+      ] as [Candidate, Candidate],
+      readyHeads,
+      state: {
+        ...fallback.state,
+        ready: fallback.state.ready.slice(readyHeads.length),
+      },
+    };
+  }
+
+  baseline(state: ChallengerState): PendingSelectionBaseline {
+    return {
+      ready: state.ready,
+      ratings: state.ratings,
+      generationTurnaroundEmaMs: state.generationTurnaroundEmaMs,
+      consecutiveFallbackDraws: state.consecutiveFallbackDraws,
+      nextFallbackAt: state.nextFallbackAt,
+    };
+  }
+
+  private finalize(state: ChallengerState): ChallengerState {
+    return {
+      ...state,
+      pendingComparison: null,
+      pendingSelectionBaseline: null,
+    };
+  }
+}

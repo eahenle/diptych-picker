@@ -36,14 +36,23 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-25
 
+### Prepared-selection reconciliation boundary
+
+Prepared comparison receipts and baselines, restart-safe completion, champion
+retirement, tie and both-lose pair replacement, fallback pool draws, and
+displayed-candidate ready-queue cleanup now share one focused coordinator.
+`GameService` still owns the outer locked transaction and immediate
+user-selection commit order. Persistence shape, comparison scoring, fallback
+pacing, and visible round behavior are unchanged.
+
 ### Refill-result reconciliation boundary
 
 Ordered refill observations, missing-publication recovery, strict durable-intent
 validation, candidate construction and lineage, asset verification, moderation
 notices, idempotent replay, rating admission, and terminal cleanup now share one
-focused coordinator. `GameService` still owns the outer locked transaction and
-prepared-selection timing. Mailbox priority, persistence shape, result
-acceptance, and visible comparison behavior are unchanged.
+focused coordinator. `GameService` still owns the outer locked transaction.
+Mailbox priority, persistence shape, result acceptance, and visible comparison
+behavior are unchanged.
 
 ### Adaptive preference application boundary
 

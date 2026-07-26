@@ -99,7 +99,11 @@ and a Next.js production build.
 - Refill-result reconciliation now has its own coordinator. Completion ordering,
   durable-intent recovery, strict work/result validation, candidate admission,
   moderation notices, idempotent replay, and terminal archival stay together
-  while `GameService` retains transaction and prepared-selection timing.
+  while `GameService` retains the outer transaction.
+- Prepared-selection reconciliation now has its own coordinator. Comparison
+  receipts and baselines, crash-replay completion, retirement and tie
+  replacement draws, and displayed-ready cleanup stay together while
+  `GameService` retains transaction timing and immediate user-action commits.
 - The manifest's discovery ranges and lockfile authority are now governed by
   [Dependency update policy](DEPENDENCY_POLICY.md), including isolated updates
   and the full validation gate.
