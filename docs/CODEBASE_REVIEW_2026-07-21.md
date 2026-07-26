@@ -85,9 +85,11 @@ and a Next.js production build.
   domain modules while the service retains lock, persistence, mailbox, and
   reconciliation ownership.
 - Prompt-card editor, blender, and writer reconciliation now share a focused
-  server coordinator. `GameService` still owns transaction timing and explicit
-  card requests while durable work validation, re-enqueue, terminal archival,
-  and suggestion creation stay behind the prompt-card boundary.
+  server coordinator. Card creation, deck edits, suggestion decisions, blend
+  requests, and favorite-set writer requests now share a companion prompt-deck
+  service. `GameService` preserves its public API while durable work validation,
+  re-enqueue, terminal archival, and suggestion creation stay behind the
+  reconciliation boundary.
 - Adaptive leaderboard visual analysis now has its own reconciliation boundary.
   `GameService` supplies the current game and challenger transaction while job
   recovery, cohort fingerprint attempts, result caching, and refill-facing

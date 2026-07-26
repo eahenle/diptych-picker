@@ -27,9 +27,6 @@ import {
   type Side,
 } from "@/domain/game";
 import {
-  createPromptCardBlendRequest,
-  createPromptCard as createPromptCardRecord,
-  emptyPromptDeck,
   recordPromptCardDecision,
   type CreatePromptCardInput,
 } from "@/domain/prompt-deck";
@@ -45,6 +42,12 @@ import {
   appendPreferenceRevision,
   applyAdaptivePreferences,
 } from "./game-adaptation";
+import {
+  GameRulesError,
+  MissingGameError,
+  PreferencePresetLimitError,
+  SelectionConflictError,
+} from "./game-service-errors";
 import {
   comparisonReceipt,
   recordBothLose,
@@ -64,16 +67,19 @@ import { LeaderboardProfileReconciler } from "./leaderboard-profile-reconciler";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import { PromptCardReconciler } from "./prompt-card-reconciler";
 import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
+import { PromptDeckService } from "./prompt-deck-service";
 import { PreparedSelectionReconciler } from "./prepared-selection-reconciler";
 import type { AssetStore } from "./providers";
 import { RefillResultReconciler } from "./refill-result-reconciler";
 import type { GameRepository } from "./repository";
 
-export class SelectionConflictError extends Error {}
-export class MissingGameError extends Error {}
-export class PreferencePresetLimitError extends Error {}
-export class PromptDeckError extends Error {}
-export class GameRulesError extends Error {}
+export {
+  GameRulesError,
+  MissingGameError,
+  PreferencePresetLimitError,
+  PromptDeckError,
+  SelectionConflictError,
+} from "./game-service-errors";
 
 export interface GameServiceConfig {
   bufferTarget: number;
@@ -91,6 +97,7 @@ export class GameService {
   private readonly generationSelectionReconciler: GenerationSelectionReconciler;
   private readonly leaderboardProfileReconciler: LeaderboardProfileReconciler;
   private readonly promptCardReconciler: PromptCardReconciler;
+  private readonly promptDeckService: PromptDeckService;
   private readonly preparedSelectionReconciler: PreparedSelectionReconciler;
   private readonly refillResultReconciler: RefillResultReconciler;
 
@@ -123,6 +130,15 @@ export class GameService {
     this.promptCardReconciler = new PromptCardReconciler({
       repository: this.gameRepository,
       editor: promptCardEditor,
+      blender: this.promptCardBlender,
+      writer: this.promptCardWriter,
+      createId: this.createId,
+      now: this.now,
+    });
+    this.promptDeckService = new PromptDeckService({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      jobPublisher: this.promptCardReconciler,
       blender: this.promptCardBlender,
       writer: this.promptCardWriter,
       createId: this.createId,
@@ -275,168 +291,18 @@ export class GameService {
   }
 
   async createPromptCard(input: CreatePromptCardInput): Promise<GameState> {
-    return this.gameRepository.withLock(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError("Start a game before creating prompt cards");
-      }
-      const promptDeck = current.promptDeck ?? emptyPromptDeck();
-      if (promptDeck.cards.length >= 50) {
-        throw new PromptDeckError(
-          "Archive or reuse a prompt card before adding another (maximum 50).",
-        );
-      }
-      if (
-        input.parents?.some(
-          (parentId) => !promptDeck.cards.some((card) => card.id === parentId),
-        )
-      ) {
-        throw new PromptDeckError(
-          "Every prompt-card parent must exist in the current deck.",
-        );
-      }
-      const updated: GameState = {
-        ...current,
-        promptDeck: {
-          ...promptDeck,
-          cards: [
-            ...promptDeck.cards,
-            createPromptCardRecord(input, this.createId(), this.now()),
-          ],
-        },
-      };
-      await this.gameRepository.save(updated);
-      return updated;
-    });
+    return this.promptDeckService.create(input);
   }
 
   async requestPromptCardBlend(
     cardIds: [string, string],
     ratio: number,
   ): Promise<GameState> {
-    return this.gameRepository.withLock(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError("Start a game before blending prompt cards");
-      }
-      if (!this.promptCardBlender) {
-        throw new PromptDeckError("Prompt-card blending is unavailable.");
-      }
-      const promptDeck = current.promptDeck ?? emptyPromptDeck();
-      if (promptDeck.blendJob) {
-        throw new PromptDeckError(
-          "Wait for the current prompt-card blend before starting another.",
-        );
-      }
-      if (new Set(cardIds).size !== 2) {
-        throw new PromptDeckError("Choose two distinct prompt cards to blend.");
-      }
-      if (!Number.isFinite(ratio) || ratio < 0.1 || ratio > 0.9) {
-        throw new PromptDeckError("Blend ratio must be between 10% and 90%.");
-      }
-      const cards = cardIds.map((cardId) =>
-        promptDeck.cards.find((card) => card.id === cardId),
-      );
-      if (!cards[0] || !cards[1]) {
-        throw new PromptDeckError(
-          "Both prompt cards must exist in the current deck.",
-        );
-      }
-      const jobId = this.createId();
-      const createdAt = this.now();
-      const job = createPromptCardBlendRequest(
-        [cards[0], cards[1]],
-        ratio,
-        jobId,
-        createdAt,
-      );
-      const updated: GameState = {
-        ...current,
-        promptDeck: {
-          ...promptDeck,
-          blendJob: {
-            jobId,
-            cardIds,
-            enqueuedAt: createdAt,
-            expectedJob: job,
-          },
-        },
-      };
-      await this.gameRepository.save(updated);
-      await this.promptCardReconciler.ensureBlenderEnqueued(job);
-      return updated;
-    });
+    return this.promptDeckService.requestBlend(cardIds, ratio);
   }
 
   async requestPromptCardWriter(candidateIds: string[]): Promise<GameState> {
-    return this.withStateLocks(async () => {
-      const [current, challengers] = await Promise.all([
-        this.gameRepository.load(),
-        this.challengerRepository.load(),
-      ]);
-      if (!current || !challengers) {
-        throw new MissingGameError(
-          "Start a game before writing prompt cards from images",
-        );
-      }
-      if (!this.promptCardWriter) {
-        throw new PromptDeckError("Prompt-card writing is unavailable.");
-      }
-      if (
-        candidateIds.length < 3 ||
-        candidateIds.length > 5 ||
-        new Set(candidateIds).size !== candidateIds.length
-      ) {
-        throw new PromptDeckError(
-          "Choose three to five distinct generated favorites.",
-        );
-      }
-      const promptDeck = current.promptDeck ?? emptyPromptDeck();
-      if (promptDeck.writerJob) {
-        throw new PromptDeckError(
-          "Wait for the current image-set draft before starting another.",
-        );
-      }
-      const candidates = candidateIds.map((candidateId) =>
-        challengers.ratings.find(
-          (rating) => rating.candidate.id === candidateId,
-        ),
-      );
-      if (
-        candidates.some(
-          (candidate) =>
-            !candidate ||
-            candidate.source !== "generated" ||
-            !candidate.favorite,
-        )
-      ) {
-        throw new PromptDeckError(
-          "Prompt-card sources must be current generated favorites.",
-        );
-      }
-      const jobId = this.createId();
-      const createdAt = this.now();
-      const job = await this.promptCardWriter.prepare(
-        jobId,
-        createdAt,
-        candidates as NonNullable<(typeof candidates)[number]>[],
-      );
-      const updated: GameState = {
-        ...current,
-        promptDeck: {
-          ...promptDeck,
-          writerJob: {
-            jobId,
-            sourceCandidateIds: [...candidateIds],
-            enqueuedAt: createdAt,
-            expectedJob: job,
-          },
-        },
-      };
-      await this.gameRepository.save(updated);
-      await this.promptCardReconciler.ensureWriterEnqueued(job);
-      return updated;
-    });
+    return this.promptDeckService.requestWriter(candidateIds);
   }
 
   async updatePromptDeck(
@@ -449,102 +315,7 @@ export class GameService {
           action: "accept" | "discard";
         },
   ): Promise<GameState> {
-    return this.gameRepository.withLock(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError(
-          "Start a game before editing the prompt deck",
-        );
-      }
-      const promptDeck = current.promptDeck ?? emptyPromptDeck();
-      if (update.kind === "suggestion") {
-        const suggestion = (promptDeck.suggestions ?? []).find(
-          (item) => item.id === update.suggestionId,
-        );
-        if (!suggestion) {
-          throw new PromptDeckError("That prompt-card suggestion is gone.");
-        }
-        if (update.action === "accept" && promptDeck.cards.length >= 50) {
-          throw new PromptDeckError(
-            "Archive or reuse a prompt card before accepting another (maximum 50).",
-          );
-        }
-        const updated: GameState = {
-          ...current,
-          promptDeck: {
-            ...promptDeck,
-            cards:
-              update.action === "accept"
-                ? [
-                    ...promptDeck.cards,
-                    createPromptCardRecord(
-                      {
-                        title: suggestion.title,
-                        prompt: suggestion.prompt,
-                        negativePrompt: suggestion.negativePrompt,
-                        weight: 1,
-                        tags: suggestion.tags,
-                        parents: suggestion.parentCardIds ?? [
-                          ...(suggestion.parentCardId
-                            ? [suggestion.parentCardId]
-                            : []),
-                        ],
-                        sourceCandidateIds: suggestion.sourceCandidateIds,
-                      },
-                      this.createId(),
-                      this.now(),
-                    ),
-                  ]
-                : promptDeck.cards,
-            suggestions: (promptDeck.suggestions ?? []).filter(
-              (item) => item.id !== suggestion.id,
-            ),
-          },
-        };
-        await this.gameRepository.save(updated);
-        return updated;
-      }
-      if (update.kind === "deck") {
-        if (
-          update.enabled &&
-          !promptDeck.cards.some((card) => card.active && card.weight > 0)
-        ) {
-          throw new PromptDeckError(
-            "Activate at least one prompt card before enabling weighted draws.",
-          );
-        }
-        const updated = {
-          ...current,
-          promptDeck: { ...promptDeck, enabled: update.enabled },
-        };
-        await this.gameRepository.save(updated);
-        return updated;
-      }
-
-      let found = false;
-      const cards = promptDeck.cards.map((card) => {
-        if (card.id !== update.cardId) return card;
-        found = true;
-        return {
-          ...card,
-          ...(update.active !== undefined ? { active: update.active } : {}),
-          ...(update.weight !== undefined ? { weight: update.weight } : {}),
-        };
-      });
-      if (!found)
-        throw new PromptDeckError("That prompt card no longer exists.");
-      const hasActive = cards.some((card) => card.active && card.weight > 0);
-      const updated: GameState = {
-        ...current,
-        promptDeck: {
-          ...promptDeck,
-          enabled: promptDeck.enabled && hasActive,
-          cards,
-        },
-      };
-      await this.gameRepository.save(updated);
-      return updated;
-    });
+    return this.promptDeckService.update(update);
   }
 
   async updatePreferenceSeed(
