@@ -37,10 +37,7 @@ import type {
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
-import {
-  appendPreferenceRevision,
-  applyAdaptivePreferences,
-} from "./game-adaptation";
+import { applyAdaptivePreferences } from "./game-adaptation";
 import {
   MissingGameError,
   SelectionConflictError,
@@ -66,6 +63,7 @@ import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-servic
 import { PromptCardReconciler } from "./prompt-card-reconciler";
 import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import { PromptDeckService } from "./prompt-deck-service";
+import { PreferenceService } from "./preference-service";
 import { PreparedSelectionReconciler } from "./prepared-selection-reconciler";
 import type { AssetStore } from "./providers";
 import { RefillResultReconciler } from "./refill-result-reconciler";
@@ -97,6 +95,7 @@ export class GameService {
   private readonly promptCardReconciler: PromptCardReconciler;
   private readonly promptDeckService: PromptDeckService;
   private readonly gameSettingsService: GameSettingsService;
+  private readonly preferenceService: PreferenceService;
   private readonly preparedSelectionReconciler: PreparedSelectionReconciler;
   private readonly refillResultReconciler: RefillResultReconciler;
 
@@ -150,6 +149,14 @@ export class GameService {
         this.addRefillCapacity(state, context),
       ensureJobsEnqueued: (jobs) => this.ensureJobsEnqueued(jobs),
       createId: this.createId,
+      now: this.now,
+    });
+    this.preferenceService = new PreferenceService({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      addRefillCapacity: (state, context) =>
+        this.addRefillCapacity(state, context),
+      ensureJobsEnqueued: (jobs) => this.ensureJobsEnqueued(jobs),
       now: this.now,
     });
     this.preparedSelectionReconciler = new PreparedSelectionReconciler({
@@ -245,89 +252,12 @@ export class GameService {
     expectedPreferenceProfile?: PreferenceProfile,
     variationSourceCandidateId?: string | null,
   ): Promise<GameState> {
-    return this.withStateLocks(async () => {
-      const [current, challengers] = await Promise.all([
-        this.gameRepository.load(),
-        this.challengerRepository.load(),
-      ]);
-      if (!current) {
-        throw new MissingGameError("Start a game before editing preferences");
-      }
-      if (
-        expectedPreferenceProfile !== undefined &&
-        !isDeepStrictEqual(
-          current.preferenceProfile ??
-            preferenceProfileFromSeed(current.preferenceSeed),
-          expectedPreferenceProfile,
-        )
-      ) {
-        throw new SelectionConflictError(
-          "Preferences changed while this editor was open. Reopen Preferences and try again.",
-        );
-      }
-      if (current.round.status === "generating") {
-        throw new SelectionConflictError(
-          "A challenger is already being generated",
-        );
-      }
-
-      const variationSource = this.resolveVariationSource(
-        current,
-        challengers,
-        variationSourceCandidateId,
-      );
-      const profileChanged = !isDeepStrictEqual(
-        current.preferenceProfile ??
-          preferenceProfileFromSeed(current.preferenceSeed),
-        preferenceProfile,
-      );
-      const variationSourceChanged =
-        current.variationSource?.candidateId !== variationSource?.candidateId;
-      const preferenceRevisions =
-        profileChanged || variationSourceChanged
-          ? appendPreferenceRevision(
-              current,
-              preferenceProfile,
-              variationSource ? "variation" : "manual",
-              this.now(),
-              variationSource,
-            )
-          : current.preferenceRevisions;
-      const updated = this.withoutGenerationNotice({
-        ...current,
-        preferenceSeed,
-        preferenceProfile,
-        ...(preferenceRevisions ? { preferenceRevisions } : {}),
-        ...(variationSource ? { variationSource } : {}),
-      });
-      if (!variationSource) delete updated.variationSource;
-      await this.gameRepository.save(updated);
-      const generationPreferencesChanged =
-        current.preferenceSeed !== preferenceSeed ||
-        (current.preferenceProfile?.adaptationMode ?? "static") !==
-          preferenceProfile.adaptationMode ||
-        (current.preferenceProfile?.adaptationStrength ?? "guided") !==
-          (preferenceProfile.adaptationStrength ?? "guided") ||
-        current.variationSource?.candidateId !==
-          updated.variationSource?.candidateId;
-      if (!challengers || !generationPreferencesChanged) {
-        return updated;
-      }
-
-      // Ready candidates and completed refill results were proposed against
-      // the previous brief. Keep unfinished records until their workers reach
-      // a terminal state, but exclude them from replacement capacity and
-      // discard their eventual results during reconciliation.
-      let refreshed: ChallengerState = { ...challengers, ready: [] };
-      const context = refillContext(updated, refreshed);
-      const capacity: RefillCapacityResult = context
-        ? this.addRefillCapacity(refreshed, context)
-        : { state: refreshed, jobs: [] };
-      refreshed = capacity.state;
-      await this.challengerRepository.save(refreshed);
-      await this.ensureJobsEnqueued(capacity.jobs);
-      return updated;
-    });
+    return this.preferenceService.update(
+      preferenceSeed,
+      preferenceProfile,
+      expectedPreferenceProfile,
+      variationSourceCandidateId,
+    );
   }
 
   async select(
@@ -784,27 +714,6 @@ export class GameService {
     });
   }
 
-  private resolveVariationSource(
-    game: GameState,
-    challengers: ChallengerState | null,
-    candidateId: string | null | undefined,
-  ) {
-    if (candidateId === undefined) return game.variationSource;
-    if (candidateId === null) return undefined;
-    const candidates = [
-      game.round.leftCandidate,
-      game.round.rightCandidate,
-      ...(challengers?.ratings.map(({ candidate }) => candidate) ?? []),
-    ];
-    const source = candidates.find((candidate) => candidate.id === candidateId);
-    if (!source) {
-      throw new SelectionConflictError(
-        "That variation source is no longer available in this game.",
-      );
-    }
-    return { candidateId: source.id, concept: source.concept };
-  }
-
   private async ensureJobsEnqueued(jobs: readonly GenerationJob[]) {
     for (const job of jobs) await this.ensureEnqueued(job);
   }
@@ -821,13 +730,6 @@ export class GameService {
 
   private sameJob(left: GenerationJob, right: GenerationJob): boolean {
     return isDeepStrictEqual(left, right);
-  }
-
-  private withoutGenerationNotice(game: GameState): GameState {
-    if (!game.generationNotice) return game;
-    const updated = { ...game };
-    delete updated.generationNotice;
-    return updated;
   }
 
   private rulesFor(game: GameState): GameRules {

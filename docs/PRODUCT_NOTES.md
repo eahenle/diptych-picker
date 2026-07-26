@@ -36,6 +36,16 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-25
 
+### Manual-preference command boundary
+
+Manual Preference saves, optimistic stale-editor rejection, candidate-derived
+variation setup and clearing, attributable revision history, and moderation
+notice clearing now share one focused service. Changes to the composed brief,
+adaptation freedom, or variation parent still invalidate ready candidates,
+retain unfinished work for safe draining, plan replacement capacity, and
+publish durable refill jobs under the existing repository lock order.
+`GameService` retains the same public API and visible editor behavior.
+
 ### Game-settings command boundary
 
 Generation-notice dismissal, named Preference preset saves and deletes, and

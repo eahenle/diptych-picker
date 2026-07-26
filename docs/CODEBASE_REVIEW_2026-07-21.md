@@ -95,6 +95,11 @@ and a Next.js production build.
   The boundary preserves preset provenance resets, the 20-preset limit,
   game-before-challenger lock order, pool resizing, refill planning, and durable
   enqueue recovery while `GameService` keeps its public API.
+- Manual preference saves now share a focused command service. Stale-editor and
+  in-flight conflict checks, variation-source resolution, revision history,
+  moderation-notice clearing, ready-capacity invalidation, refill planning, and
+  durable publication stay in one game-before-challenger transaction while
+  `GameService` preserves its public API.
 - Adaptive leaderboard visual analysis now has its own reconciliation boundary.
   `GameService` supplies the current game and challenger transaction while job
   recovery, cohort fingerprint attempts, result caching, and refill-facing
