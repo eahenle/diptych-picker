@@ -17,9 +17,7 @@ import {
   completeBothLose,
   completeSelection,
   completeTie,
-  failSelection,
   oppositeSide,
-  recentConcepts,
   preferenceProfileFromSeed,
   willRetireChampion,
   type GameRules,
@@ -61,16 +59,14 @@ import {
   type RefillContext,
 } from "./game-refill";
 import { effectiveGameRules, validGameRules } from "./game-rules";
+import { GenerationSelectionReconciler } from "./generation-selection-reconciler";
 import { LeaderboardProfileReconciler } from "./leaderboard-profile-reconciler";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import { PromptCardReconciler } from "./prompt-card-reconciler";
 import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import { PreparedSelectionReconciler } from "./prepared-selection-reconciler";
 import type { AssetStore } from "./providers";
-import {
-  candidateFromGenerationResult,
-  RefillResultReconciler,
-} from "./refill-result-reconciler";
+import { RefillResultReconciler } from "./refill-result-reconciler";
 import type { GameRepository } from "./repository";
 
 export class SelectionConflictError extends Error {}
@@ -92,6 +88,7 @@ export interface GameServiceConfig {
 
 export class GameService {
   private reconciliation: Promise<GameState | null> | null = null;
+  private readonly generationSelectionReconciler: GenerationSelectionReconciler;
   private readonly leaderboardProfileReconciler: LeaderboardProfileReconciler;
   private readonly promptCardReconciler: PromptCardReconciler;
   private readonly preparedSelectionReconciler: PreparedSelectionReconciler;
@@ -111,6 +108,12 @@ export class GameService {
     private readonly promptCardBlender?: PromptCardBlenderMailbox,
     private readonly promptCardWriter?: PromptCardWriterCoordinator,
   ) {
+    this.generationSelectionReconciler = new GenerationSelectionReconciler({
+      repository: this.gameRepository,
+      mailbox: this.mailbox,
+      assetVerifier: this.assetVerifier,
+      ensureEnqueued: (job) => this.ensureEnqueued(job),
+    });
     this.leaderboardProfileReconciler = new LeaderboardProfileReconciler({
       repository: this.challengerRepository,
       coordinator: leaderboardProfiles,
@@ -963,11 +966,7 @@ export class GameService {
     let game = await this.gameRepository.load();
     if (!game) return null;
 
-    if (game.mailboxCleanupJobId) {
-      await this.mailbox.archive(game.mailboxCleanupJobId);
-      game = this.withoutCleanupMarker(game);
-      await this.gameRepository.save(game);
-    }
+    game = await this.generationSelectionReconciler.cleanup(game);
 
     game = await this.promptCardReconciler.reconcile(game);
 
@@ -975,7 +974,7 @@ export class GameService {
       game.round.status === "generating" &&
       game.pendingSelection?.kind === "generation"
     ) {
-      return this.reconcileLegacySelection(game);
+      return this.generationSelectionReconciler.reconcile(game);
     }
 
     let challengers = await this.challengerRepository.load();
@@ -1149,98 +1148,5 @@ export class GameService {
     return this.gameRepository.withLock(() =>
       this.challengerRepository.withLock(operation),
     );
-  }
-
-  private async reconcileLegacySelection(
-    current: GameState,
-  ): Promise<GameState> {
-    const pending = current.pendingSelection;
-    if (pending?.kind !== "generation") return current;
-
-    const expectedJob = this.legacyGenerationJob(current);
-    const result = await this.mailbox.readResult(pending.generationJobId);
-    if (!result) {
-      await this.ensureEnqueued(expectedJob);
-      return current;
-    }
-    if (result.jobId !== pending.generationJobId) return current;
-
-    const actualWork = await this.mailbox.readWork(pending.generationJobId);
-    let terminal: GameState;
-    if (!actualWork || !this.sameJob(actualWork, expectedJob)) {
-      terminal = failSelection(
-        current,
-        "Generation failed: Work metadata does not match the persisted selection",
-      );
-    } else if (result.status === "failed") {
-      terminal = failSelection(current, `Generation failed: ${result.message}`);
-    } else {
-      const generated = candidateFromGenerationResult(result);
-      if (!generated || this.candidateIdExistsInRound(current, generated.id)) {
-        terminal = failSelection(
-          current,
-          "Generation failed: Challenger result is invalid or collides with the current round",
-        );
-      } else {
-        try {
-          await this.assetVerifier.verify(result.asset);
-          terminal = completeSelection(current, generated);
-        } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "Asset verification failed";
-          terminal = failSelection(
-            current,
-            `Generation failed: Asset verification failed: ${message}`,
-          );
-        }
-      }
-    }
-
-    const awaitingCleanup = {
-      ...terminal,
-      mailboxCleanupJobId: pending.generationJobId,
-    };
-    await this.gameRepository.save(awaitingCleanup);
-    await this.mailbox.archive(pending.generationJobId);
-    const cleaned = this.withoutCleanupMarker(awaitingCleanup);
-    await this.gameRepository.save(cleaned);
-    return cleaned;
-  }
-
-  private legacyGenerationJob(state: GameState): GenerationJob {
-    const pending = state.pendingSelection;
-    if (pending?.kind !== "generation") {
-      throw new Error("No pending generation can be enqueued");
-    }
-    return {
-      id: pending.generationJobId,
-      kind: "challenger",
-      createdAt: pending.selectedAt,
-      roundNumber: state.round.roundNumber,
-      winnerSide: pending.winnerSide,
-      retainedWinner: candidateAt(state.round, pending.winnerSide),
-      rejectedCandidate: candidateAt(
-        state.round,
-        oppositeSide(pending.winnerSide),
-      ),
-      selectionHistory: state.history.slice(-12),
-      recentConcepts: recentConcepts(state, 10),
-      preferenceSeed: state.preferenceSeed,
-    };
-  }
-
-  private candidateIdExistsInRound(state: GameState, candidateId: string) {
-    return (
-      state.round.leftCandidate.id === candidateId ||
-      state.round.rightCandidate.id === candidateId
-    );
-  }
-
-  private withoutCleanupMarker(state: GameState): GameState {
-    const cleaned = { ...state };
-    delete cleaned.mailboxCleanupJobId;
-    return cleaned;
   }
 }
