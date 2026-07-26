@@ -1,7 +1,6 @@
 import {
   drawFallback,
   popReady,
-  backfillGeneratedPool,
   type BufferedCandidate,
   type ChallengerState,
   type PendingComparisonReceipt,
@@ -47,8 +46,8 @@ import {
   recordTie,
   tieReferenceSide,
 } from "./game-comparison";
+import { GameReconciler } from "./game-reconciler";
 import { GameSettingsService } from "./game-settings-service";
-import { refillContext } from "./game-refill";
 import { effectiveGameRules } from "./game-rules";
 import { GenerationJobPublisher } from "./generation-job-publisher";
 import { GenerationSelectionReconciler } from "./generation-selection-reconciler";
@@ -84,7 +83,6 @@ export interface GameServiceConfig {
 }
 
 export class GameService {
-  private reconciliation: Promise<GameState | null> | null = null;
   private readonly generationJobPublisher: GenerationJobPublisher;
   private readonly generationSelectionReconciler: GenerationSelectionReconciler;
   private readonly leaderboardProfileReconciler: LeaderboardProfileReconciler;
@@ -95,6 +93,7 @@ export class GameService {
   private readonly preparedSelectionReconciler: PreparedSelectionReconciler;
   private readonly refillResultReconciler: RefillResultReconciler;
   private readonly refillCapacityService: RefillCapacityService;
+  private readonly gameReconciler: GameReconciler;
 
   constructor(
     private readonly gameRepository: GameRepository,
@@ -193,6 +192,19 @@ export class GameService {
           game,
           challengers,
         ),
+    });
+    this.gameReconciler = new GameReconciler({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      generationSelectionReconciler: this.generationSelectionReconciler,
+      promptCardReconciler: this.promptCardReconciler,
+      leaderboardProfileReconciler: this.leaderboardProfileReconciler,
+      preparedSelectionReconciler: this.preparedSelectionReconciler,
+      refillResultReconciler: this.refillResultReconciler,
+      refillCapacityService: this.refillCapacityService,
+      generationJobPublisher: this.generationJobPublisher,
+      rulesFor: (game) => this.rulesFor(game),
+      drawFallback: (state, game) => this.drawFallback(state, game),
     });
   }
 
@@ -567,107 +579,7 @@ export class GameService {
   }
 
   async reconcile(): Promise<GameState | null> {
-    if (this.reconciliation) return this.reconciliation;
-
-    const reconciliation = this.withStateLocks(() => this.reconcileLocked());
-    this.reconciliation = reconciliation;
-    try {
-      return await reconciliation;
-    } finally {
-      if (this.reconciliation === reconciliation) this.reconciliation = null;
-    }
-  }
-
-  private async reconcileLocked(): Promise<GameState | null> {
-    let game = await this.gameRepository.load();
-    if (!game) return null;
-
-    game = await this.generationSelectionReconciler.cleanup(game);
-
-    game = await this.promptCardReconciler.reconcile(game);
-
-    if (
-      game.round.status === "generating" &&
-      game.pendingSelection?.kind === "generation"
-    ) {
-      return this.generationSelectionReconciler.reconcile(game);
-    }
-
-    let challengers = await this.challengerRepository.load();
-    if (!challengers) return game;
-
-    const backfilled = backfillGeneratedPool(
-      challengers,
-      this.rulesFor(game).poolMaximum,
-    );
-    if (backfilled !== challengers) {
-      challengers = backfilled;
-      await this.challengerRepository.save(challengers);
-    }
-
-    challengers = await this.leaderboardProfileReconciler.reconcile(
-      game,
-      challengers,
-    );
-
-    challengers = await this.preparedSelectionReconciler.prepare(
-      game,
-      challengers,
-    );
-
-    const prepared = await this.preparedSelectionReconciler.complete(
-      game,
-      challengers,
-    );
-    game = prepared.game;
-    challengers =
-      await this.preparedSelectionReconciler.removeDisplayedCandidatesFromReady(
-        prepared.game,
-        prepared.challengers,
-      );
-
-    const refills = await this.refillResultReconciler.reconcile(
-      game,
-      challengers,
-    );
-    game = refills.game;
-    challengers = refills.challengers;
-
-    if (
-      game.round.status === "generating" &&
-      game.pendingSelection?.kind === "buffer"
-    ) {
-      let draw = popReady(challengers);
-      if (!draw.candidate) draw = this.drawFallback(challengers, game);
-      challengers = draw.state;
-      if (draw.candidate) {
-        const adapted = applyAdaptivePreferences(
-          completeSelection(game, draw.candidate),
-          challengers,
-        );
-        game = adapted.game;
-        challengers = adapted.challengers;
-        await this.gameRepository.save(game);
-        challengers = {
-          ...challengers,
-          pendingComparison: null,
-          pendingSelectionBaseline: null,
-        };
-        await this.challengerRepository.save(challengers);
-      }
-    }
-
-    const context = refillContext(game, challengers);
-    if (context) {
-      const capacity = this.refillCapacityService.plan(challengers, context);
-      challengers = capacity.state;
-      if (capacity.jobs.length > 0) {
-        await this.challengerRepository.save(challengers);
-        await this.generationJobPublisher.ensureAll(capacity.jobs);
-      }
-    }
-
-    return game;
+    return this.gameReconciler.reconcile();
   }
 
   private drawFallback(

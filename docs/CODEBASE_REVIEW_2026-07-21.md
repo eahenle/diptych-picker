@@ -104,7 +104,12 @@ and a Next.js production build.
   and explicit capacity checks now share a focused service. A companion durable
   publisher centralizes ordered enqueue and exact-work lost-acknowledgement
   recovery for selection, reconciliation, and refill-result paths.
-  `GameService` retains transaction timing and its public API.
+  `GameService` retains its public API.
+- The outer reconciliation transaction now has its own coordinator. Concurrent
+  calls coalesce behind the existing game-before-challenger lock order, and the
+  ordered generation, prompt-card, leaderboard, prepared-selection,
+  refill-result, buffered-completion, and capacity passes remain unchanged.
+  `GameService` is the stable façade and dependency-wiring boundary.
 - Adaptive leaderboard visual analysis now has its own reconciliation boundary.
   `GameService` supplies the current game and challenger transaction while job
   recovery, cohort fingerprint attempts, result caching, and refill-facing
@@ -116,11 +121,11 @@ and a Next.js production build.
 - Refill-result reconciliation now has its own coordinator. Completion ordering,
   durable-intent recovery, strict work/result validation, candidate admission,
   moderation notices, idempotent replay, and terminal archival stay together
-  while `GameService` retains the outer transaction.
+  behind the outer reconciliation coordinator.
 - Prepared-selection reconciliation now has its own coordinator. Comparison
   receipts and baselines, crash-replay completion, retirement and tie
   replacement draws, and displayed-ready cleanup stay together while
-  `GameService` retains transaction timing and immediate user-action commits.
+  immediate user-action commits remain in `GameService`.
 - Pre-buffer single-challenger saves now recover through a focused compatibility
   coordinator. Exact intent reconstruction, work/result validation, asset
   verification, terminal completion, and two-phase mailbox cleanup stay out of
