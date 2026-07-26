@@ -180,6 +180,8 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/refill-result-reconciler.ts`: ordered refill-result validation, recovery, admission, moderation notices, and terminal cleanup.
 - `src/server/game-settings-service.ts`: generation-notice dismissal, named preference presets, and editable per-game rules.
 - `src/server/preference-service.ts`: manual preference saves, stale-editor protection, variation lineage, and replacement-capacity refresh.
+- `src/server/generation-job-publisher.ts`: idempotent durable mailbox publication with lost-acknowledgement recovery.
+- `src/server/refill-capacity-service.ts`: locked refill-deficit planning, intent persistence, and job publication.
 - `src/server/prompt-deck-service.ts`: card creation, weighted-deck edits, suggestion decisions, blend requests, and favorite-set writer requests.
 - `src/server/prompt-card-reconciler.ts`: durable editor, blender, and favorite-set writer recovery, terminal reconciliation, and suggestion creation.
 - `src/server/leaderboard-profile-reconciler.ts`: adaptive leaderboard analysis scheduling, durable result recovery, and current-cohort cache selection.

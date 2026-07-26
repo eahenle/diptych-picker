@@ -100,6 +100,11 @@ and a Next.js production build.
   moderation-notice clearing, ready-capacity invalidation, refill planning, and
   durable publication stay in one game-before-challenger transaction while
   `GameService` preserves its public API.
+- Refill deficit planning, leaderboard-profile attachment, intent persistence,
+  and explicit capacity checks now share a focused service. A companion durable
+  publisher centralizes ordered enqueue and exact-work lost-acknowledgement
+  recovery for selection, reconciliation, and refill-result paths.
+  `GameService` retains transaction timing and its public API.
 - Adaptive leaderboard visual analysis now has its own reconciliation boundary.
   `GameService` supplies the current game and challenger transaction while job
   recovery, cohort fingerprint attempts, result caching, and refill-facing

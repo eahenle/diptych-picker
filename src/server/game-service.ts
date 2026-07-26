@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import {
   drawFallback,
   popReady,
@@ -30,7 +29,6 @@ import {
   type CreatePromptCardInput,
 } from "@/domain/prompt-deck";
 import type {
-  GenerationJob,
   GenerationMailbox,
   PromptCardBlenderMailbox,
   PromptCardEditorMailbox,
@@ -50,13 +48,9 @@ import {
   tieReferenceSide,
 } from "./game-comparison";
 import { GameSettingsService } from "./game-settings-service";
-import {
-  planRefillCapacity,
-  refillContext,
-  type RefillCapacityResult,
-  type RefillContext,
-} from "./game-refill";
+import { refillContext } from "./game-refill";
 import { effectiveGameRules } from "./game-rules";
+import { GenerationJobPublisher } from "./generation-job-publisher";
 import { GenerationSelectionReconciler } from "./generation-selection-reconciler";
 import { LeaderboardProfileReconciler } from "./leaderboard-profile-reconciler";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
@@ -68,6 +62,7 @@ import { PreparedSelectionReconciler } from "./prepared-selection-reconciler";
 import type { AssetStore } from "./providers";
 import { RefillResultReconciler } from "./refill-result-reconciler";
 import type { GameRepository } from "./repository";
+import { RefillCapacityService } from "./refill-capacity-service";
 
 export {
   GameRulesError,
@@ -90,6 +85,7 @@ export interface GameServiceConfig {
 
 export class GameService {
   private reconciliation: Promise<GameState | null> | null = null;
+  private readonly generationJobPublisher: GenerationJobPublisher;
   private readonly generationSelectionReconciler: GenerationSelectionReconciler;
   private readonly leaderboardProfileReconciler: LeaderboardProfileReconciler;
   private readonly promptCardReconciler: PromptCardReconciler;
@@ -98,6 +94,7 @@ export class GameService {
   private readonly preferenceService: PreferenceService;
   private readonly preparedSelectionReconciler: PreparedSelectionReconciler;
   private readonly refillResultReconciler: RefillResultReconciler;
+  private readonly refillCapacityService: RefillCapacityService;
 
   constructor(
     private readonly gameRepository: GameRepository,
@@ -113,17 +110,29 @@ export class GameService {
     private readonly promptCardBlender?: PromptCardBlenderMailbox,
     private readonly promptCardWriter?: PromptCardWriterCoordinator,
   ) {
+    this.generationJobPublisher = new GenerationJobPublisher(this.mailbox);
     this.generationSelectionReconciler = new GenerationSelectionReconciler({
       repository: this.gameRepository,
       mailbox: this.mailbox,
       assetVerifier: this.assetVerifier,
-      ensureEnqueued: (job) => this.ensureEnqueued(job),
+      ensureEnqueued: (job) => this.generationJobPublisher.ensure(job),
     });
     this.leaderboardProfileReconciler = new LeaderboardProfileReconciler({
       repository: this.challengerRepository,
       coordinator: leaderboardProfiles,
       createId: this.createId,
       now: this.now,
+    });
+    this.refillCapacityService = new RefillCapacityService({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      publisher: this.generationJobPublisher,
+      rulesFor: (game) => this.rulesFor(game),
+      leaderboardVisualProfile: (state, game) =>
+        this.leaderboardProfileReconciler.current(state, game),
+      createId: this.createId,
+      now: this.now,
+      random: this.random,
     });
     this.promptCardReconciler = new PromptCardReconciler({
       repository: this.gameRepository,
@@ -146,8 +155,8 @@ export class GameService {
       gameRepository: this.gameRepository,
       challengerRepository: this.challengerRepository,
       addRefillCapacity: (state, context) =>
-        this.addRefillCapacity(state, context),
-      ensureJobsEnqueued: (jobs) => this.ensureJobsEnqueued(jobs),
+        this.refillCapacityService.plan(state, context),
+      ensureJobsEnqueued: (jobs) => this.generationJobPublisher.ensureAll(jobs),
       createId: this.createId,
       now: this.now,
     });
@@ -155,8 +164,8 @@ export class GameService {
       gameRepository: this.gameRepository,
       challengerRepository: this.challengerRepository,
       addRefillCapacity: (state, context) =>
-        this.addRefillCapacity(state, context),
-      ensureJobsEnqueued: (jobs) => this.ensureJobsEnqueued(jobs),
+        this.refillCapacityService.plan(state, context),
+      ensureJobsEnqueued: (jobs) => this.generationJobPublisher.ensureAll(jobs),
       now: this.now,
     });
     this.preparedSelectionReconciler = new PreparedSelectionReconciler({
@@ -176,7 +185,7 @@ export class GameService {
       assetVerifier: this.assetVerifier,
       initialRating: this.config.initialRating,
       turnaroundEmaAlpha: this.config.turnaroundEmaAlpha,
-      ensureEnqueued: (job) => this.ensureEnqueued(job),
+      ensureEnqueued: (job) => this.generationJobPublisher.ensure(job),
       completePreparedSelection: (game, challengers) =>
         this.preparedSelectionReconciler.complete(game, challengers),
       removeDisplayedCandidatesFromReady: (game, challengers) =>
@@ -357,7 +366,7 @@ export class GameService {
       const adapted = applyAdaptivePreferences(nextGame, nextChallengers);
       nextGame = adapted.game;
       nextChallengers = adapted.challengers;
-      const capacity = this.addRefillCapacity(nextChallengers, {
+      const capacity = this.refillCapacityService.plan(nextChallengers, {
         game: nextGame,
         winnerSide,
         retainedWinner,
@@ -392,7 +401,7 @@ export class GameService {
           pendingSelectionBaseline: null,
         });
       }
-      await this.ensureJobsEnqueued(capacity.jobs);
+      await this.generationJobPublisher.ensureAll(capacity.jobs);
       return nextGame;
     });
   }
@@ -513,7 +522,7 @@ export class GameService {
         current.round,
         oppositeSide(referenceSide),
       );
-      const capacity = this.addRefillCapacity(nextChallengers, {
+      const capacity = this.refillCapacityService.plan(nextChallengers, {
         game: nextGame,
         winnerSide: referenceSide,
         retainedWinner: reference,
@@ -548,26 +557,13 @@ export class GameService {
           pendingSelectionBaseline: null,
         });
       }
-      await this.ensureJobsEnqueued(capacity.jobs);
+      await this.generationJobPublisher.ensureAll(capacity.jobs);
       return nextGame;
     });
   }
 
   async ensureRefillCapacity(): Promise<void> {
-    await this.withStateLocks(async () => {
-      const [game, challengers] = await Promise.all([
-        this.gameRepository.load(),
-        this.challengerRepository.load(),
-      ]);
-      if (!game || !challengers) return;
-
-      const context = refillContext(game, challengers);
-      if (!context) return;
-      const capacity = this.addRefillCapacity(challengers, context);
-      if (capacity.jobs.length === 0) return;
-      await this.challengerRepository.save(capacity.state);
-      await this.ensureJobsEnqueued(capacity.jobs);
-    });
+    await this.refillCapacityService.ensure();
   }
 
   async reconcile(): Promise<GameState | null> {
@@ -663,31 +659,15 @@ export class GameService {
 
     const context = refillContext(game, challengers);
     if (context) {
-      const capacity = this.addRefillCapacity(challengers, context);
+      const capacity = this.refillCapacityService.plan(challengers, context);
       challengers = capacity.state;
       if (capacity.jobs.length > 0) {
         await this.challengerRepository.save(challengers);
-        await this.ensureJobsEnqueued(capacity.jobs);
+        await this.generationJobPublisher.ensureAll(capacity.jobs);
       }
     }
 
     return game;
-  }
-
-  private addRefillCapacity(
-    state: ChallengerState,
-    context: RefillContext,
-  ): RefillCapacityResult {
-    return planRefillCapacity(state, context, {
-      bufferTarget: this.rulesFor(context.game).bufferTarget,
-      leaderboardVisualProfile: this.leaderboardProfileReconciler.current(
-        state,
-        context.game,
-      ),
-      createId: this.createId,
-      now: this.now,
-      random: this.random,
-    });
   }
 
   private drawFallback(
@@ -712,24 +692,6 @@ export class GameService {
       delayMs: this.config.fallbackDelayMs,
       maximumConsecutiveDraws: this.rulesFor(game).fallbackMaximumConsecutive,
     });
-  }
-
-  private async ensureJobsEnqueued(jobs: readonly GenerationJob[]) {
-    for (const job of jobs) await this.ensureEnqueued(job);
-  }
-
-  private async ensureEnqueued(job: GenerationJob): Promise<void> {
-    try {
-      await this.mailbox.enqueue(job);
-    } catch (error) {
-      const work = await this.mailbox.readWork(job.id);
-      if (work && this.sameJob(work, job)) return;
-      throw error;
-    }
-  }
-
-  private sameJob(left: GenerationJob, right: GenerationJob): boolean {
-    return isDeepStrictEqual(left, right);
   }
 
   private rulesFor(game: GameState): GameRules {
