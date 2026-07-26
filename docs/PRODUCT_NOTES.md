@@ -36,6 +36,16 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-25
 
+### Game-settings command boundary
+
+Generation-notice dismissal, named Preference preset saves and deletes, and
+editable game-rule updates now share one focused service. Case-insensitive
+preset replacement, reusable-profile provenance resets, the 20-preset limit,
+pool trimming, refill-capacity expansion, repository lock order, and durable
+job publication remain unchanged. `GameService` retains the same public API,
+and the existing Preferences controls continue to edit complete per-game rule
+snapshots.
+
 ### Prompt-deck command boundary
 
 Prompt-card creation, weighted-deck and card edits, approval-gated suggestion

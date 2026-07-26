@@ -23,7 +23,6 @@ import {
   type GameRules,
   type GameState,
   type PreferenceProfile,
-  type PreferencePreset,
   type Side,
 } from "@/domain/game";
 import {
@@ -43,9 +42,7 @@ import {
   applyAdaptivePreferences,
 } from "./game-adaptation";
 import {
-  GameRulesError,
   MissingGameError,
-  PreferencePresetLimitError,
   SelectionConflictError,
 } from "./game-service-errors";
 import {
@@ -55,13 +52,14 @@ import {
   recordTie,
   tieReferenceSide,
 } from "./game-comparison";
+import { GameSettingsService } from "./game-settings-service";
 import {
   planRefillCapacity,
   refillContext,
   type RefillCapacityResult,
   type RefillContext,
 } from "./game-refill";
-import { effectiveGameRules, validGameRules } from "./game-rules";
+import { effectiveGameRules } from "./game-rules";
 import { GenerationSelectionReconciler } from "./generation-selection-reconciler";
 import { LeaderboardProfileReconciler } from "./leaderboard-profile-reconciler";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
@@ -98,6 +96,7 @@ export class GameService {
   private readonly leaderboardProfileReconciler: LeaderboardProfileReconciler;
   private readonly promptCardReconciler: PromptCardReconciler;
   private readonly promptDeckService: PromptDeckService;
+  private readonly gameSettingsService: GameSettingsService;
   private readonly preparedSelectionReconciler: PreparedSelectionReconciler;
   private readonly refillResultReconciler: RefillResultReconciler;
 
@@ -144,6 +143,15 @@ export class GameService {
       createId: this.createId,
       now: this.now,
     });
+    this.gameSettingsService = new GameSettingsService({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      addRefillCapacity: (state, context) =>
+        this.addRefillCapacity(state, context),
+      ensureJobsEnqueued: (jobs) => this.ensureJobsEnqueued(jobs),
+      createId: this.createId,
+      now: this.now,
+    });
     this.preparedSelectionReconciler = new PreparedSelectionReconciler({
       gameRepository: this.gameRepository,
       challengerRepository: this.challengerRepository,
@@ -183,111 +191,22 @@ export class GameService {
   }
 
   async dismissGenerationNotice(): Promise<GameState> {
-    return this.gameRepository.withLock(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError("Start a game before dismissing a notice");
-      }
-      const updated = this.withoutGenerationNotice(current);
-      if (updated !== current) await this.gameRepository.save(updated);
-      return updated;
-    });
+    return this.gameSettingsService.dismissGenerationNotice();
   }
 
   async savePreferencePreset(
     name: string,
     profile: PreferenceProfile,
   ): Promise<GameState> {
-    return this.gameRepository.withLock(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError("Start a game before saving a preset");
-      }
-      const normalizedName = name.trim();
-      const presets = current.preferencePresets ?? [];
-      const existing = presets.find(
-        (preset) => preset.name.toLowerCase() === normalizedName.toLowerCase(),
-      );
-      if (!existing && presets.length >= 20) {
-        throw new PreferencePresetLimitError(
-          "Delete a preset before saving another (maximum 20).",
-        );
-      }
-      const updatedAt = this.now();
-      const reusableProfile: PreferenceProfile = {
-        ...profile,
-        adaptationLastDecision: 0,
-        adaptationSourceWinnerIds: [],
-        adaptationSourceRejectedIds: [],
-      };
-      const preset: PreferencePreset = {
-        id: existing?.id ?? this.createId(),
-        name: normalizedName,
-        createdAt: existing?.createdAt ?? updatedAt,
-        updatedAt,
-        profile: reusableProfile,
-      };
-      const updated: GameState = {
-        ...current,
-        preferencePresets: existing
-          ? presets.map((item) => (item.id === existing.id ? preset : item))
-          : [...presets, preset],
-      };
-      await this.gameRepository.save(updated);
-      return updated;
-    });
+    return this.gameSettingsService.savePreferencePreset(name, profile);
   }
 
   async deletePreferencePreset(presetId: string): Promise<GameState> {
-    return this.gameRepository.withLock(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError("Start a game before deleting a preset");
-      }
-      const preferencePresets = (current.preferencePresets ?? []).filter(
-        (preset) => preset.id !== presetId,
-      );
-      if (preferencePresets.length === current.preferencePresets?.length) {
-        return current;
-      }
-      const updated: GameState = { ...current, preferencePresets };
-      await this.gameRepository.save(updated);
-      return updated;
-    });
+    return this.gameSettingsService.deletePreferencePreset(presetId);
   }
 
   async updateGameRules(rules: GameRules): Promise<GameState> {
-    if (!validGameRules(rules)) {
-      throw new GameRulesError("One or more game rules are out of range.");
-    }
-    return this.withStateLocks(async () => {
-      const [current, challengers] = await Promise.all([
-        this.gameRepository.load(),
-        this.challengerRepository.load(),
-      ]);
-      if (!current || !challengers) {
-        throw new MissingGameError("Start a game before editing its rules");
-      }
-      const updated: GameState = {
-        ...current,
-        gameRules: { ...rules },
-      };
-      let nextChallengers = backfillGeneratedPool(
-        challengers,
-        rules.poolMaximum,
-      );
-      const context = refillContext(updated, nextChallengers);
-      const capacity = context
-        ? this.addRefillCapacity(nextChallengers, context)
-        : { state: nextChallengers, jobs: [] };
-      nextChallengers = capacity.state;
-      await this.gameRepository.save(updated);
-      if (nextChallengers !== challengers) {
-        await this.challengerRepository.save(nextChallengers);
-      }
-      await this.ensureJobsEnqueued(capacity.jobs);
-      return updated;
-    });
+    return this.gameSettingsService.updateGameRules(rules);
   }
 
   async createPromptCard(input: CreatePromptCardInput): Promise<GameState> {

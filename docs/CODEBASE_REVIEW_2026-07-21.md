@@ -90,6 +90,11 @@ and a Next.js production build.
   service. `GameService` preserves its public API while durable work validation,
   re-enqueue, terminal archival, and suggestion creation stay behind the
   reconciliation boundary.
+- Generation-notice dismissal, reusable preference-preset persistence, and
+  editable per-game rule updates now share a focused settings command service.
+  The boundary preserves preset provenance resets, the 20-preset limit,
+  game-before-challenger lock order, pool resizing, refill planning, and durable
+  enqueue recovery while `GameService` keeps its public API.
 - Adaptive leaderboard visual analysis now has its own reconciliation boundary.
   `GameService` supplies the current game and challenger transaction while job
   recovery, cohort fingerprint attempts, result caching, and refill-facing
