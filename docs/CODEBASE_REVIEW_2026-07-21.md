@@ -36,9 +36,9 @@ and a Next.js production build.
    selection, tie/both-lose, queue fallback, inspection, history, favorites,
    preferences, presets, source analysis, export/import, and queued saves.
 4. **Launcher scripts had no automated syntax/contract gate.** The normal test
-   command now validates all three shell entrypoints and their side-effect-free
-   command-preview modes. This protects the production runner and the
-   `multi-cli` launcher without starting a second app or agent session.
+   command now validates all shell entrypoints and their side-effect-free
+   command-preview modes. This protects the production, demo, and stock Codex
+   launchers without starting a second app or agent session.
 5. **Transport documentation lagged merged state.** The co-proc prerequisite and
    Diptych notification adapter are now recorded as merged, while persistent
    named workers and deck authority remain explicitly staged.
@@ -67,10 +67,9 @@ and a Next.js production build.
    different timestamp/path strictness between storage and mailbox boundaries.
    Extract shared field fragments only when the context-specific constraints
    can remain obvious; a single overly permissive schema would be worse.
-3. The manifest uses `latest` dependency ranges while `npm ci` is reproducible
-   through the committed lockfile. Adopt an explicit dependency-update policy
-   in a separate maintenance change rather than mixing upgrades into feature or
-   hardening work.
+3. Resolved in the public-release foundation: direct versions are exact,
+   security overrides are documented, and production audit findings are a
+   release gate.
 4. Prompt-deck persistence, weighted draws, verdict attribution, and
    approval-gated card-editor suggestions landed in subsequent feature passes.
    Persistent co-proc workers remain staged, and transport work should retain

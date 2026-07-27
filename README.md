@@ -2,29 +2,49 @@
 
 A local-first, iterative two-image preference game. Pick A or B; the exact winner stays on the same side while only the loser is replaced by one independently generated challenger.
 
-## Run with Codex
+## Quickstart: offline demo
 
-Install dependencies once:
+Diptych Picker requires Node.js 24 or newer. The offline demo is deterministic,
+uses only the included local image pool, and makes no model or network calls
+after dependencies are installed.
 
 ```bash
-npm install
-cp .env.example .env.local
+npm ci
+npm run demo
 ```
 
-Launch a dedicated interactive Codex session with eight agent threads and the required monitor-to-worker nesting:
+Open <http://127.0.0.1:3000>. Use `PORT=3001 npm run demo` if port 3000 is
+already occupied. Demo state is isolated under `.local-data/demo`.
+
+## Run with Codex
+
+Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), authenticate,
+and launch the repository's interactive generation workflow:
 
 ```bash
+npm install --global @openai/codex
+codex login
 npm run codex:play
 ```
 
-Pass another thread count after `--`, or set `DIPTYCH_CODEX_THREADS`:
+The launcher uses the stock `codex` command, changes into this repository, and
+sends the `$run-diptych-picker` startup prompt. It requests eight total threads:
+one root supervisor, one persistent mailbox monitor, and up to three concurrent
+fresh image workers, with spare capacity for bounded supporting work. It does
+not require a named profile or modify global Codex configuration.
+
+Pass a different total thread count after `--`, or set
+`DIPTYCH_CODEX_THREADS`. Five is the minimum that can fit the root, monitor, and
+three image workers:
 
 ```bash
 npm run codex:play -- 12
 DIPTYCH_CODEX_THREADS=12 npm run codex:play
 ```
 
-The script starts the `codex/personal` profile through `multi-cli`, applies per-launch `features.multi_agent_v2.max_concurrent_threads_per_session` and `agents.max_depth=2` overrides, and sends the initial `$run-diptych-picker` prompt. It reserves one thread for the root, one for the monitor, and up to three for fresh image workers, so the launcher requires at least five total threads. The v2 thread setting is a ceiling rather than a request to create idle agents; all three workers are active only while at least three independent mailbox jobs are pending. The script does not modify global Codex configuration. Open <http://localhost:3000> after the skill reports readiness.
+Open <http://127.0.0.1:3000> after the skill reports readiness. The agent-backed
+app binds only to loopback. All mutating API requests from browsers must also be
+same-origin, which prevents another website from changing local game state.
 
 Normal play runs the app as an optimized production server, not through Next's development server. To build and start only the agent-backed app without launching Codex, run:
 
@@ -34,10 +54,19 @@ npm run run:production
 
 The root-level `run-only` launcher builds into the gitignored `.next-run` directory, preserves the tracked Next TypeScript configuration, forces `GENERATION_PROVIDER=agent`, and then starts the production server. `dev-and-play` instructs the runner skill to use this same launcher so both entrypoints share one startup path.
 
-To inspect the exact command without launching Codex, run `./dev-and-play --print-command [thread-count]`.
-Inspect the production app command with `./run-only --print-command`.
+To inspect commands without launching anything, run
+`./dev-and-play --print-command [thread-count]`,
+`./demo-only --print-command`, or `./run-only --print-command`.
 
 The web server never launches `codex`, calls an OpenAI API, or receives an API key. Model choice, authentication, permissions, and subagent execution belong to the interactive CLI session.
+
+## Release status
+
+Version 0.9 is the public-release preview foundation. The repository does not
+yet include an open-source license; choose and add one, and confirm the
+redistribution rights for the seed images, before publishing an open-source
+1.0 release. See [SECURITY.md](SECURITY.md) before changing the loopback-only
+deployment boundary.
 
 ## Development checks
 
@@ -57,7 +86,7 @@ Each selection restores the configured buffer deficit by writing `refill` reques
 
 The selected winner is never sent through an image-editing model. Its candidate ID, URL, bytes, metadata, side, object identity in the active browser state, and `<img>` node remain unchanged.
 
-If Codex closes during a job, the current images, ready queue, pool, and mailbox remain on disk. Reopen the `codex/personal` profile through `multi-cli` in the repository and run the skill again; startup recovery resumes unfinished refill batches and ordinary jobs. Completion and failure helpers are idempotent, and opposite terminal outcomes cannot both win.
+If Codex closes during a job, the current images, ready queue, pool, and mailbox remain on disk. Run `npm run codex:play` again; startup recovery resumes unfinished refill batches and ordinary jobs. Completion and failure helpers are idempotent, and opposite terminal outcomes cannot both win.
 
 ### Staged co-proc transport
 

@@ -8,6 +8,7 @@ export default defineConfig([
   globalIgnores([
     ".next/**",
     ".next-build/**",
+    ".next-demo/**",
     ".next-e2e/**",
     ".next-run/**",
     ".local-data/**",

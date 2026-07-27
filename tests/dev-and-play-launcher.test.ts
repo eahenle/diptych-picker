@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 const launcher = join(process.cwd(), "dev-and-play");
 const runOnly = join(process.cwd(), "run-only");
+const demoOnly = join(process.cwd(), "demo-only");
 const testE2e = join(process.cwd(), "test-e2e");
 const temporaryRoots: string[] = [];
 
@@ -31,12 +32,10 @@ describe("dev-and-play launcher", () => {
   it("prints a capacity and nesting override with the skill prompt", async () => {
     const { stdout } = await execFileAsync(launcher, ["--print-command", "12"]);
 
-    expect(stdout).toContain("multi-cli codex/personal");
-    expect(stdout).toContain("features.multi_agent_v2=");
-    expect(stdout).toContain("enabled=true");
-    expect(stdout).toContain("max_concurrent_threads_per_session=12");
-    expect(stdout).not.toContain("agents.max_threads=");
-    expect(stdout).toContain("agents.max_depth=2");
+    expect(stdout).toMatch(/^codex /);
+    expect(stdout).toContain("agents.max_concurrent_threads_per_session=11");
+    expect(stdout).not.toContain("multi-cli");
+    expect(stdout).not.toContain("codex/personal");
     expect(stdout).toContain(`--cd ${process.cwd()}`);
     expect(stdout).toContain("\\$run-diptych-picker");
     expect(stdout).toContain("workerLimit=3");
@@ -60,6 +59,7 @@ describe("run-only launcher", () => {
     expect(stdout).toContain("npm run build");
     expect(stdout).toContain("GENERATION_PROVIDER=agent");
     expect(stdout).toContain("npm run start");
+    expect(stdout).toContain("--hostname 127.0.0.1");
     expect(stdout).not.toContain("npm run dev");
   });
 
@@ -103,7 +103,9 @@ describe("run-only launcher", () => {
     expect(await readFile(join(root, "tsconfig.json"), "utf8")).toBe(
       "original config\n",
     );
-    expect(await readFile(log, "utf8")).toBe("run build\nrun start\n");
+    expect(await readFile(log, "utf8")).toBe(
+      "run build\nrun start -- --hostname 127.0.0.1\n",
+    );
   });
 
   it("rejects unsupported arguments", async () => {
@@ -112,7 +114,7 @@ describe("run-only launcher", () => {
     });
   });
 
-  it("keeps production build output outside formatting and lint scope", async () => {
+  it("keeps isolated build output outside formatting and lint scope", async () => {
     const [gitignore, eslintConfig, tsconfig] = await Promise.all([
       readFile(join(process.cwd(), ".gitignore"), "utf8"),
       readFile(join(process.cwd(), "eslint.config.mjs"), "utf8"),
@@ -120,8 +122,32 @@ describe("run-only launcher", () => {
     ]);
 
     expect(gitignore).toContain(".next-run/");
+    expect(gitignore).toContain(".next-demo/");
     expect(eslintConfig).toContain('".next-run/**"');
+    expect(eslintConfig).toContain('".next-demo/**"');
     expect(tsconfig).toContain('".next-run/types/**/*.ts"');
+    expect(tsconfig).toContain('".next-demo/types/**/*.ts"');
+  });
+});
+
+describe("demo-only launcher", () => {
+  it("prints an offline, loopback-only production command", async () => {
+    const { stdout } = await execFileAsync(demoOnly, ["--print-command"]);
+
+    expect(stdout).toContain("NEXT_DIST_DIR=.next-demo");
+    expect(stdout).toContain("LOCAL_DATA_DIR=.local-data/demo");
+    expect(stdout).toContain("GENERATION_PROVIDER=mock");
+    expect(stdout).toContain("DIPTYCH_OFFLINE_DEMO=true");
+    expect(stdout).toContain("npm run build");
+    expect(stdout).toContain("npm run start");
+    expect(stdout).toContain("--hostname 127.0.0.1");
+    expect(stdout).not.toContain("codex");
+  });
+
+  it("rejects unsupported arguments", async () => {
+    await expect(execFileAsync(demoOnly, ["--watch"])).rejects.toMatchObject({
+      stderr: expect.stringMatching(/Usage: \.\/demo-only/),
+    });
   });
 });
 

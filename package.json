@@ -1,7 +1,20 @@
 {
   "name": "diptych-picker",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "private": true,
+  "description": "A local-first image preference game with deterministic offline play and optional Codex-powered generation.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eahenle/diptych-picker.git"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.18.0",
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "$sharp"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -12,12 +25,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run && npm run test:agent-protocol && npm run test:scripts",
     "test:agent-protocol": "node --test .agents/skills/run-diptych-picker/scripts/*.test.mjs",
-    "test:scripts": "bash -n run-only dev-and-play test-e2e && ./run-only --print-command >/dev/null && ./dev-and-play --print-command 8 >/dev/null",
+    "test:scripts": "bash -n run-only demo-only dev-and-play test-e2e && ./run-only --print-command >/dev/null && ./demo-only --print-command >/dev/null && ./dev-and-play --print-command 8 >/dev/null",
     "test:watch": "vitest",
     "test:e2e": "./test-e2e",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
     "hooks:install": "git config core.hooksPath .githooks",
     "codex:play": "./dev-and-play",
+    "demo": "./demo-only",
     "run:production": "./run-only",
     "agent:next": "node .agents/skills/run-diptych-picker/scripts/next-job.mjs",
     "agent:claim-lease": "node .agents/skills/run-diptych-picker/scripts/claim-lease.mjs",
@@ -31,24 +45,24 @@
     "agent:heartbeat": "node .agents/skills/run-diptych-picker/scripts/heartbeat.mjs"
   },
   "dependencies": {
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "sharp": "^0.35.3",
-    "zod": "latest"
+    "next": "16.2.12",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "sharp": "0.35.3",
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "latest",
-    "@testing-library/jest-dom": "latest",
-    "@testing-library/react": "latest",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "eslint": "latest",
-    "eslint-config-next": "latest",
-    "jsdom": "latest",
-    "prettier": "latest",
-    "typescript": "latest",
-    "vitest": "latest"
+    "@playwright/test": "1.61.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.2.12",
+    "jsdom": "29.1.1",
+    "prettier": "3.9.5",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
   }
 }

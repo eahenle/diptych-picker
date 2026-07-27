@@ -8,24 +8,29 @@ if [[ "${1:-}" == "--print-command" ]]; then
   shift
 fi
 if (( $# > 0 )); then
-  printf '%s\n' "Usage: ./run-only [--print-command]" >&2
+  printf '%s\n' "Usage: ./demo-only [--print-command]" >&2
   exit 2
 fi
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-production_dist_dir=".next-run"
+demo_dist_dir=".next-demo"
+demo_data_dir="${DIPTYCH_DEMO_DATA_DIR:-.local-data/demo}"
 build_command=(
   env
-  GENERATION_PROVIDER=agent
-  NEXT_DIST_DIR="$production_dist_dir"
+  DIPTYCH_OFFLINE_DEMO=true
+  GENERATION_PROVIDER=mock
+  LOCAL_DATA_DIR="$demo_data_dir"
+  NEXT_DIST_DIR="$demo_dist_dir"
   npm
   run
   build
 )
 start_command=(
   env
-  GENERATION_PROVIDER=agent
-  NEXT_DIST_DIR="$production_dist_dir"
+  DIPTYCH_OFFLINE_DEMO=true
+  GENERATION_PROVIDER=mock
+  LOCAL_DATA_DIR="$demo_data_dir"
+  NEXT_DIST_DIR="$demo_dist_dir"
   npm
   run
   start
@@ -49,14 +54,14 @@ fi
 
 cd "$repository_root"
 next_env_path="$repository_root/next-env.d.ts"
-next_env_backup="$(mktemp "${TMPDIR:-/tmp}/diptych-next-env.XXXXXX")"
+next_env_backup="$(mktemp "${TMPDIR:-/tmp}/diptych-demo-next-env.XXXXXX")"
 next_env_existed=false
 if [[ -f "$next_env_path" ]]; then
   cp "$next_env_path" "$next_env_backup"
   next_env_existed=true
 fi
 tsconfig_path="$repository_root/tsconfig.json"
-tsconfig_backup="$(mktemp "${TMPDIR:-/tmp}/diptych-tsconfig.XXXXXX")"
+tsconfig_backup="$(mktemp "${TMPDIR:-/tmp}/diptych-demo-tsconfig.XXXXXX")"
 tsconfig_existed=false
 if [[ -f "$tsconfig_path" ]]; then
   cp "$tsconfig_path" "$tsconfig_backup"

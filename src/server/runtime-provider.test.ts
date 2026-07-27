@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const originalProvider = process.env.GENERATION_PROVIDER;
+const originalOfflineDemo = process.env.DIPTYCH_OFFLINE_DEMO;
 const originalCoProcChannel = process.env.CO_PROC_GENERATION_CHANNEL;
 const originalCoProcChannels = process.env.CO_PROC_GENERATION_CHANNELS;
 const originalReadyTimeout = process.env.CO_PROC_GENERATION_READY_TIMEOUT_MS;
@@ -23,6 +24,7 @@ describe("runtime generation provider", () => {
   afterEach(() => {
     vi.resetModules();
     restoreEnvironment("GENERATION_PROVIDER", originalProvider);
+    restoreEnvironment("DIPTYCH_OFFLINE_DEMO", originalOfflineDemo);
     restoreEnvironment("CO_PROC_GENERATION_CHANNEL", originalCoProcChannel);
     restoreEnvironment("CO_PROC_GENERATION_CHANNELS", originalCoProcChannels);
     restoreEnvironment(
