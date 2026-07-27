@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact stable version from package.json
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate release input
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          test -f "docs/releases/$VERSION.md"
+          grep -F "## $VERSION —" CHANGELOG.md
+          if git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            test "$(git cat-file -t "refs/tags/v$VERSION")" = "tag"
+            test "$(git rev-list -n 1 "refs/tags/v$VERSION")" = "$GITHUB_SHA"
+          fi
+      - run: npm ci
+      - run: npm audit --omit=dev
+      - run: npm run check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Create annotated tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            git tag -a "v$VERSION" -m "Diptych Picker $VERSION"
+            git push origin "refs/tags/v$VERSION"
+          fi
+          if ! gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release create "v$VERSION" \
+              --verify-tag \
+              --title "Diptych Picker $VERSION" \
+              --notes-file "docs/releases/$VERSION.md"
+          fi

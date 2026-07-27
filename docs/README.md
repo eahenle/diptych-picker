@@ -16,6 +16,7 @@
 - [Security model](../SECURITY.md)
 - [Seed image provenance and licensing](../public/seed-assets/README.md)
 - [Release checklist](RELEASE_CHECKLIST.md)
+- [Diptych Picker 1.0.0 release record](releases/1.0.0.md)
 - [Changelog](../CHANGELOG.md)
 
 ## Contribute and maintain

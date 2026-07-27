@@ -5,6 +5,10 @@ All notable public changes are recorded here. This project follows
 
 ## Unreleased
 
+No public changes yet.
+
+## 1.0.0 — 2026-07-27
+
 ### Added
 
 - Complete v1.0 public documentation, feature matrix, reproducible scenarios,
@@ -15,6 +19,12 @@ All notable public changes are recorded here. This project follows
 
 - Public documentation now distinguishes shipped behavior from experimental
   co-proc transport stages.
+- Declared the first stable public API, save-format, local-security, and
+  agent-runner compatibility baseline.
+
+### Release
+
+- Published as the annotated `v1.0.0` tag with a GitHub source release.
 
 ## 0.9.0 — 2026-07-27
 
