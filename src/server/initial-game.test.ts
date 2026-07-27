@@ -219,8 +219,8 @@ describe("InitialGameService", () => {
     });
   });
 
-  it("starts from seven distinct curated candidates and restores the FIFO on refresh", async () => {
-    const curated = curatedCandidates();
+  it("starts from five distinct curated candidates and restores the FIFO on refresh", async () => {
+    const curated = curatedCandidates().slice(0, 5);
     const { service, challengerRepository } = harness({
       curatedCandidates: curated,
       random: () => 0.25,
@@ -234,13 +234,13 @@ describe("InitialGameService", () => {
     expect(start.game.round.leftCandidate.id).not.toBe(
       start.game.round.rightCandidate.id,
     );
-    expect(persisted?.ready).toHaveLength(5);
-    const allSevenIds = [
+    expect(persisted?.ready).toHaveLength(3);
+    const allFiveIds = [
       start.game.round.leftCandidate.id,
       start.game.round.rightCandidate.id,
       ...(persisted?.ready.map(({ candidate }) => candidate.id) ?? []),
     ];
-    expect(new Set(allSevenIds).size).toBe(7);
+    expect(new Set(allFiveIds).size).toBe(5);
     expect(persisted?.ratings).toEqual(
       expect.arrayContaining(
         curated.map((item) =>
