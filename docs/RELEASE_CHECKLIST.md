@@ -3,6 +3,10 @@
 Use this checklist for the first `1.0.0` release and adapt it for later
 versions. Do not tag a release with unresolved required items.
 
+Completed records:
+
+- [Diptych Picker 1.0.0](releases/1.0.0.md)
+
 ## Scope
 
 - [ ] Every intended public feature appears in

@@ -3,8 +3,11 @@
 ## Supported versions
 
 Security fixes target the current `main` branch and the latest tagged release.
-The 0.9 series is a public-release preview and should be treated as local
-development software.
+
+| Version | Supported |
+| ------- | --------- |
+| 1.0.x   | Yes       |
+| 0.9.x   | No        |
 
 ## Local trust boundary
 

@@ -28,6 +28,7 @@ const requiredFiles = [
   "docs/API.md",
   "docs/FEATURE_MATRIX.md",
   "docs/RELEASE_CHECKLIST.md",
+  "docs/releases/1.0.0.md",
   "examples/README.md",
   "examples/feature-scenarios.md",
   "examples/api/status.sh",
@@ -45,6 +46,29 @@ const requiredFiles = [
 for (const path of requiredFiles) {
   if (!existsSync(join(root, path)))
     failures.push(`Missing required file: ${path}`);
+}
+
+const packageManifest = JSON.parse(
+  readFileSync(join(root, "package.json"), "utf8"),
+);
+const packageLock = JSON.parse(
+  readFileSync(join(root, "package-lock.json"), "utf8"),
+);
+if (
+  packageManifest.version !== packageLock.version ||
+  packageManifest.version !== packageLock.packages?.[""]?.version
+) {
+  failures.push("package.json and package-lock.json versions must match");
+}
+if (packageManifest.version === "1.0.0") {
+  const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+  const security = readFileSync(join(root, "SECURITY.md"), "utf8");
+  if (!changelog.includes("## 1.0.0 —")) {
+    failures.push("CHANGELOG.md must contain the 1.0.0 release heading");
+  }
+  if (!/^\|\s*1\.0\.x\s*\|\s*Yes\s*\|$/m.test(security)) {
+    failures.push("SECURITY.md must mark 1.0.x as supported");
+  }
 }
 
 function walk(directory) {

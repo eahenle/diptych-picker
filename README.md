@@ -67,14 +67,13 @@ The web server never launches `codex`, calls an OpenAI API, or receives an API k
 
 ## Release status
 
-Version 0.9 is the public-release preview foundation. The software and
-documentation and the five bundled seed PNGs are available under the
-[MIT License](LICENSE). The [seed-asset notes](public/seed-assets/README.md)
-record what is known about each image's repository provenance. See
-[SECURITY.md](SECURITY.md) before changing the loopback-only deployment
-boundary. The auditable public-release scope lives in the
-[v1.0 feature matrix](docs/FEATURE_MATRIX.md) and
-[release checklist](docs/RELEASE_CHECKLIST.md).
+Version 1.0.0 is the first stable public release. The software, documentation,
+and five bundled seed PNGs are available under the [MIT License](LICENSE). The
+[seed-asset notes](public/seed-assets/README.md) record what is known about each
+image's repository provenance. See [SECURITY.md](SECURITY.md) before changing
+the loopback-only deployment boundary. The auditable public-release scope lives
+in the [v1.0 feature matrix](docs/FEATURE_MATRIX.md), with completed release
+evidence in [Diptych Picker 1.0.0](docs/releases/1.0.0.md).
 
 ## Development checks
 

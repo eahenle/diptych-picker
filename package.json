@@ -1,6 +1,6 @@
 {
   "name": "diptych-picker",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "private": true,
   "license": "MIT",
   "description": "A local-first image preference game with deterministic offline play and optional Codex-powered generation.",
