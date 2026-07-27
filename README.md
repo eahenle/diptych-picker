@@ -2,6 +2,11 @@
 
 A local-first, iterative two-image preference game. Pick A or B; the exact winner stays on the same side while only the loser is replaced by one independently generated challenger.
 
+Public documentation: [Getting started](docs/GETTING_STARTED.md) ·
+[User guide](docs/USER_GUIDE.md) · [Examples](examples/README.md) ·
+[Configuration](docs/CONFIGURATION.md) · [Local API](docs/API.md) ·
+[v1.0 feature matrix](docs/FEATURE_MATRIX.md)
+
 ## Quickstart: offline demo
 
 Diptych Picker requires Node.js 24 or newer. The offline demo is deterministic,
@@ -67,7 +72,9 @@ documentation and the five bundled seed PNGs are available under the
 [MIT License](LICENSE). The [seed-asset notes](public/seed-assets/README.md)
 record what is known about each image's repository provenance. See
 [SECURITY.md](SECURITY.md) before changing the loopback-only deployment
-boundary.
+boundary. The auditable public-release scope lives in the
+[v1.0 feature matrix](docs/FEATURE_MATRIX.md) and
+[release checklist](docs/RELEASE_CHECKLIST.md).
 
 ## Development checks
 
@@ -77,11 +84,21 @@ Install the repository's pre-commit hook once per clone:
 npm run hooks:install
 ```
 
-The hook runs formatting, lint, TypeScript validation, and unit/integration tests through `npm run check`. Pull requests and pushes to `main` run the same focused check in GitHub Actions.
+The hook runs formatting, public-documentation coverage, lint, TypeScript
+validation, and unit/integration tests through `npm run check`. Pull requests
+and pushes to `main` run the same focused check in GitHub Actions. See
+[Contributing](CONTRIBUTING.md) for the complete development and review
+workflow.
 
 ## Challenger buffer and generation loop
 
-An ordinary new game starts with two displayed candidates and a durable FIFO of five ready challengers. A selection consumes the FIFO head immediately, preloads that one image in the browser, and swaps only the losing card. Ready and in-flight candidates stay valid when the winner changes, so older work drains in FIFO order instead of being discarded.
+An ordinary new game starts with two displayed candidates and three ready
+challengers from the five-image curated pool. A selection consumes the FIFO
+head immediately, preloads that one image in the browser, and swaps only the
+losing card. After the first comparison provides real preference evidence,
+generation restores the configured queue target (five by default). Ready and
+in-flight candidates stay valid when the winner changes, so older work drains
+in FIFO order instead of being discarded.
 
 Each selection restores the configured buffer deficit by writing `refill` requests under `.local-data/agent-mailbox/`. The root Codex session supervises one persistent mailbox-monitor subagent. That monitor claims only as many independent refills as it has fresh image-worker slots, delegates one standalone image per request, validates each result independently, and publishes immutable PNGs under `.local-data/assets/`. Keep the interactive Codex session and `$run-diptych-picker` monitor alive while playing if you want generated refills to arrive in the background.
 
@@ -193,13 +210,14 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 
 ```bash
 npm run format:check
+npm run docs:check
 npm run lint
 npm test
 npm run build
 npm run test:e2e
 ```
 
-Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, preference revisions and presets, editable persisted game rules, weighted prompt cards, two-card blending, favorite-set card writing, five instant FIFO swaps, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
+Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, preference revisions and presets, editable persisted game rules, weighted prompt cards, two-card blending, favorite-set card writing, three guaranteed initial FIFO swaps, generated refill capacity, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
 
 ## Architecture
 
@@ -243,3 +261,4 @@ The latest comprehensive maintainability audit and its deferred structural work
 are recorded in [Codebase Review — 2026-07-21](docs/CODEBASE_REVIEW_2026-07-21.md).
 Reproducible installs and isolated maintenance upgrades follow the
 [dependency update policy](docs/DEPENDENCY_POLICY.md).
+The complete public documentation index is [docs/README.md](docs/README.md).
