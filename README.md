@@ -62,11 +62,12 @@ The web server never launches `codex`, calls an OpenAI API, or receives an API k
 
 ## Release status
 
-Version 0.9 is the public-release preview foundation. The repository does not
-yet include an open-source license; choose and add one, and confirm the
-redistribution rights for the seed images, before publishing an open-source
-1.0 release. See [SECURITY.md](SECURITY.md) before changing the loopback-only
-deployment boundary.
+Version 0.9 is the public-release preview foundation. The software and
+documentation are available under the [MIT License](LICENSE). The seven
+bundled PNGs remain excluded pending the provenance review documented in the
+[seed-asset notes](public/seed-assets/README.md); confirm their redistribution
+rights or replace them before publishing 1.0. See [SECURITY.md](SECURITY.md)
+before changing the loopback-only deployment boundary.
 
 ## Development checks
 
