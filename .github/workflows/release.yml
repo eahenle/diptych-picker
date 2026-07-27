@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -12,15 +14,16 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.version }}
+  group: release-${{ inputs.version || github.sha }}
   cancel-in-progress: false
 
 jobs:
   publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.head_commit.message, 'Release Diptych Picker ')
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,6 +32,17 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Determine release version
+        env:
+          RELEASE_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$RELEASE_INPUT" ]]; then
+            version="$RELEASE_INPUT"
+          else
+            version="$(node -p "require('./package.json').version")"
+          fi
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
       - name: Validate release input
         run: |
           set -euo pipefail
