@@ -132,7 +132,7 @@ export class InitialGameService {
     candidates: readonly Candidate[],
     previous: ChallengerState | null,
   ): Promise<GameStartState> {
-    const selected = this.selectSeven(candidates);
+    const selected = this.selectInitialCandidates(candidates);
     const [leftCandidate, rightCandidate, ...readyCandidates] = selected;
     const game: GameState = {
       round: {
@@ -229,13 +229,15 @@ export class InitialGameService {
     });
   }
 
-  private selectSeven(candidates: readonly Candidate[]): Candidate[] {
+  private selectInitialCandidates(
+    candidates: readonly Candidate[],
+  ): Candidate[] {
     const distinct = [
       ...new Map(candidates.map((item) => [item.id, item])).values(),
     ];
-    if (distinct.length < 7) {
+    if (distinct.length < 2) {
       throw new Error(
-        `At least seven distinct curated candidates are required; received ${distinct.length}`,
+        `At least two distinct curated candidates are required; received ${distinct.length}`,
       );
     }
 

@@ -8,7 +8,7 @@ This design preserves the critical invariant: the selected winner remains the sa
 
 ## Terms and Defaults
 
-- **Curated pool:** checked-in standalone square seed images and metadata. It is immutable at runtime and contains at least seven candidates so a new install can display two and buffer five.
+- **Curated pool:** five checked-in standalone square seed images and metadata. It is immutable at runtime; a new install displays two and buffers three, then generation restores the configured buffer target after the first comparison supplies preference evidence.
 - **Learned pool:** locally persisted membership and ratings for candidates that earned inclusion through user choices. It references immutable assets and survives new games and browser refreshes.
 - **Local pool:** the effective bounded set formed from curated and learned membership.
 - **Ready buffer:** a durable FIFO queue of up to five candidates available for immediate loser replacement.
@@ -74,7 +74,7 @@ The checked-in curated manifest is validated at startup. Runtime rating and memb
 
 Starting a new game clears the current round, history, ready buffer, in-flight refill bookkeeping, fallback streak, and fallback cooldown. It does not erase learned ratings or learned pool membership.
 
-The service chooses seven distinct eligible local-pool candidates. Two become the initial independent A and B candidates and five fill the ready FIFO. A fresh install draws from the curated pool. A returning install draws from the effective curated-plus-learned pool while excluding missing or invalid assets.
+The service chooses up to seven distinct eligible local-pool candidates. Two become the initial independent A and B candidates and the remainder fill the ready FIFO. A fresh install draws five from the curated pool. After the first comparison, generation restores the configured ready-buffer target. A returning install draws from the effective curated-plus-learned pool while excluding missing or invalid assets.
 
 The initial screen is therefore ready without model work. Generated-initial mode remains available for explicit testing and recovery, but normal local-first startup uses the curated pool.
 
@@ -135,7 +135,7 @@ Background refill work alone does not lock game interaction or preference editin
 - A waiting selection keeps both existing candidates intact until a valid replacement is available; retry continues to use durable mailbox semantics.
 - Restart recovery reconciles active/completed refill jobs before enqueueing new work and never duplicates a job ID.
 - New-game cancellation archives outstanding refill jobs. Late results from the old generation are ignored through generation/session ownership metadata.
-- Invalid curated metadata or missing assets are skipped; startup fails with a clear actionable error only when fewer than seven valid pool candidates remain.
+- Invalid curated metadata or missing assets are rejected by manifest validation; game construction fails with a clear actionable error if fewer than two distinct candidates remain.
 - Asset cleanup must retain anything referenced by the current round, ready buffer, rating catalog, or active mailbox state. Destructive asset garbage collection is outside this feature.
 
 ## UI Behavior

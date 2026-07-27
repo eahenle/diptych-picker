@@ -99,7 +99,7 @@ test.afterEach(async ({ request }) => {
   await reconcileAllRefills(request);
 });
 
-test("starts with five durable challengers and adapts two independent images to the viewport", async ({
+test("starts with three durable challengers and adapts two independent images to the viewport", async ({
   page,
 }) => {
   const images = page.getByTestId("candidate-image");
@@ -109,12 +109,12 @@ test("starts with five durable challengers and adapts two independent images to 
   ]);
   const stored = await challengerState();
 
-  expect(stored.ready).toHaveLength(5);
+  expect(stored.ready).toHaveLength(3);
   await expect(
-    page.getByLabel("View queue details; 5 ready, 0 generating, 0 waiting"),
+    page.getByLabel("View queue details; 3 ready, 0 generating, 0 waiting"),
   ).toBeVisible();
   await expect(
-    page.getByLabel("View pool leaderboard; 7 of 50 reusable images"),
+    page.getByLabel("View pool leaderboard; 5 of 50 reusable images"),
   ).toBeVisible();
   await expect(page.getByTitle("First appearance")).toHaveCount(2);
   await expect(page.getByTestId("candidate-card-left")).not.toContainText(
@@ -364,19 +364,19 @@ test("opens a display-safe reusable-pool leaderboard", async ({
 }) => {
   await page
     .getByRole("button", {
-      name: "View pool leaderboard; 7 of 50 reusable images",
+      name: "View pool leaderboard; 5 of 50 reusable images",
     })
     .click();
 
   const dialog = page.getByRole("dialog", { name: "Pool leaderboard" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("listitem")).toHaveCount(7);
-  await expect(dialog.getByText(/1000/)).toHaveCount(7);
+  await expect(dialog.getByRole("listitem")).toHaveCount(5);
+  await expect(dialog.getByText(/1000/)).toHaveCount(5);
 
   const response = await request.get("/api/game/leaderboard");
   expect(response.status()).toBe(200);
   const body = await response.json();
-  expect(body.entries).toHaveLength(7);
+  expect(body.entries).toHaveLength(5);
   expect(JSON.stringify(body)).not.toContain('"prompt"');
 
   const firstCard = dialog
@@ -526,7 +526,7 @@ test("favorites a candidate across history, gallery, pool, refresh, and export",
 
   await page
     .getByRole("button", {
-      name: "View pool leaderboard; 7 of 50 reusable images",
+      name: "View pool leaderboard; 5 of 50 reusable images",
     })
     .click();
   await expect(
@@ -694,7 +694,7 @@ test("edits durable game rules and applies the champion streak immediately", asy
   });
   const leaderboard = await (await request.get("/api/game/leaderboard")).json();
   expect(leaderboard.poolMaximum).toBe(6);
-  expect(leaderboard.entries).toHaveLength(6);
+  expect(leaderboard.entries).toHaveLength(5);
 
   await page.reload();
   await page.getByRole("button", { name: "Preferences" }).click();
@@ -1090,7 +1090,7 @@ test("exports the current game and restores it after later play", async ({
   );
 });
 
-test("serves five instant FIFO swaps while preserving the winner node and URL", async ({
+test("serves three instant FIFO swaps while preserving the winner node and URL", async ({
   page,
 }) => {
   const winner = page.getByTestId("candidate-image").nth(0);
@@ -1102,7 +1102,7 @@ test("serves five instant FIFO swaps while preserving the winner node and URL", 
     ).winnerNode = document.querySelector('[data-testid="candidate-image"]');
   });
 
-  for (let round = 2; round <= 6; round += 1) {
+  for (let round = 2; round <= 4; round += 1) {
     const loser = page.getByTestId("candidate-image").nth(1);
     const previousLoserUrl = await loser.getAttribute("src");
     const response = await select(page, "left", round);
@@ -1112,7 +1112,7 @@ test("serves five instant FIFO swaps while preserving the winner node and URL", 
     losingUrls.add((await loser.getAttribute("src"))!);
   }
 
-  expect(losingUrls.size).toBe(5);
+  expect(losingUrls.size).toBe(3);
   expect(
     await page.evaluate(
       () =>
@@ -1157,7 +1157,7 @@ test("keeps stale FIFO work after a challenger becomes the next winner", async (
         document.querySelectorAll('[data-testid="candidate-image"]')[1],
     ),
   ).toBe(true);
-  expect((await challengerState()).ready).toHaveLength(3);
+  expect((await challengerState()).ready).toHaveLength(1);
 });
 
 test("refresh restores the current round and remaining FIFO exactly", async ({
@@ -1205,7 +1205,7 @@ test("double click consumes one challenger and advances one round", async ({
 
   expect(selectionPosts).toBe(1);
   await expect(page.getByText("Round 3", { exact: true })).toHaveCount(0);
-  expect((await challengerState()).ready).toHaveLength(4);
+  expect((await challengerState()).ready).toHaveLength(2);
 });
 
 test("delays pool fallback, blocks an eleventh, and completes a queued Preferences save", async ({

@@ -28,19 +28,6 @@
       ]
     },
     {
-      "id": "seed-night-shift-derby",
-      "file": "night-shift-derby.png",
-      "prompt": "Use case: photorealistic-natural\nAsset type: standalone square challenger artwork for an image preference game\nPrimary request: capture an exuberant all-women senior roller derby team, ages roughly 60 to 75, executing a perfectly coordinated whip maneuver at full speed in a converted factory rink during a late-night bout\nScene/backdrop: a cavernous repurposed factory interior with worn concrete, exposed roof trusses, hazy air, and a polished oval track; abstract ultraviolet and amber practical lights glow in the distance without forming any words\nSubject: five visibly older, formidable adult skaters in distinctive unbranded black, oxblood, copper, and deep-purple gear; powerful athletic stances, expressive lined faces, silver and gray hair moving with speed, one lead skater slingshotting around the pack while teammates lock into a precise formation; camaraderie, mastery, and sly humor rather than parody\nStyle/medium: candid 35mm documentary sports photography with hard direct flash, authentic film grain, slight halation, tactile realism, and controlled directional motion blur; emphatically photographic, kinetic, and unposed\nComposition/framing: square format, track-level wide-angle viewpoint close to the curve, the team sweeping diagonally from lower left toward upper right; one unified scene with layered depth and bodies fully readable, energetic but coherent\nLighting/mood: sharp flash freezes faces and gear against long streaks of ultraviolet and amber ambient light; rebellious, joyful, formidable, and warm\nColor palette: soot black, oxblood, tarnished copper, ultraviolet, warm amber, and natural skin tones\nMaterials/textures: scuffed leather, scratched helmets, worn concrete, steel trusses, sweat, fabric weave, realistic skin texture, fine film grain\nConstraints: exactly one standalone square image; one unified scene; no diptych, no split-screen, no side-by-side comparison, no A/B labels, no border, no caption, no watermark, no logos, no readable text, no legible jersey names or numbers\nAvoid: coastal scenery, observatories, radio dishes, blue-hour landscapes, science-fiction architecture, crystalline objects, synthesizers, product still life, mushrooms, marionettes, conductors, theater stages, gouache, linocut, illustration, fantasy creatures",
-      "concept": "The Night Shift Derby",
-      "style": [
-        "documentary sports photography",
-        "35mm film grain",
-        "hard direct flash",
-        "kinetic realism",
-        "industrial ultraviolet"
-      ]
-    },
-    {
       "id": "seed-pool-sized-circuit",
       "file": "pool-sized-circuit.png",
       "prompt": "Use case: stylized-concept\nAsset type: standalone square challenger artwork for an image preference game\nPrimary request: create a monumental overhead view of a drained 1970s public swimming pool being transformed into a gigantic working copper circuit board by a small precision fabrication crew\nScene/backdrop: a sun-bleached municipal pool complex in an arid inland town at high noon; faded apricot concrete, turquoise tile remnants, empty diving platforms, and crisp geometric shadows; the deep pool basin is filled with meter-wide copper traces, ceramic components, braided cables, and tiny work platforms\nSubject: six highly skilled adult fabricators in cobalt-blue coveralls and protective visors methodically soldering, riveting, testing, and polishing the enormous circuit inside the pool; their teamwork reads clearly from above, with one worker standing on the diving board operating a compact diagnostic instrument that emits only abstract colored indicator lights\nStyle/medium: meticulously crafted layered paper relief and screen-printed collage, photographed as a tactile physical artwork; visible cut-paper edges, embossed fibers, metallic copper foil, slightly imperfect ink registration, bold editorial graphic design, not photorealistic and not a conventional landscape painting\nComposition/framing: exactly square, near-vertical bird's-eye view centered on the pool's strong rectangular geometry; the circuit traces create an elegant asymmetrical maze while the tiny crew provides scale; one continuous unified scene with no panels or divisions\nLighting/mood: hard white midday light with sharp shadows; ingenious, industrious, playful, calm, and quietly monumental\nColor palette: sun-faded apricot, swimming-pool turquoise, cobalt blue, bright copper foil, warm cream, and small vermilion accents\nMaterials/textures: fibrous cut paper, matte screen-print ink, oxidized and polished copper foil, chipped ceramic tile, braided cord, embossed concrete grain\nConstraints: exactly one standalone square PNG composition; one unified scene; no diptych, no split-screen, no side-by-side comparison, no A/B labels, no border, no caption, no watermark, no logos, no readable text, no legible numbers, no coastal scenery, no observatory, no radio dishes\nAvoid: blue-hour landscapes, Pacific Northwest scenery, retrofuturist architecture, crystalline instruments, synthesizers, product still life, mushrooms, marionettes, conductors, theater stages, roller derby, sports photography, ultraviolet nightclub lighting, gothic fantasy, cute animals, photorealism",
@@ -64,18 +51,6 @@
         "underwater urban surrealism",
         "bioluminescent night",
         "intimate eye-level composition"
-      ]
-    },
-    {
-      "id": "seed-fogline-glassworks",
-      "file": "fogline-glassworks.png",
-      "prompt": "One standalone square image of an adult glassblower operating a rain-soaked hilltop furnace at dawn, confident and technically precise, with pale fog, blackened steel, molten amber glass, and restrained cinematic blue. Use an etched colored-pencil and watercolor medium with one coherent composition. No diptych, split screen, A/B label, border, caption, watermark, logo, or readable text.",
-      "concept": "Fogline Glassworks",
-      "style": [
-        "etched colored-pencil",
-        "watercolor",
-        "industrial craft",
-        "cinematic dawn"
       ]
     }
   ]

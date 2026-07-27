@@ -63,11 +63,11 @@ The web server never launches `codex`, calls an OpenAI API, or receives an API k
 ## Release status
 
 Version 0.9 is the public-release preview foundation. The software and
-documentation are available under the [MIT License](LICENSE). The seven
-bundled PNGs remain excluded pending the provenance review documented in the
-[seed-asset notes](public/seed-assets/README.md); confirm their redistribution
-rights or replace them before publishing 1.0. See [SECURITY.md](SECURITY.md)
-before changing the loopback-only deployment boundary.
+documentation and the five bundled seed PNGs are available under the
+[MIT License](LICENSE). The [seed-asset notes](public/seed-assets/README.md)
+record what is known about each image's repository provenance. See
+[SECURITY.md](SECURITY.md) before changing the loopback-only deployment
+boundary.
 
 ## Development checks
 
@@ -128,7 +128,12 @@ publication are token-owned with expiry-based mailbox fallback.
 
 ## Curated and learned pools
 
-Seven standalone curated PNGs and their strict manifest live under `public/seed-assets/`. A normal new game shuffles seven distinct eligible candidates: two are displayed and five fill the ready FIFO. Curated files are immutable at runtime.
+Five standalone curated PNGs and their strict manifest live under
+`public/seed-assets/`. A normal new game shuffles five distinct eligible
+candidates: two are displayed and three fill the ready FIFO. After the first
+comparison supplies genuine preference evidence, normal generation restores
+the FIFO to the configured buffer target (five by default). Curated files are
+immutable at runtime.
 
 Every comparison updates both candidates with Elo K=32. Generated candidates become eligible for the learned pool after comparison even when they have no wins, so a small pool preserves breadth instead of discarding useful alternatives prematurely. The effective curated-plus-learned pool is bounded by the current game's reusable-pool capacity (`CANDIDATE_POOL_SIZE`, 50 by default); once full, a stronger candidate displaces only a strictly lower-rated lowest member, while rating history and immutable assets remain durable. Existing sessions backfill eligible rated candidates into available pool capacity, and lowering the live capacity retains the strongest members.
 

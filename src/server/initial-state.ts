@@ -31,7 +31,7 @@ export const curatedManifestSchema = z
   .object({
     candidates: z
       .array(curatedCandidateSchema)
-      .length(7, "Manifest must contain exactly seven curated candidates"),
+      .length(5, "Manifest must contain exactly five curated candidates"),
   })
   .strict()
   .superRefine(({ candidates }, context) => {
