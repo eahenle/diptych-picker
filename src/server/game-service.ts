@@ -1,32 +1,12 @@
+import { drawFallback, type ChallengerState } from "@/domain/challenger-state";
 import {
-  drawFallback,
-  popReady,
-  type BufferedCandidate,
-  type ChallengerState,
-  type PendingComparisonReceipt,
-} from "@/domain/challenger-state";
-import {
-  beginChampionRetirement,
-  beginBothLose,
-  beginBufferedSelection,
-  beginTie,
-  candidateAt,
-  completeChampionRetirement,
-  completeBothLose,
-  completeSelection,
-  completeTie,
-  oppositeSide,
   preferenceProfileFromSeed,
-  willRetireChampion,
   type GameRules,
   type GameState,
   type PreferenceProfile,
   type Side,
 } from "@/domain/game";
-import {
-  recordPromptCardDecision,
-  type CreatePromptCardInput,
-} from "@/domain/prompt-deck";
+import type { CreatePromptCardInput } from "@/domain/prompt-deck";
 import type {
   GenerationMailbox,
   PromptCardBlenderMailbox,
@@ -34,19 +14,9 @@ import type {
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
-import { applyAdaptivePreferences } from "./game-adaptation";
-import {
-  MissingGameError,
-  SelectionConflictError,
-} from "./game-service-errors";
-import {
-  comparisonReceipt,
-  recordBothLose,
-  recordComparison,
-  recordTie,
-  tieReferenceSide,
-} from "./game-comparison";
+import { SelectionConflictError } from "./game-service-errors";
 import { GameReconciler } from "./game-reconciler";
+import { GameSelectionService } from "./game-selection-service";
 import { GameSettingsService } from "./game-settings-service";
 import { effectiveGameRules } from "./game-rules";
 import { GenerationJobPublisher } from "./generation-job-publisher";
@@ -94,6 +64,7 @@ export class GameService {
   private readonly refillResultReconciler: RefillResultReconciler;
   private readonly refillCapacityService: RefillCapacityService;
   private readonly gameReconciler: GameReconciler;
+  private readonly gameSelectionService: GameSelectionService;
 
   constructor(
     private readonly gameRepository: GameRepository,
@@ -206,6 +177,18 @@ export class GameService {
       rulesFor: (game) => this.rulesFor(game),
       drawFallback: (state, game) => this.drawFallback(state, game),
     });
+    this.gameSelectionService = new GameSelectionService({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      promptCardReconciler: this.promptCardReconciler,
+      preparedSelectionReconciler: this.preparedSelectionReconciler,
+      refillCapacityService: this.refillCapacityService,
+      generationJobPublisher: this.generationJobPublisher,
+      config: this.config,
+      rulesFor: (game) => this.rulesFor(game),
+      drawFallback: (state, game) => this.drawFallback(state, game),
+      now: this.now,
+    });
   }
 
   async assertIdle(): Promise<void> {
@@ -285,293 +268,15 @@ export class GameService {
     winnerSide: Side,
     expectedRoundNumber: number,
   ): Promise<GameState> {
-    return this.withStateLocks(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError("Start a game before choosing an image");
-      }
-      if (current.round.roundNumber !== expectedRoundNumber) {
-        throw new SelectionConflictError(
-          "The round changed before this selection arrived",
-        );
-      }
-
-      const challengerState = await this.challengerRepository.load();
-      if (!challengerState) {
-        throw new MissingGameError(
-          "Start a game before choosing a buffered challenger",
-        );
-      }
-
-      const selectedAt = this.now();
-      const rules = this.rulesFor(current);
-      const retirement = willRetireChampion(
-        current,
-        winnerSide,
-        rules.championRetirementStreak,
-      );
-      const inFlight = retirement
-        ? beginChampionRetirement(
-            current,
-            winnerSide,
-            selectedAt,
-            rules.championRetirementStreak,
-          )
-        : beginBufferedSelection(current, winnerSide, selectedAt);
-      if (!inFlight) {
-        throw new SelectionConflictError(
-          "A challenger is already being generated",
-        );
-      }
-
-      const retainedWinner = candidateAt(current.round, winnerSide);
-      const rejectedCandidate = candidateAt(
-        current.round,
-        oppositeSide(winnerSide),
-      );
-      let nextChallengers = recordComparison(
-        {
-          ...challengerState,
-          pendingSelectionBaseline:
-            this.preparedSelectionReconciler.baseline(challengerState),
-        },
-        retainedWinner,
-        rejectedCandidate,
-        comparisonReceipt(current, winnerSide, selectedAt),
-        { ...this.config, poolMaximum: rules.poolMaximum },
-      );
-      let preparedReadyHeads: BufferedCandidate[] = [];
-      let nextGame = inFlight;
-      if (retirement) {
-        if (nextChallengers.ready.length >= 2) {
-          preparedReadyHeads = nextChallengers.ready.slice(0, 2);
-          const leftDraw = popReady(nextChallengers);
-          const rightDraw = popReady(leftDraw.state);
-          nextChallengers = rightDraw.state;
-          nextGame = completeChampionRetirement(
-            inFlight,
-            leftDraw.candidate!,
-            rightDraw.candidate!,
-          );
-        }
-      } else {
-        let draw = popReady(nextChallengers);
-        if (draw.candidate) {
-          preparedReadyHeads = nextChallengers.ready.slice(0, 1);
-          nextChallengers = draw.state;
-          nextGame = completeSelection(inFlight, draw.candidate);
-        } else {
-          draw = this.drawFallback(nextChallengers, current);
-          nextChallengers = draw.state;
-          if (draw.candidate)
-            nextGame = completeSelection(inFlight, draw.candidate);
-        }
-      }
-
-      nextGame = recordPromptCardDecision(
-        nextGame,
-        [retainedWinner],
-        [rejectedCandidate],
-        selectedAt,
-        "Selected comparison winner",
-      );
-      const adapted = applyAdaptivePreferences(nextGame, nextChallengers);
-      nextGame = adapted.game;
-      nextChallengers = adapted.challengers;
-      const capacity = this.refillCapacityService.plan(nextChallengers, {
-        game: nextGame,
-        winnerSide,
-        retainedWinner,
-        rejectedCandidate,
-      });
-      const durableChallengers =
-        preparedReadyHeads.length > 0
-          ? {
-              ...capacity.state,
-              ready: [...preparedReadyHeads, ...capacity.state.ready],
-            }
-          : capacity.state;
-      // Persist a replayable selection before committing either side of the
-      // cross-repository transition. A prepared FIFO head remains durable
-      // until the completed game round is safely stored.
-      await this.gameRepository.save(
-        recordPromptCardDecision(
-          inFlight,
-          [retainedWinner],
-          [rejectedCandidate],
-          selectedAt,
-          "Selected comparison winner",
-        ),
-      );
-      await this.challengerRepository.save(durableChallengers);
-      await this.gameRepository.save(nextGame);
-      nextGame = await this.promptCardReconciler.reconcileEditor(nextGame);
-      if (nextGame.round.status === "idle") {
-        await this.challengerRepository.save({
-          ...capacity.state,
-          pendingComparison: null,
-          pendingSelectionBaseline: null,
-        });
-      }
-      await this.generationJobPublisher.ensureAll(capacity.jobs);
-      return nextGame;
-    });
+    return this.gameSelectionService.select(winnerSide, expectedRoundNumber);
   }
 
   async tie(expectedRoundNumber: number): Promise<GameState> {
-    return this.replacePair(expectedRoundNumber, "tie");
+    return this.gameSelectionService.tie(expectedRoundNumber);
   }
 
   async bothLose(expectedRoundNumber: number): Promise<GameState> {
-    return this.replacePair(expectedRoundNumber, "both-lose");
-  }
-
-  private async replacePair(
-    expectedRoundNumber: number,
-    outcome: "tie" | "both-lose",
-  ): Promise<GameState> {
-    return this.withStateLocks(async () => {
-      const current = await this.gameRepository.load();
-      if (!current) {
-        throw new MissingGameError(
-          outcome === "tie"
-            ? "Start a game before declaring a tie"
-            : "Start a game before rejecting both candidates",
-        );
-      }
-      if (current.round.roundNumber !== expectedRoundNumber) {
-        throw new SelectionConflictError(
-          outcome === "tie"
-            ? "The round changed before this tie arrived"
-            : "The round changed before this dual rejection arrived",
-        );
-      }
-
-      const challengerState = await this.challengerRepository.load();
-      if (!challengerState) {
-        throw new MissingGameError(
-          "Start a game before replacing tied candidates",
-        );
-      }
-
-      const selectedAt = this.now();
-      const referenceSide = tieReferenceSide(
-        current,
-        challengerState,
-        this.config.initialRating,
-      );
-      const inFlight =
-        outcome === "tie"
-          ? beginTie(current, referenceSide, selectedAt)
-          : beginBothLose(current, referenceSide, selectedAt);
-      if (!inFlight) {
-        throw new SelectionConflictError(
-          "A challenger is already being generated",
-        );
-      }
-
-      const left = current.round.leftCandidate;
-      const right = current.round.rightCandidate;
-      const receipt: PendingComparisonReceipt = {
-        kind: outcome,
-        selectedAt,
-        roundNumber: current.round.roundNumber,
-        leftId: left.id,
-        rightId: right.id,
-      };
-      const baseline = {
-        ...challengerState,
-        pendingSelectionBaseline:
-          this.preparedSelectionReconciler.baseline(challengerState),
-      };
-      let nextChallengers =
-        outcome === "tie"
-          ? recordTie(baseline, left, right, receipt, {
-              ...this.config,
-              poolMaximum: this.rulesFor(current).poolMaximum,
-            })
-          : recordBothLose(
-              baseline,
-              left,
-              right,
-              receipt,
-              this.config.initialRating,
-            );
-      let preparedReadyHeads: BufferedCandidate[] = [];
-      let nextGame = inFlight;
-      const replacements =
-        this.preparedSelectionReconciler.drawPairReplacements(
-          nextChallengers,
-          current,
-        );
-      nextChallengers = replacements.state;
-      if (replacements.candidates) {
-        preparedReadyHeads = replacements.readyHeads;
-        nextGame =
-          outcome === "tie"
-            ? completeTie(inFlight, ...replacements.candidates)
-            : completeBothLose(inFlight, ...replacements.candidates);
-      }
-
-      if (outcome === "both-lose") {
-        nextGame = recordPromptCardDecision(
-          nextGame,
-          [],
-          [left, right],
-          selectedAt,
-          "Both images rejected",
-        );
-      }
-
-      if (outcome === "both-lose" && nextGame.round.status === "idle") {
-        const adapted = applyAdaptivePreferences(nextGame, nextChallengers);
-        nextGame = adapted.game;
-        nextChallengers = adapted.challengers;
-      }
-
-      const reference = candidateAt(current.round, referenceSide);
-      const contrasted = candidateAt(
-        current.round,
-        oppositeSide(referenceSide),
-      );
-      const capacity = this.refillCapacityService.plan(nextChallengers, {
-        game: nextGame,
-        winnerSide: referenceSide,
-        retainedWinner: reference,
-        rejectedCandidate: contrasted,
-        comparisonOutcome: outcome,
-      });
-      const durableChallengers =
-        preparedReadyHeads.length > 0
-          ? {
-              ...capacity.state,
-              ready: [...preparedReadyHeads, ...capacity.state.ready],
-            }
-          : capacity.state;
-      await this.gameRepository.save(
-        outcome === "both-lose"
-          ? recordPromptCardDecision(
-              inFlight,
-              [],
-              [left, right],
-              selectedAt,
-              "Both images rejected",
-            )
-          : inFlight,
-      );
-      await this.challengerRepository.save(durableChallengers);
-      await this.gameRepository.save(nextGame);
-      nextGame = await this.promptCardReconciler.reconcileEditor(nextGame);
-      if (nextGame.round.status === "idle") {
-        await this.challengerRepository.save({
-          ...capacity.state,
-          pendingComparison: null,
-          pendingSelectionBaseline: null,
-        });
-      }
-      await this.generationJobPublisher.ensureAll(capacity.jobs);
-      return nextGame;
-    });
+    return this.gameSelectionService.bothLose(expectedRoundNumber);
   }
 
   async ensureRefillCapacity(): Promise<void> {
@@ -608,11 +313,5 @@ export class GameService {
 
   private rulesFor(game: GameState): GameRules {
     return effectiveGameRules(game, this.config);
-  }
-
-  private withStateLocks<T>(operation: () => Promise<T>): Promise<T> {
-    return this.gameRepository.withLock(() =>
-      this.challengerRepository.withLock(operation),
-    );
   }
 }

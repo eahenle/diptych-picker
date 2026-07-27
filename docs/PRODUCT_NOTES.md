@@ -36,6 +36,15 @@ risk justifies a deliberate compatibility break.
 
 ## 2026-07-26
 
+### Immediate comparison command boundary
+
+Winner selections, ties, and both-lose commands now share one focused service.
+It preserves stale-round and in-flight conflict guards, game-before-challenger
+lock order, Elo and pool updates, prepared FIFO recovery, champion retirement,
+fallback pacing, adaptive preference evidence, prompt-card decisions, durable
+refill planning, and replayable save order. `GameService` keeps the same public
+API, and visible comparisons, saved state, and mailbox behavior are unchanged.
+
 ### Outer reconciliation transaction boundary
 
 The complete game reconciliation pass now runs through one focused coordinator.
@@ -101,8 +110,8 @@ refill jobs continue through their existing durable paths.
 Prepared comparison receipts and baselines, restart-safe completion, champion
 retirement, tie and both-lose pair replacement, fallback pool draws, and
 displayed-candidate ready-queue cleanup now share one focused coordinator.
-Immediate user-selection commits remain in `GameService`, while the outer
-transaction now delegates through the game reconciler. Persistence shape,
+Immediate user-selection commits now run through the selection service, while
+the outer transaction delegates through the game reconciler. Persistence shape,
 comparison scoring, fallback pacing, and visible round behavior are unchanged.
 
 ### Refill-result reconciliation boundary

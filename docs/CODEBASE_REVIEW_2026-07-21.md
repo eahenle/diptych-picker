@@ -110,6 +110,11 @@ and a Next.js production build.
   ordered generation, prompt-card, leaderboard, prepared-selection,
   refill-result, buffered-completion, and capacity passes remain unchanged.
   `GameService` is the stable façade and dependency-wiring boundary.
+- Immediate winner, tie, and both-lose commands now share a focused selection
+  service. Stale-round guards, comparison rating, prepared FIFO heads,
+  replayable cross-repository save order, adaptive preferences, prompt-card
+  editor recovery, capacity planning, and durable publication remain in one
+  game-before-challenger transaction behind the stable `GameService` API.
 - Adaptive leaderboard visual analysis now has its own reconciliation boundary.
   `GameService` supplies the current game and challenger transaction while job
   recovery, cohort fingerprint attempts, result caching, and refill-facing
@@ -124,8 +129,8 @@ and a Next.js production build.
   behind the outer reconciliation coordinator.
 - Prepared-selection reconciliation now has its own coordinator. Comparison
   receipts and baselines, crash-replay completion, retirement and tie
-  replacement draws, and displayed-ready cleanup stay together while
-  immediate user-action commits remain in `GameService`.
+  replacement draws, and displayed-ready cleanup stay together while the
+  selection service owns immediate user-action commits.
 - Pre-buffer single-challenger saves now recover through a focused compatibility
   coordinator. Exact intent reconstruction, work/result validation, asset
   verification, terminal completion, and two-phase mailbox cleanup stay out of
