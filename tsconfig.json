@@ -32,6 +32,8 @@
     ".next-e2e/dev/types/**/*.ts",
     ".next-build/types/**/*.ts",
     ".next-build/dev/types/**/*.ts",
+    ".next-demo/types/**/*.ts",
+    ".next-demo/dev/types/**/*.ts",
     ".next-run/types/**/*.ts",
     ".next-run/dev/types/**/*.ts"
   ],

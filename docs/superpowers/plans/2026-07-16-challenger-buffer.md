@@ -498,7 +498,7 @@ Run:
 
 ```bash
 node --test .agents/skills/run-diptych-picker/scripts/next-job.test.mjs
-python3 /Users/ahenle/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/run-diptych-picker
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" .agents/skills/run-diptych-picker
 ```
 
 Expected: all tests pass and validator prints `Skill is valid!`.

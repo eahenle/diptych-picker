@@ -7,10 +7,10 @@ and production builds. Use `npm ci` when reproducing the repository state. Do
 not run an unreviewed install as part of feature work or commit lockfile changes
 that are unrelated to the branch's purpose.
 
-The `latest` ranges in `package.json` are intentional discovery ranges, not a
-signal that every install should silently become an upgrade. The committed
-lockfile pins the exact versions until a dedicated maintenance change updates
-them.
+`package.json` and `package-lock.json` both pin exact direct dependency
+versions. The manifest makes review diffs explicit, while the lockfile remains
+the authoritative complete graph. Security overrides must name the patched
+transitive version and be removed when the direct dependency adopts it.
 
 ## Update cadence and scope
 
@@ -36,11 +36,13 @@ npm ci
 npm run check
 npm run build
 npm run test:e2e
+npm audit --omit=dev
 ```
 
 Launcher, mailbox-protocol, production compilation, and Chromium coverage are
-all release gates. If an update changes generated `next-env.d.ts` content,
-restore the repository's tracked development reference before committing.
+all release gates. Production dependencies must have no high or critical audit
+findings. If an update changes generated `next-env.d.ts` content, restore the
+repository's tracked development reference before committing.
 
 ## Merge and rollback
 

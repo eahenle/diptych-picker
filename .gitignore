@@ -2,6 +2,7 @@ node_modules/
 .next/
 .next-e2e/
 .next-build/
+.next-demo/
 .next-run/
 coverage/
 playwright-report/

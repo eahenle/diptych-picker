@@ -129,8 +129,14 @@ const coProcLeaseDuration = optionalLeaseDuration(
   "CO_PROC_GENERATION_LEASE_MS",
   process.env.CO_PROC_GENERATION_LEASE_MS,
 );
-if (mockMode && process.env.NODE_ENV === "production") {
-  throw new Error("The deterministic mock worker is test-only");
+if (
+  mockMode &&
+  process.env.NODE_ENV === "production" &&
+  process.env.DIPTYCH_OFFLINE_DEMO !== "true"
+) {
+  throw new Error(
+    "The deterministic mock worker requires DIPTYCH_OFFLINE_DEMO=true in production",
+  );
 }
 
 const configuredMockDelay = Number(
