@@ -173,7 +173,8 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/agent-mailbox.ts`: validated durable job/result protocol and restart recovery.
 - `src/server/preference-profile-schema.ts`: shared strict, request, and backward-compatible persisted preference validation.
 - `src/server/co-proc-generation-transport.ts`: opt-in live NDJSON notification over secure attachable `co-proc` endpoints, with durable mailbox fallback.
-- `src/server/game-service.ts`: transactional lock, persistence, mailbox, reconciliation, and cleanup orchestration.
+- `src/server/game-service.ts`: stable command façade and shared dependency wiring.
+- `src/server/game-reconciler.ts`: coalesced outer reconciliation transaction, ordered coordinator passes, buffered completion, and refill publication.
 - `src/server/game-adaptation.ts`: winner-gated profile adoption, rejection provenance, revision history, and stale-capacity invalidation.
 - `src/server/generation-selection-reconciler.ts`: legacy single-challenger intent recovery, strict result validation, completion, and two-phase mailbox cleanup.
 - `src/server/prepared-selection-reconciler.ts`: prepared comparison receipts, crash-replay completion, pair replacement, and displayed-ready cleanup.

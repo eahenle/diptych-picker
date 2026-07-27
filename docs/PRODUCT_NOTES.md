@@ -34,6 +34,18 @@ not sufficient reason to introduce a breaking save, API, or workflow change.
 Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
 
+## 2026-07-26
+
+### Outer reconciliation transaction boundary
+
+The complete game reconciliation pass now runs through one focused coordinator.
+Concurrent calls still coalesce behind game-before-challenger repository locks,
+and generation cleanup, prompt-card recovery, legacy selection, leaderboard
+analysis, prepared selection, refill results, buffered completion, adaptive
+preferences, and capacity publication retain their established order.
+`GameService` remains the public façade and dependency-wiring boundary; saved
+state, mailbox behavior, and visible game flow are unchanged.
+
 ## 2026-07-25
 
 ### Durable generation-capacity boundary
@@ -89,18 +101,18 @@ refill jobs continue through their existing durable paths.
 Prepared comparison receipts and baselines, restart-safe completion, champion
 retirement, tie and both-lose pair replacement, fallback pool draws, and
 displayed-candidate ready-queue cleanup now share one focused coordinator.
-`GameService` still owns the outer locked transaction and immediate
-user-selection commit order. Persistence shape, comparison scoring, fallback
-pacing, and visible round behavior are unchanged.
+Immediate user-selection commits remain in `GameService`, while the outer
+transaction now delegates through the game reconciler. Persistence shape,
+comparison scoring, fallback pacing, and visible round behavior are unchanged.
 
 ### Refill-result reconciliation boundary
 
 Ordered refill observations, missing-publication recovery, strict durable-intent
 validation, candidate construction and lineage, asset verification, moderation
 notices, idempotent replay, rating admission, and terminal cleanup now share one
-focused coordinator. `GameService` still owns the outer locked transaction.
-Mailbox priority, persistence shape, result acceptance, and visible comparison
-behavior are unchanged.
+focused coordinator behind the outer game reconciler. Mailbox priority,
+persistence shape, result acceptance, and visible comparison behavior are
+unchanged.
 
 ### Adaptive preference application boundary
 
