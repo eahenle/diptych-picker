@@ -89,7 +89,7 @@ interface ImportSession {
   items: ImportItem[];
   initialFillJobs: InitialFillJobRecord[];
   initialFillRetry: InitialFillRetryReceipt | null;
-  servedReceipts: ServedImportReceipt[];
+  servedReceipts: ImportServedReceipt[];
 }
 
 interface ImportItem {
@@ -154,7 +154,24 @@ interface ImportActivationIntentRepository {
   withLock<T>(operation: () => Promise<T>): Promise<T>;
 }
 
-interface ServedImportReceipt {
+type ImportServedReceipt =
+  ActivationDisplayServedReceipt | DequeueServedImportReceipt;
+
+interface ActivationDisplayServedReceipt {
+  kind: "activation-display";
+  activationDisplayReceiptId: string;
+  activationIntentId: string;
+  importSessionId: string;
+  replacementSlot: "initial-left" | "initial-right";
+  importItemId: string;
+  candidateId: string;
+  candidate: Candidate;
+  provenance: "imported";
+  servedAt: string;
+}
+
+interface DequeueServedImportReceipt {
+  kind: "dequeue";
   dequeueOperationId: string;
   importSessionId: string;
   originalReceipt: PendingComparisonReceipt;
@@ -225,6 +242,26 @@ target and archive side effect for its outcome was already verified.
 The committed aggregate creates a new session ID and starts with default
 preferences, an empty history, and no prior rating catalog. Two ready
 candidates form round one; three form the initial ready buffer.
+
+For each initially displayed candidate whose provenance is imported, the
+prepared aggregate changes its `ImportItem` to `status: "served"`, sets
+`servedAt` to the activation timestamp, and includes one
+`ActivationDisplayServedReceipt`. Its durable ID is
+`"activation-display-" + sha256(canonicalJson([activationIntentId, importSessionId, replacementSlot]))`,
+where the slot is `"initial-left"` or `"initial-right"`. The two slots are
+distinct even if the same intent and session identify the activation. An
+initial-fill generated candidate creates no import served receipt. These item
+updates and receipts are part of `intent.next.importSession`, so the commit
+cannot expose the initial comparison without its served evidence.
+
+An activation-display receipt has no `PendingComparisonReceipt`: no comparison
+exists before the first pair is shown. Strict union parsing rejects dequeue
+receipts without `originalReceipt` and rejects `originalReceipt` on an
+activation-display receipt. Across both kinds, the import-session schema
+requires unique derived receipt IDs and unique `importItemId` values, and each
+receipt's candidate/item IDs must match the referenced import item. This
+prevents an initial display and a later dequeue from both claiming the same
+import.
 
 The active challenger state references the import session and maintains a
 prioritized queue whose entries preserve per-candidate provenance. Imported
@@ -370,11 +407,12 @@ annotations append to the prioritized imported queue.
 
 Activation is recoverably transactional. A failure before aggregate writes
 marks the separately journaled transaction as a verified cleaned rollback
-before clearing it and leaves the staged import unchanged. A failure after the writing phase begins is completed forward from
-the separate durable journal before any game read, selection, restart
-reconciliation, or refill planning is allowed. Superseded jobs remain live
-until the committed phase is durable. The journal is retained until targets,
-archives, and the cleaned phase have all been durably verified.
+before clearing it and leaves the staged import unchanged. A failure after the
+writing phase begins is completed forward from the separate durable journal
+before any game read, selection, restart reconciliation, or refill planning is
+allowed. Superseded jobs remain live until the committed phase is durable. The
+journal is retained until targets, archives, and the cleaned phase have all
+been durably verified.
 
 ## Challenger and Pool Behavior
 
@@ -410,13 +448,13 @@ candidate IDs, and selection timestamp. A one-candidate draw uses slot
 `"pair-right"` slots. Thus two replacements from the same receipt cannot share
 an identity. A legacy game with no import uses
 `"game:" + challengerSessionId` in the namespace position and cannot create a
-`ServedImportReceipt`; an active imported stream always uses its exact import
-session ID.
+`DequeueServedImportReceipt`; an active imported stream always uses its exact
+import session ID.
 
 The primitive returns
 `{ dequeueOperationId, candidate, provenance, importItemId }`, where provenance
 distinguishes imported queue, ordinary ready queue, and eligible pool fallback.
-For an imported draw it persists a `ServedImportReceipt` keyed by
+For an imported draw it persists a `DequeueServedImportReceipt` keyed by
 `dequeueOperationId` before changing the item to served under the canonical
 journal -> import -> game -> challenger lock order. The receipt also stores the
 import item and full candidate, so replay returns the same draw without
@@ -437,7 +475,9 @@ interface ImportSupplySnapshot {
   annotating: number;
   failed: number;
   readyUnserved: number;
-  servedReceiptCount: number;
+  servedImportedItemCount: number;
+  activationDisplayReceiptCount: number;
+  dequeueReceiptCount: number;
   initialFillPending: number;
   initialFillFailed: number;
   terminal: boolean;
@@ -459,9 +499,15 @@ No ordinary generated refill is published while either of the first two import
 sources remains or initial-fill recovery is pending. Existing eligible pool
 fallback may continue at its normal cadence if the imported ready queue
 temporarily runs dry. Once every retained imported candidate has a durable
-served receipt and every import annotation and initial-fill attempt is
-terminal, the import session becomes completed and ordinary refill planning
-resumes.
+served receipt of either kind and every import annotation and initial-fill
+attempt is terminal, the import session becomes completed and ordinary refill
+planning resumes. Completion derives a unique set of served import item IDs
+across activation-display and dequeue receipts and requires it to equal the set
+of retained ready/served import items. Receipt counts alone are insufficient.
+With five ready imports, activation contributes the initial-left and
+initial-right receipts while the remaining three stay unserved; after those
+three receive dequeue receipts, completion becomes true and the next refill
+plan may publish ordinary generated work.
 
 ## UI Status and Recovery
 
@@ -487,12 +533,19 @@ the failure is resolved.
 Game snapshots include the active import stream, resolved imported candidates,
 normalized asset metadata, and pending item state. They exclude session-bound
 annotation and initial-fill job IDs, and they never embed or clear the separate
-activation journal. Restore verifies every referenced immutable asset and
-creates fresh game and import session IDs. It re-keys exported served receipts
-and unfinished prepared dequeues from the fresh import ID plus each preserved
-original receipt and replacement slot, keeping pair slots distinct, then
-republishes only unfinished annotation or initial-fill work. A staged import
-that has not activated is not included when exporting the still-current game.
+activation journal. Snapshot receipt projections preserve the discriminator,
+slot, item/candidate evidence, served time, and dequeue comparison receipt when
+applicable, but omit old derived receipt IDs, session IDs, and activation intent
+IDs. Restore verifies every referenced immutable asset and creates fresh game
+and import session IDs. It re-keys projected receipts by kind:
+activation-display receipts use the restore activation intent ID, fresh import
+session ID, and preserved initial-left/initial-right slot, with no comparison
+receipt; dequeue receipts and unfinished prepared dequeues use the fresh import
+ID plus their preserved original comparison receipt and single/pair slot.
+Restore validates unique receipt IDs and import item IDs, preserves served item
+status, then republishes only unfinished annotation or initial-fill work. A
+staged import that has not activated is not included when exporting the
+still-current game.
 
 ## API Boundaries
 
@@ -570,13 +623,20 @@ the mock provider unless a mailbox script itself is under test. They prove:
     displayed candidates, three buffered candidates, empty history, default
     preferences, and no pool members. Displayed imported and initial-fill
     generated candidates retain distinct provenance and begin
-    `poolMember: false`, `poolEligible: true`.
+    `poolMember: false`, `poolEligible: true`. Each displayed import is marked
+    served in the committed aggregate with a distinct initial-left or
+    initial-right activation-display receipt; a displayed initial-fill
+    generated candidate creates no import receipt.
 11. Imports with zero through four retained images publish exactly the missing
     number of initial-fill generation jobs after annotation resolution.
 12. Later annotation results append once and in deterministic completion order.
 13. No ordinary generated refill is published while an annotation can still
-    produce a candidate or an imported candidate remains unserved.
-14. Generation resumes after the import stream is exhausted.
+    produce a candidate or an imported candidate remains unserved according to
+    the union of activation-display and dequeue receipts.
+14. For five ready imports, the two activation-display receipts do not complete
+    the session while three imports remain queued. After all three receive
+    dequeue receipts, the session completes and ordinary generated refills
+    unblock.
 15. Imported and initial-fill generated candidates receive initial Elo only
     when first displayed. Display alone does not grant membership; every
     recorded selection, tie, or both-lose comparison then invokes the same
@@ -587,8 +647,10 @@ the mock provider unless a mailbox script itself is under test. They prove:
     must be selected again.
 18. Abandonment preserves the current game and immutable assets while preventing
     pending or late results from entering a future session.
-19. Snapshot export and restore preserve active imported candidates and requeue
-    unfinished work with fresh ownership.
+19. Snapshot export and restore preserve both served receipt kinds and active
+    imported candidates, re-key each kind from its own required fields, and
+    requeue unfinished work with fresh ownership. Activation-display receipts
+    never require or synthesize a prior comparison receipt.
 20. Desktop and narrow browser tests preserve exactly two independent candidate
     images and the retained winner's exact ID, URL, bytes, metadata, side, and
     DOM node across imported-stream comparisons.
@@ -598,12 +660,13 @@ the mock provider unless a mailbox script itself is under test. They prove:
     marking, and journal clear proves restart either takes a no-write prepared
     intent through verified cleaned rollback or completes the intended
     aggregate and cleanup without exposing mixed state or losing the journal
-    early.
+    early. Replay never commits an initial imported pair without its item state
+    and activation-display receipts or duplicates either receipt.
 22. Normal, retirement, tie, both-lose, prepared-selection, and restart paths
     all use the same source-aware dequeue. One-candidate and pair-left/pair-right
     draws derive distinct stable operation IDs from the original durable
     receipt. Crash/replay preserves operation ID, candidate, provenance, import
-    item ID, served receipt, and refill supply snapshot without double
+    item ID, dequeue receipt, and refill supply snapshot without double
     consumption; prepared and restart recovery reuse the original ID.
 23. Initial-fill failure status is display-safe. Session-level Retry publishes
     only the remaining deficit, exact duplicate requests return the original
