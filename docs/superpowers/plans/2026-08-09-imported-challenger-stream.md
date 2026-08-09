@@ -17,8 +17,15 @@
 - Upload only the normalized PNG; never upload the original source file or its metadata.
 - Automated annotation must not generate or edit an image, identify a person, infer sensitive traits, expose private readable text, or request identity, likeness, or exact reproduction.
 - Annotation failures remain explicit and support Retry, Manual annotation, and Remove.
+- Initial-fill failures remain explicit and support one idempotent session-level Retry for only the remaining deficit.
 - Activate only after the browser editing queue is empty and five candidates are ready; generate exactly the shortfall when fewer than five valid imports remain.
 - Imported candidates must be served before ordinary generated refills and must enter Elo and pool membership only through ordinary comparison behavior.
+- Preserve imported versus initial-fill generated provenance per candidate; display starts both at `poolMember: false`, `poolEligible: true`.
+- Use one source-aware, receipt-backed dequeue for normal selection, retirement, tie, both-lose, prepared recovery, and restart recovery.
+- Acquire state locks only in import session -> game -> challenger -> initial bootstrap order; publish or archive mailbox work only after releasing repository locks.
+- While browser inputs remain unresolved, disable Close and Pause; confirmed Abandon is the only exit until the session seals.
+- Fit mode must keep every rotated source pixel visible and must not expose pan or zoom controls that can clip it.
+- Structurally parse bounded PNG, WebP, and JPEG containers; reject malformed, truncated, animated, MPF/MPO, and multiple-image sources.
 - Preserve two independent image assets and never edit, regenerate, re-encode, replace, or move the retained winner.
 - Preserve existing untracked seed images and unrelated working-tree changes.
 - Each PR below must pass targeted tests and `npm run check`; the final PR must also pass production build and Playwright verification.
@@ -46,12 +53,18 @@
 **Interfaces:**
 
 - Produces: `ImportSession`, `ImportItem`, `ImportedAssetMetadata`, `ImportedCandidateAnnotation`, `ImportSessionRepository`, `JsonImportSessionRepository`, and `parseImportSession(value: unknown): ImportSession`.
-- Produces: `ChallengerState.importQueue: BufferedCandidate[]` and provenance unions containing `"imported"`.
+- Produces: `ImportActivationIntent`, `InitialFillRetryReceipt`, `ServedImportReceipt`, `ImportSupplySnapshot`, and durable activation/dequeue receipt collections.
+- Produces: `ChallengerState.importQueue: BufferedCandidate[]`, provenance unions containing `"imported"`, and `importItemId: string | null` on buffered candidates and ratings.
 - Consumes: existing atomic JSON, lock, and Zod patterns from `src/server/repository.ts` and `src/server/challenger-repository.ts`.
 
 - [ ] **Step 1: Write failing repository and schema tests**
 
-Add tests that parse and round-trip a session with one annotating item and one ready item, reject duplicate item IDs and digests, reject an annotation without style tags, and prove atomic `load`, `save`, `clear`, and `withLock` behavior.
+Add tests that parse and round-trip a session with one annotating item, one ready
+item, an initial-fill retry receipt, a served receipt, and a prepared activation
+intent containing the full new aggregate. Reject duplicate item IDs, digests,
+served receipt keys, activation IDs, and retry request IDs; reject an annotation
+without style tags; and prove atomic `load`, `save`, `clear`, and `withLock`
+behavior.
 
 ```ts
 const session: ImportSession = {
@@ -63,6 +76,9 @@ const session: ImportSession = {
   activatedAt: null,
   items: [importItem("item-1", "a".repeat(64), "annotating")],
   initialFillJobs: [],
+  initialFillRetry: null,
+  servedReceipts: [],
+  activation: null,
 };
 
 await repository.save(session);
@@ -105,7 +121,18 @@ export interface ImportSessionRepository {
 }
 ```
 
-Use `.strict()` Zod objects, the existing candidate constraints, unique item IDs, unique nonremoved digests, normalized filenames matching `/^[a-f0-9]{64}\.png$/`, and atomic temp-file rename. Add `importQueue` with a default of `[]` when older challenger state is parsed. Expand `CandidateRating.source` and `BufferedCandidate.source` to include `"imported"`.
+Use `.strict()` Zod objects, the existing candidate constraints, unique item
+IDs, unique nonremoved digests, unique
+`(importSessionId, importItemId, roundNumber)` served receipts, normalized
+filenames matching `/^[a-f0-9]{64}\.png$/`, and atomic temp-file rename. The
+activation schema must require the expected old import session ID, game
+revision ID, challenger session ID, and bootstrap batch ID; exact full new
+game/challenger/bootstrap/import values; superseded job IDs; and phase
+`prepared | writing | committed | cleaned`. Add `importQueue`
+with a default of `[]` when older challenger state is parsed. Expand
+`CandidateRating.source` and `BufferedCandidate.source` to include
+`"imported"`; add required `importItemId: string | null` with legacy generated
+and seed entries parsed as null.
 
 - [ ] **Step 4: Run the focused tests and type checker**
 
@@ -298,12 +325,20 @@ Expected: PASS. Push the branch, open a PR containing Tasks 1-3, request review,
 **Interfaces:**
 
 - Consumes: Tasks 1-3 repositories, normalizer, asset verifier, and annotation mailbox.
-- Produces: `ImportSessionService.createOrResume`, `approve`, `seal`, `retry`, `annotateManually`, `remove`, `abandon`, `status`, and `reconcileAnnotations`.
+- Produces: `ImportSessionService.createOrResume`, `approve`, `seal`, `retry`, `retryInitialFill`, `annotateManually`, `remove`, `abandon`, `status`, and `reconcileAnnotations`.
 - Produces: display-safe `ImportSessionStatus` responses with no filesystem or mailbox paths.
 
 - [ ] **Step 1: Write failing service state-transition tests**
 
-Test create-or-resume, approval and immediate enqueue, same-digest conflict, seal, retry with a fresh job ID, manual resolution, removal, stale item conflict, late-result suppression, and abandonment preserving asset files.
+Test create-or-resume, approval and immediate enqueue, same-digest conflict,
+seal, annotation retry with a fresh job ID, manual resolution, removal, stale
+item conflict, late-result suppression, and abandonment preserving asset files.
+Add session-level initial-fill retry tests: a failed attempt exposes only a
+display-safe message and attempt ID; Retry records its client request ID before
+publication, preserves successful fill candidates, and creates exactly the
+remaining deficit; an exact duplicate request returns the original replacement
+IDs; a new request against the stale failed attempt returns 409 and publishes
+nothing.
 
 ```ts
 const approved = await service.approve(session.id, pngBytes);
@@ -323,7 +358,14 @@ Expected: FAIL because service and routes are missing.
 
 - [ ] **Step 3: Implement locked state transitions and reconciliation**
 
-Implement one mutation path that loads the expected session under its lock, validates current status, writes the new state, and performs mailbox publication or archival with recoverable expected-job records. Reconciliation verifies the exact expected request before accepting a result and creates candidates with stable IDs derived from session and item IDs.
+Implement one mutation path that loads the expected session under its lock,
+validates current status, writes the new state, and performs mailbox publication
+or archival after releasing the repository lock with recoverable expected-job
+records. Reconciliation verifies the exact expected request before accepting a
+result and creates candidates with stable IDs derived from session and item
+IDs. `retryInitialFill(sessionId, failedAttemptId, requestId)` persists an
+`InitialFillRetryReceipt` containing the exact replacement job IDs before
+publishing or archiving anything, then replays those side effects idempotently.
 
 Manual annotation accepts only:
 
@@ -339,13 +381,21 @@ Set `reasoningSummary` to `"Provided manually during image import."` and `source
 
 - [ ] **Step 4: Implement narrow routes and runtime wiring**
 
-Use `GET/POST/DELETE /api/game/import`, multipart `POST /api/game/import/items`, `PATCH /api/game/import/items/[itemId]` with discriminated actions `retry | manual | remove`, and `POST /api/game/import/seal`. Return 400 for input errors, 404 for missing session/items, and 409 for stale transitions.
+Use `GET/POST/DELETE /api/game/import`, multipart
+`POST /api/game/import/items`, `PATCH /api/game/import/items/[itemId]` with
+discriminated actions `retry | manual | remove`, and
+`POST /api/game/import/seal`. Add `PATCH /api/game/import` action
+`retry-initial-fill` with exact `sessionId`, `failedAttemptId`, and `requestId`.
+Return 400 for input errors, 404 for missing session/items, and 409 for stale
+transitions or a Pause request before sealing. Return the existing status for
+an exact duplicate initial-fill Retry without publishing again.
 
 - [ ] **Step 5: Run focused tests and type checking**
 
 Run: `npx vitest run src/server/import-session-service.test.ts src/app/api/game/import/route.test.ts && npm run typecheck`
 
-Expected: PASS with no route response containing local paths or raw mailbox records.
+Expected: PASS with no route response containing local paths, raw mailbox
+records, worker payloads, or a nondisplay-safe initial-fill error.
 
 - [ ] **Step 6: Commit Task 4**
 
@@ -360,16 +410,36 @@ git commit -m "Add image import workflow API"
 
 - Create: `src/server/import-activation-service.ts`
 - Create: `src/server/import-activation-service.test.ts`
+- Create: `src/server/candidate-dequeue-service.ts`
+- Create: `src/server/candidate-dequeue-service.test.ts`
+- Create: `src/server/state-lock-coordinator.ts`
+- Create: `src/server/state-lock-coordinator.test.ts`
 - Modify: `src/server/agent-mailbox.ts`
+- Modify: `src/server/agent-mailbox.test.ts`
 - Modify: `src/server/mock-agent.ts`
 - Modify: `src/server/game-service.ts`
 - Modify: `src/server/game-service.test.ts`
+- Modify: `src/server/game-comparison.ts`
+- Create: `src/server/game-comparison.test.ts`
 - Modify: `src/server/game-selection-service.ts`
 - Modify: `src/server/game-selection-service.test.ts`
 - Modify: `src/server/refill-capacity-service.ts`
 - Modify: `src/server/refill-capacity-service.test.ts`
 - Modify: `src/server/import-session-service.ts`
 - Modify: `src/server/import-session-service.test.ts`
+- Modify: `src/server/import-session-repository.ts`
+- Modify: `src/server/import-session-repository.test.ts`
+- Modify: `src/server/challenger-repository.ts`
+- Modify: `src/server/challenger-repository.test.ts`
+- Modify: `src/server/repository.ts`
+- Modify: `src/server/repository.test.ts`
+- Modify: `src/server/initial-bootstrap.ts`
+- Create: `src/server/initial-bootstrap.test.ts`
+- Modify: `src/server/prepared-selection-reconciler.ts`
+- Modify: `src/server/prepared-selection-reconciler.test.ts`
+- Modify: `src/server/game-reconciler.ts`
+- Modify: `src/server/game-reconciler.test.ts`
+- Modify: `src/server/runtime.ts`
 - Modify: `src/domain/challenger-state.ts`
 - Modify: `src/domain/challenger-state.test.ts`
 - Modify: `.agents/skills/run-diptych-picker/scripts/complete-job.mjs`
@@ -382,12 +452,23 @@ git commit -m "Add image import workflow API"
 **Interfaces:**
 
 - Consumes: ready import items from Task 4.
-- Produces: `ImportActivationService.reconcile(): Promise<GameStartState | null>` and `kind: "initial-import-fill-batch"` mailbox claims.
-- Produces: imported-first draw behavior and generation gating via `RefillCapacityService.plan`.
+- Produces: `ImportActivationService.reconcile(): Promise<GameStartState | null>`, durable `ImportActivationIntent` replay, and `kind: "initial-import-fill-batch"` mailbox claims.
+- Produces: `StateLockCoordinator.withStateLocks` as the sole canonical import -> game -> challenger -> initial-bootstrap lock entry point.
+- Produces: `CandidateDequeueService.dequeueLocked(context, request): Promise<CandidateDequeueResult>` as the only source-aware challenger draw and served-receipt writer; its locked-context token prevents use outside the coordinator.
+- Produces: `RefillCapacityService.plan(state, context, importSupply)` with the dequeue-time `ImportSupplySnapshot` rather than an unlocked import lookup.
 
 - [ ] **Step 1: Write failing activation and scheduling tests**
 
-Cover: no mutation before seal; five ready items activate two displayed plus three queued; prior game/history/ratings/preferences are absent; ready items beyond five append deterministically; zero through four ready items publish exactly five through one initial-fill jobs only after terminal annotation resolution; imported queue draws before ordinary ready; and no refill job appears while an imported item is annotating, failed, ready, or queued.
+Cover: no mutation before seal; five ready items activate two displayed plus
+three queued; prior game/history/ratings/preferences are absent; ready items
+beyond five append deterministically; zero through four ready items publish
+exactly five through one initial-fill jobs only after terminal annotation
+resolution; imported queue draws before ordinary ready; and no refill job
+appears while an imported item is annotating, failed, ready, queued, or has a
+failed initial-fill attempt. Mix imported and initial-fill generated candidates
+in the first five and assert exact per-candidate `source` and `importItemId`.
+Assert both displayed rating records start `poolMember: false` and
+`poolEligible: true`.
 
 ```ts
 expect(activated.game.round.leftCandidate.id).toBe("import-item-1");
@@ -401,11 +482,15 @@ expect(challengers.ratings.map(({ candidate }) => candidate.id)).toEqual([
   "import-item-1",
   "import-item-2",
 ]);
+expect(challengers.ratings.map(({ poolMember }) => poolMember)).toEqual([
+  false,
+  false,
+]);
 ```
 
 - [ ] **Step 2: Run focused tests and verify failure**
 
-Run: `npx vitest run src/server/import-activation-service.test.ts src/server/game-selection-service.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts`
+Run: `npx vitest run src/server/import-activation-service.test.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.test.ts src/server/game-comparison.test.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts`
 
 Expected: FAIL because activation and import priority are missing.
 
@@ -416,44 +501,137 @@ Add `InitialImportFillRequest` with session ID, preference seed, created time, a
 Mock mode produces deterministic standalone assets. Agent mode delegates one fresh native-image worker per job.
 
 Teach `ImportSessionService.reconcileAnnotations` to reconcile initial-fill
-results independently, append successful generated candidates to the ready
-set, retain failed jobs as retryable activation failures, and never count one
-job twice. Extend `complete-job.mjs` to validate and publish this generation
-kind through the same immutable standalone-PNG contract.
+results independently, append successful candidates with
+`source: "generated"` and `importItemId: null`, retain failed jobs as one
+display-safe retryable session failure, and never count one job twice. Extend
+`complete-job.mjs` to validate and publish this generation kind through the
+same immutable standalone-PNG contract. Reuse the Task 4 retry receipt so
+reconciliation publishes only `5 - readyCount` replacements and exact duplicate
+Retry requests replay the same IDs.
 
-- [ ] **Step 4: Implement atomic activation and imported-first draws**
+- [ ] **Step 4: Implement recoverable activation transaction**
 
-Under import, game, challenger, and bootstrap locks, archive superseded jobs, validate five assets, create default game state, create ratings only for the displayed pair with `source: "imported"`, `poolMember: true`, and `poolEligible: true`, and persist the remaining ready imports in `importQueue`. Sort by annotation completion time then item ID.
+Add `withLock` to `InitialBootstrapRepository`. Implement
+`StateLockCoordinator` and route every multi-repository operation through it,
+requesting the smallest needed lock subset while always acquiring import
+session, game, challenger, then initial bootstrap. Pass an opaque locked-context
+token to activation and dequeue helpers so they cannot reacquire nested locks.
+Mailbox publication and archival happen after repository locks are released.
 
-Change candidate drawing to:
+Activation first validates five assets and constructs the complete new
+game/challenger/bootstrap/import aggregate. Give the game repository envelope a
+durable revision ID and persist an `ImportActivationIntent` with expected old
+import session ID, game revision ID, challenger session ID, bootstrap batch ID,
+and exact superseded job IDs before changing an active repository. Change its
+phase to `writing`, then install game,
+challenger, bootstrap, and active import values in canonical order. Every write
+accepts either the expected old ID or byte-equivalent intended new value and
+rejects any third state. Mark `committed` only after all four match; that marker
+is the commit point. Archive superseded jobs afterward and finally mark
+`cleaned`. Startup and request reconciliation clears a `prepared` intent only
+when no aggregate write happened; once `writing` exists it completes forward
+before any game is returned.
+
+Create ratings only for the displayed pair, preserving each candidate's
+`source` and `importItemId`, with `poolMember: false` and `poolEligible: true`.
+Persist the remaining first-five candidates in the merged deterministic order.
+Sort imported
+annotations by completion time then item ID and initial-fill results by
+completion time then job ID before merging by completion time.
+
+- [ ] **Step 5: Replace every draw with one source-aware dequeue**
+
+Implement only this stateful draw interface inside the coordinator's locked
+callback:
 
 ```ts
-const next = state.importQueue[0] ?? state.ready[0] ?? null;
+interface CandidateDequeueRequest {
+  reason:
+    | "selection"
+    | "retirement-left"
+    | "retirement-right"
+    | "tie-left"
+    | "tie-right"
+    | "both-lose-left"
+    | "both-lose-right"
+    | "prepared-recovery"
+    | "restart-recovery";
+  roundNumber: number;
+  excludedCandidateIds: string[];
+}
+
+interface CandidateDequeueResult {
+  candidate: Candidate | null;
+  provenance: "imported" | "ready" | "pool-fallback" | null;
+  importItemId: string | null;
+  challengers: ChallengerState;
+  importSupply: ImportSupplySnapshot;
+}
 ```
 
-When an imported candidate is drawn, create its initial rating with `source: "imported"`, `poolMember: false`, and `poolEligible: true`. After its first completed comparison, pass both compared candidate IDs through a generalized `admitEligibleCandidate` that retains the existing strict-rank and tie behavior.
+Under import -> game -> challenger locks, draw imported first, then ordinary
+ready, then the existing eligible pool fallback. For an imported draw, persist
+the served receipt keyed by import session, item, and round before saving queue
+removal or returning.
+An exact replay returns the receipt's original candidate/provenance without
+consuming another queue entry. Replace direct `popReady`, `drawFallback`, and
+`drawFallbackBatch` calls in `game-selection-service.ts`,
+`prepared-selection-reconciler.ts`, and `game-reconciler.ts`; normal selection,
+two retirement draws, two tie draws, two both-lose draws, prepared completion,
+and restart completion must all use this interface. Persist the returned supply
+snapshot with prepared-selection state.
 
-- [ ] **Step 5: Gate refills until import exhaustion**
+Write crash/replay tests for each reason with failure after served-receipt/item
+state persistence, challenger queue save, prepared supply-snapshot save,
+prepared game save, and completed game save. Each replay must return the full
+candidate stored in the receipt, the same provenance and import item ID,
+produce one served receipt, and never skip the next import.
 
-`RefillCapacityService.plan` must return no ordinary refill jobs while the active import reports any nonterminal annotation or `challengers.importQueue.length > 0`. Initial-fill jobs are exempt because they are activation prerequisites. Pool fallback remains available from already-rated clean-session candidates.
+- [ ] **Step 6: Apply generalized admission after recorded comparisons**
 
-- [ ] **Step 6: Document initial-fill monitor behavior**
+When any imported or initial-fill generated candidate is first displayed,
+create its initial rating with retained provenance, `poolMember: false`, and
+`poolEligible: true`. After any selection, tie, or both-lose comparison outcome
+is durably recorded, pass both compared IDs through generalized
+`admitEligibleCandidates(state, candidateIds, poolMaximum)`. Preserve strict
+rank, bounded quota, and no displacement on equal ratings.
+
+- [ ] **Step 7: Gate refills from the locked import-supply snapshot**
+
+`RefillCapacityService.plan` must accept the exact `ImportSupplySnapshot`
+returned by dequeue or reconciliation. It returns no ordinary refill jobs while
+that snapshot reports annotating, failed, ready-unserved, pending initial-fill,
+or failed initial-fill supply. It must never reload the import repository.
+Initial-fill jobs are exempt because they are activation prerequisites. Pool
+fallback remains available from already-rated clean-session candidates.
+
+- [ ] **Step 8: Add activation failure-injection coverage**
+
+Inject a process failure after intent persistence, writing-phase persistence,
+each of the four aggregate repository writes, committed-phase persistence, each
+superseded-job archive, and cleaned-phase persistence. Restart reconciliation
+must roll back a no-write prepared intent or complete the full intended
+aggregate and remaining archives. At no injection point may a read return a
+new game with old challengers/bootstrap/import state, or archive old jobs before
+the committed marker is durable.
+
+- [ ] **Step 9: Document initial-fill monitor behavior**
 
 Update the runner skill and protocol with `initial-import-fill-batch`. Require
 one fresh native-image worker per entry, all three slots for a three-job batch,
 one standalone square PNG and proposal per job, independent completion or
 failure publication, no retained-winner mutation, and continued polling.
 
-- [ ] **Step 7: Run focused tests and type checking**
+- [ ] **Step 10: Run focused tests and type checking**
 
-Run: `npx vitest run src/server/import-activation-service.test.ts src/server/game-service.test.ts src/server/game-selection-service.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts && npm run typecheck`
+Run: `npx vitest run src/server/import-activation-service.test.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.test.ts src/server/import-session-repository.test.ts src/server/challenger-repository.test.ts src/server/repository.test.ts src/server/initial-bootstrap.test.ts src/server/game-service.test.ts src/server/game-comparison.test.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts && npm run typecheck`
 
 Expected: PASS, including retained-winner identity tests.
 
-- [ ] **Step 8: Commit Task 5**
+- [ ] **Step 11: Commit Task 5**
 
 ```bash
-git add src/domain/challenger-state.ts src/domain/challenger-state.test.ts src/server/import-activation-service.ts src/server/import-activation-service.test.ts src/server/import-session-service.ts src/server/import-session-service.test.ts src/server/agent-mailbox.ts src/server/mock-agent.ts src/server/game-service.ts src/server/game-service.test.ts src/server/game-selection-service.ts src/server/game-selection-service.test.ts src/server/refill-capacity-service.ts src/server/refill-capacity-service.test.ts .agents/skills/run-diptych-picker
+git add src/domain/challenger-state.ts src/domain/challenger-state.test.ts src/server/import-activation-service.ts src/server/import-activation-service.test.ts src/server/state-lock-coordinator.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.ts src/server/candidate-dequeue-service.test.ts src/server/import-session-service.ts src/server/import-session-service.test.ts src/server/import-session-repository.ts src/server/import-session-repository.test.ts src/server/agent-mailbox.ts src/server/agent-mailbox.test.ts src/server/mock-agent.ts src/server/challenger-repository.ts src/server/challenger-repository.test.ts src/server/repository.ts src/server/repository.test.ts src/server/initial-bootstrap.ts src/server/initial-bootstrap.test.ts src/server/game-service.ts src/server/game-service.test.ts src/server/game-comparison.ts src/server/game-comparison.test.ts src/server/game-selection-service.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.ts src/server/refill-capacity-service.test.ts src/server/runtime.ts .agents/skills/run-diptych-picker
 git commit -m "Feed imports through the challenger stream"
 ```
 
@@ -473,13 +651,18 @@ git commit -m "Feed imports through the challenger stream"
 
 **Interfaces:**
 
-- Consumes: active import session, imported queue, and import activation service.
+- Consumes: active import session, imported queue, activation intent, served receipts, supply snapshots, and source-aware dequeue service.
 - Produces: snapshot version support for active import state and runtime reconciliation on status reads.
 - Produces: display-safe import progress on `GameStartState` or the existing game status envelope.
 
 - [ ] **Step 1: Write failing snapshot and restart tests**
 
-Test export/restore of imported candidates and queue provenance, omission of old job IDs, fresh annotation/initial-fill ownership after restore, asset verification through `LocalAssetStore`, import reconciliation before refill planning, and an unchanged export when an unrelated staged import has not activated.
+Test export/restore of imported and initial-fill generated candidate provenance,
+import item IDs, served receipts, and queued supply; omission of old job IDs and
+activation intents; fresh annotation/initial-fill ownership after restore;
+asset verification through `LocalAssetStore`; activation-intent reconciliation
+before any game read; import reconciliation before refill planning; and an
+unchanged export when an unrelated staged import has not activated.
 
 ```ts
 const exported = await service.export();
@@ -499,11 +682,25 @@ Expected: FAIL because snapshots and reconciliation do not know imported state.
 
 - [ ] **Step 3: Extend snapshot schemas and restoration**
 
-Bump the snapshot schema with backward parsing for existing saves. Include an activated import session, imported queue, normalized asset metadata, resolved annotations, and pending statuses. Strip job IDs and session ownership from exported JSON. On restore, verify every imported asset, create fresh game/challenger/import session IDs, and publish unfinished work exactly once.
+Bump the snapshot schema with backward parsing for existing saves. Include an
+activated import session, imported queue, normalized asset metadata, resolved
+annotations, per-candidate `source`/`importItemId`, served status, and pending
+supply. Strip job IDs, activation intent, retry request IDs, and session
+ownership from exported JSON. On restore, verify every imported asset, create
+fresh game/challenger/import session IDs, derive fresh served receipts for
+already-displayed imported candidates, and publish unfinished work exactly
+once.
 
 - [ ] **Step 4: Reconcile import outcomes before serving game state**
 
-Runtime `getOrCreateGame`, selection completion, buffer health, and `/api/game` reads must reconcile annotation and initial-fill results, activate when eligible, append later ready imports once, and only then plan ordinary refill capacity.
+Runtime `getOrCreateGame`, selection completion, buffer health, and `/api/game`
+reads must first finish or roll back any activation intent, then reconcile
+annotation and initial-fill results, activate when eligible, append later ready
+imports once, and only then plan ordinary refill capacity. `game-reconciler.ts`
+must use `CandidateDequeueService` for restart completion and pass its locked
+`ImportSupplySnapshot` to refill planning; it may not call `popReady` or
+`drawFallback` directly. Crash/replay tests assert the recovered candidate,
+provenance, import item ID, and served receipt are stable.
 
 Expose counts only:
 
@@ -514,13 +711,17 @@ interface ImportProgress {
   ready: number;
   failed: number;
   unserved: number;
+  initialFillPending: number;
+  initialFillFailed: number;
+  initialFillAttemptId: string | null;
+  initialFillFailureMessage: string | null;
   activationTarget: 5;
 }
 ```
 
 - [ ] **Step 5: Run focused tests and full check**
 
-Run: `npx vitest run src/server/game-snapshot.test.ts src/server/game-reconciler.test.ts src/app/api/game/route.test.ts && npm run check`
+Run: `npx vitest run src/server/game-snapshot.test.ts src/server/game-reconciler.test.ts src/server/import-activation-service.test.ts src/app/api/game/route.test.ts && npm run check`
 
 Expected: PASS with old saves and games still valid.
 
@@ -553,7 +754,16 @@ Push Tasks 4-6, open PR 2, request review, resolve actionable findings, run requ
 
 - [ ] **Step 1: Write failing file and transform tests**
 
-Use byte fixtures for PNG, JPEG, WebP, APNG `acTL`, animated WebP `ANIM`, empty data, and unsupported data. Test crop and fit matrix calculations for landscape, portrait, small, large, rotated, zoomed, and panned inputs. Render deterministic pixel fixtures in Playwright-facing browser tests rather than relying on jsdom canvas.
+Use byte fixtures for still PNG/JPEG/WebP; valid APNG `acTL`; animated WebP
+`ANIM`/`ANMF`; JPEG APP2 MPF and a two-image MPO; empty and unsupported data;
+truncated PNG/WebP chunks and JPEG segments; overflowing or mispadded chunk
+lengths; a missing PNG `IEND`; WebP RIFF-size mismatch; multiple JPEG SOI/EOI
+pairs; and still pixel payloads containing decoy `acTL`, `ANIM`, or `MPF`
+strings. Test crop and fit matrix calculations for landscape, portrait, small,
+large, and rotated inputs. At 0, 90, and 37 degrees, render a source with a
+unique one-pixel border and assert every border color remains visible inside
+the output. Render deterministic pixel fixtures in Playwright-facing browser
+tests rather than relying on jsdom canvas.
 
 ```ts
 expect(await inspectImportFile(stillPng)).toMatchObject({
@@ -574,30 +784,63 @@ Expected: FAIL because inspection, transforms, and editor are missing.
 
 - [ ] **Step 3: Implement strict source inspection**
 
-Sniff signatures rather than trusting MIME or extension. Reject PNG files containing `acTL`, WebP RIFF payloads containing `ANIM` or `ANMF`, empty buffers, and unsupported signatures. Decode accepted sources with `createImageBitmap(file, { imageOrientation: "from-image" })` and report a per-file decode error.
+Sniff signatures rather than trusting MIME or extension; do not use raw
+substring detection. For PNG require one first `IHDR`, walk big-endian
+length/type/data/CRC extents and verify each CRC, reject `acTL`, require one terminal `IEND` and no
+trailing payload, and stop with a complexity error above 4096 chunks. For WebP
+require RIFF size to equal the file boundary, walk every padded chunk within
+that boundary, reject structurally parsed `ANIM`/`ANMF`, and cap the walk at
+4096 chunks. For JPEG walk marker segments and entropy scans, validate every
+declared segment boundary, parse APP2 `MPF\0` as a TIFF MP index, reject MPF/MPO,
+reject a second SOI or payload after the sole EOI except padding, and accept
+ordinary multi-scan progressive JPEG. Reject empty, malformed, truncated, and
+unsupported inputs before decode. Decode accepted sources with
+`createImageBitmap(file, { imageOrientation: "from-image" })` and report a
+per-file decode error.
 
 - [ ] **Step 4: Implement deterministic editor transforms and rendering**
 
-Keep transform math pure. Crop uses cover scale plus bounded pan, zoom, and rotation. Fit uses contain scale and fills the 1024-square output with the selected solid color before drawing the full image. Render to an `OffscreenCanvas` when available and an ordinary canvas otherwise, then encode `image/png`.
+Keep transform math pure. Crop uses cover scale plus bounded pan, zoom, and
+rotation. Fit computes the rotated bounds
+`(|w cos θ| + |h sin θ|, |w sin θ| + |h cos θ|)` and scales them into a
+1022-square safe area, leaving a one-pixel resampling inset. Fit always centers,
+locks zoom to `1`, sets pan to zero, and recomputes on rotation; it must be
+impossible for fit controls or stale crop state to clip a source boundary. Fill
+the 1024-square output with the selected solid color before drawing the full
+image. Render to an `OffscreenCanvas` when available and an ordinary canvas
+otherwise, then encode `image/png`.
 
 ```ts
 context.fillStyle = mode === "fit" ? background : "#000000";
 context.fillRect(0, 0, 1024, 1024);
-context.translate(512 + panX, 512 + panY);
+context.translate(
+  512 + (mode === "crop" ? panX : 0),
+  512 + (mode === "crop" ? panY : 0),
+);
 context.rotate((rotation * Math.PI) / 180);
-context.scale(scale * zoom, scale * zoom);
+context.scale(
+  scale * (mode === "crop" ? zoom : 1),
+  scale * (mode === "crop" ? zoom : 1),
+);
 context.drawImage(bitmap, -width / 2, -height / 2);
 ```
 
 - [ ] **Step 5: Implement the accessible single-image editor**
 
-Provide crop/fit mode controls, pan/zoom/rotation inputs, background color in fit mode, Previous, Next, Remove, and Approve. Disable navigation only during the current approval upload. Expose a square preview and descriptive labels. Do not render any button or shortcut that approves multiple inputs.
+Provide crop/fit mode controls, rotation, background color in fit mode,
+Previous, Next, Remove, and Approve. Pan and zoom are enabled only for crop;
+fit disables them, resets them for rendering, and explains that the full
+rotated source is visible. Disable navigation only during the current approval
+upload. Expose a square preview and descriptive labels. Do not render any
+button or shortcut that approves multiple inputs.
 
 - [ ] **Step 6: Run focused tests and type checking**
 
 Run: `npx vitest run src/components/import-image-file.test.ts src/components/import-image-transform.test.ts src/components/import-image-editor.test.tsx && npm run typecheck`
 
-Expected: PASS with no network request containing the original `File`.
+Expected: PASS with no network request containing the original `File`, no raw
+marker-substring false positives, and all 0/90/37-degree fit border assertions
+inside the output.
 
 - [ ] **Step 7: Commit Task 7**
 
@@ -629,7 +872,16 @@ git commit -m "Build the human image normalization editor"
 
 - [ ] **Step 1: Write failing hook and modal tests**
 
-Test multiple file selection, per-file validation errors, explicit approval, immediate multipart upload of only the normalized blob, duplicate conflict display, queue navigation, seal after the last approval/removal, progress waiting for five, pause/resume, abandon confirmation, and activation preload before committing the clean game.
+Test multiple file selection, per-file validation errors, explicit approval,
+immediate multipart upload of only the normalized blob, duplicate conflict
+display, queue navigation, seal after the last approval/removal, progress
+waiting for five, sealed pause/resume, abandon confirmation, and activation
+preload before committing the clean game. While any browser input is unresolved,
+assert the modal has no Close or Pause action, Escape and backdrop requests are
+ignored, `beforeunload` warns, and confirmed Abandon is the only exit. After
+sealing, assert Close/Pause works. Render a display-safe failed initial-fill
+state and test session-level Retry, exact duplicate response handling, and 409
+stale-attempt refresh.
 
 ```ts
 expect(screen.queryByRole("button", { name: /accept all/i })).toBeNull();
@@ -648,13 +900,32 @@ Expected: FAIL because the workflow does not exist.
 
 - [ ] **Step 3: Implement the queue controller**
 
-Keep browser `File` and decoded bitmap state client-only. Poll display-safe session status while annotations or initial-fill jobs remain. After every approval or removal, advance to the next unresolved local input. Seal once none remain. If the server reports a ready game, preload changed assets and call `commitStartState` once.
+Keep browser `File` and decoded bitmap state client-only. Poll display-safe
+session status while annotations or initial-fill jobs remain. After every
+approval or removal, advance to the next unresolved local input. While any
+local input is unresolved, register the unsaved-input `beforeunload` guard and
+reject modal close, Escape, backdrop, and Pause callbacks. Seal once none
+remain, remove the guard, and only then enable Close/Pause. If the server
+reports a ready game, preload changed assets and call `commitStartState` once.
 
 - [ ] **Step 4: Implement modal states and annotation resolution**
 
-Render the editor plus a sidebar with Editing, Annotating, Ready, Failed, and Removed counts. Failed server items render Retry, Annotate manually, and Remove. The manual form requires concept, description, and comma-separated style tags and sends the validated discriminated PATCH action.
+Render the editor plus a sidebar with Editing, Annotating, Ready, Failed, and
+Removed counts. Failed server items render Retry, Annotate manually, and
+Remove. The manual form requires concept, description, and comma-separated
+style tags and sends the validated discriminated PATCH action.
 
-Closing before activation pauses the modal and keeps the server session. Abandon requires confirmation and calls `DELETE /api/game/import`. When local unapproved inputs were lost on refresh, explain that they must be selected again.
+If initial fill fails, show only the server's display-safe session message and
+one **Retry initial fill** button. Send `PATCH /api/game/import` with
+`action: "retry-initial-fill"`, the current session/attempt IDs, and a stable
+client request ID reused until the response succeeds. An exact duplicate
+response is success; on 409 refresh status and do not silently retry a newer
+attempt.
+
+Before sealing, omit Close and Pause; confirmed Abandon is the only exit and
+calls `DELETE /api/game/import`. After sealing, Close or Pause keeps the
+server-owned session running. When local unapproved inputs were lost on refresh,
+explain that they must be selected again.
 
 - [ ] **Step 5: Add the New Game entry point**
 
@@ -664,7 +935,8 @@ Add an Import images option beside export/load/start-fresh. Disable it during se
 
 Run: `npx vitest run src/components/use-image-import.test.tsx src/components/image-import-modal.test.tsx src/components/game-transfer-modal.test.tsx src/components/game-screen.test.tsx && npm run typecheck`
 
-Expected: PASS with current load/export/new-game behavior unchanged.
+Expected: PASS with current load/export/new-game behavior unchanged, no way to
+pause or close unresolved browser inputs, and idempotent initial-fill Retry UI.
 
 - [ ] **Step 7: Commit Task 8**
 
@@ -745,6 +1017,11 @@ Push Tasks 7-9, open PR 3, request review, resolve actionable findings, verify r
 - Create: `tests/fixtures/import-square.webp`
 - Create: `tests/fixtures/import-duplicate.png`
 - Create: `tests/fixtures/import-animated.webp`
+- Create: `tests/fixtures/import-animated.png`
+- Create: `tests/fixtures/import-multipicture.mpo`
+- Create: `tests/fixtures/import-truncated.png`
+- Create: `tests/fixtures/import-truncated.webp`
+- Create: `tests/fixtures/import-truncated.jpg`
 
 **Interfaces:**
 
@@ -753,7 +1030,16 @@ Push Tasks 7-9, open PR 3, request review, resolve actionable findings, verify r
 
 - [ ] **Step 1: Add failing Playwright scenarios**
 
-Cover crop and fit approval, no bulk approval, mixed aspect ratios and sizes, animation rejection, hash duplicate resolution, automated annotation progress, manual fallback, clean activation at five, exact shortfall generation, imports larger than pool maximum, generated-refill suppression until the imported stream is served, refresh recovery, snapshot restore, and retained winner DOM identity.
+Cover crop and fit approval; 0, 90, and 37-degree full-border visibility in fit
+mode; disabled fit pan/zoom; no bulk approval; mixed aspect ratios and sizes;
+structural APNG/animated WebP/MPO/truncated-container rejection; hash duplicate
+resolution; automated annotation progress; manual fallback; clean activation
+at five; exact shortfall generation; display-safe initial-fill failure and
+session Retry; imports larger than pool maximum; generated-refill suppression
+until the imported stream is served; refresh recovery; snapshot restore; and
+retained winner DOM identity. Verify Close, Escape, backdrop, and Pause cannot
+leave unresolved browser inputs, while confirmed Abandon can and sealed Close
+can.
 
 ```ts
 await page.getByRole("button", { name: "Import images" }).click();
@@ -779,7 +1065,14 @@ drift in the same commit.
 
 - [ ] **Step 4: Update public docs and examples**
 
-Document supported still types, human normalization, crop/fit controls, canonical 1024 PNGs, local-only originals, hash deduplication, annotation/manual resolution, five-ready activation, clean-session behavior, imported-first scheduling, snapshot recovery, API methods, and the absence of cloud upload or external image APIs.
+Document supported still types and structural multipicture rejection, human
+normalization, crop/fit controls and fit's no-clipping guarantee, canonical
+1024 PNGs, local-only originals, hash deduplication, annotation/manual
+resolution, session-level initial-fill Retry, five-ready activation,
+recoverable activation transactions, clean-session behavior, per-candidate
+provenance, receipt-backed imported-first scheduling, snapshot recovery, API
+methods, unresolved-input close restrictions, and the absence of cloud upload
+or external image APIs.
 
 - [ ] **Step 5: Run targeted browser tests and inspect both viewports**
 

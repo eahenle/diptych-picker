@@ -28,10 +28,14 @@ re-encoded, regenerated, or replaced.
   the active import.
 - Automated annotation begins as soon as an image is approved.
 - An annotation failure offers Retry, Manual annotation, and Remove actions.
-- The editor stays open until every browser input is approved or removed.
+- While any browser input remains unresolved, the editor cannot be closed or
+  paused. The only exit is confirmed **Abandon import**. Close and Pause become
+  available after sealing, when every browser input is approved or removed.
 - The game activates after editing is complete and five candidates are ready.
 - If fewer than five valid imports remain, generation supplies exactly the
   missing count after editing and annotation work is resolved.
+- A failed initial fill remains staged and offers one session-level Retry that
+  republishes only the still-missing supply.
 - Generated refills remain suppressed until every imported candidate has been
   served once and no import annotation remains unresolved.
 
@@ -84,6 +88,9 @@ interface ImportSession {
   activatedAt: string | null;
   items: ImportItem[];
   initialFillJobs: InitialFillJobRecord[];
+  initialFillRetry: InitialFillRetryReceipt | null;
+  servedReceipts: ServedImportReceipt[];
+  activation: ImportActivationIntent | null;
 }
 
 interface ImportItem {
@@ -98,6 +105,55 @@ interface ImportItem {
   approvedAt: string;
   servedAt: string | null;
 }
+
+interface InitialFillJobRecord {
+  id: string;
+  attemptId: string;
+  status: "pending" | "ready" | "failed" | "superseded";
+  candidate: Candidate | null;
+  source: "generated";
+  importItemId: null;
+  failureMessage: string | null;
+  completedAt: string | null;
+}
+
+interface InitialFillRetryReceipt {
+  requestId: string;
+  failedAttemptId: string;
+  replacementAttemptId: string;
+  replacementJobIds: string[];
+  createdAt: string;
+}
+
+interface ImportActivationIntent {
+  id: string;
+  phase: "prepared" | "writing" | "committed" | "cleaned";
+  expectedOld: {
+    importSessionId: string;
+    gameRevisionId: string | null;
+    challengerSessionId: string | null;
+    bootstrapBatchId: string | null;
+  };
+  next: {
+    game: GameState;
+    challengers: ChallengerState;
+    bootstrap: InitialBootstrap;
+    importSession: Omit<ImportSession, "activation">;
+  };
+  supersededJobIds: string[];
+  preparedAt: string;
+  committedAt: string | null;
+}
+
+interface ServedImportReceipt {
+  importSessionId: string;
+  importItemId: string;
+  candidateId: string;
+  candidate: Candidate;
+  provenance: "imported";
+  roundNumber: number;
+  servedAt: string;
+}
 ```
 
 Browser-only files that have not been approved do not enter this repository.
@@ -105,27 +161,90 @@ After a refresh, server-owned approved items and their progress resume, while
 unapproved inputs must be selected again. The modal explains this boundary
 before the player leaves an unfinished editor.
 
-The current game and challenger repositories are replaced atomically at
-activation under their existing locks. Activation archives superseded initial
-and refill jobs, creates a new session ID, and starts with default preferences,
-an empty history, and no prior rating catalog. Two ready candidates form round
-one; three form the initial ready buffer.
+Separate JSON repositories cannot be replaced atomically by locks alone.
+Activation therefore uses the durable `ImportActivationIntent` as a
+write-ahead transaction. It records the expected old repository session IDs,
+the complete new game/challenger/bootstrap/import aggregate, and the exact
+superseded job IDs before any active repository is changed. One shared
+state-lock coordinator makes nested lock acquisition impossible. Every
+activation and selection path asks it for the needed subset of locks in this
+canonical order:
+
+1. import session;
+2. game;
+3. challenger;
+4. initial bootstrap; and
+5. mailbox publication or archival, which occurs only after repository locks
+   are released.
+
+Preparation validates all assets and persists `phase: "prepared"`. The writer
+then changes the phase to `"writing"` and installs each new repository value in
+canonical order. Each install is compare-and-set idempotent: the repository
+must match either its expected old session ID or the exact intended new value;
+any third state is a conflict. If preparation fails before the first aggregate
+write, reconciliation clears the intent and leaves the staged import retryable.
+Once `"writing"` begins, startup reconciliation completes forward from the
+intent rather than exposing a mixed aggregate. After every repository matches,
+it persists the import session with `phase: "committed"`; this is the commit
+point. Only then may it archive superseded initial and refill jobs. Archival is
+idempotent, and `phase: "cleaned"` records its completion, so a restart can
+repeat any unfinished write or cleanup side effect safely.
+
+The committed aggregate creates a new session ID and starts with default
+preferences, an empty history, and no prior rating catalog. Two ready
+candidates form round one; three form the initial ready buffer.
 
 The active challenger state references the import session and maintains a
-prioritized imported queue. Imported items not yet displayed are not reusable
-pool members and do not consume pool capacity.
+prioritized queue whose entries preserve per-candidate provenance. Imported
+entries carry their import item ID; initial-fill entries retain
+`source: "generated"` and no import item ID. Neither kind becomes a reusable
+pool member merely because it is queued or displayed.
 
 ## Input Validation and Normalization
 
 The browser accepts still PNG, JPEG, and WebP inputs. It rejects animated,
-multipage, unsupported, empty, or undecodable files before editing. Source
-aspect ratio and pixel dimensions have no product-level restriction; a browser
-decode or canvas resource failure is reported against that file without
-affecting the other inputs.
+multipage, unsupported, empty, malformed, truncated, or undecodable files
+before editing. Source aspect ratio and pixel dimensions have no product-level
+restriction; a browser decode or canvas resource failure is reported against
+that file without affecting the other inputs.
+
+Inspection structurally parses containers instead of searching arbitrary byte
+substrings. The PNG parser requires a single first `IHDR`, validates every
+big-endian chunk length, extent, and CRC, rejects `acTL`, requires one
+terminal `IEND` with no trailing payload, and caps the walk at 4096 chunks. The
+WebP parser verifies the RIFF size against the file, walks each padded chunk
+within that declared boundary, rejects `ANIM` or `ANMF`, and caps the walk at
+4096 chunks. The JPEG parser walks marker segments and entropy-coded scans,
+rejects truncated lengths, structurally recognizes an APP2 MPF TIFF index,
+rejects MPF/MPO and more than one image, and permits only padding after the
+single EOI marker. These bounds prevent oversized lengths, malformed padding,
+or decoy marker text inside pixel data from bypassing or confusing still-image
+validation.
 
 Source bytes remain in browser memory. Approval applies EXIF orientation and
 the player's crop or fit transform, renders a 1024 by 1024 sRGB image, and
 encodes it as PNG. The original file and its metadata are never uploaded.
+
+Crop and fit expose different controls. Crop permits bounded pan and zoom
+because clipping is intentional. Fit guarantees that every source pixel,
+including its filtered boundary, remains visible. For source dimensions
+`width` and `height` after orientation and rotation angle `theta` in radians,
+fit computes the rotated axis-aligned bounds:
+
+```ts
+const rotatedWidth =
+  Math.abs(width * Math.cos(theta)) + Math.abs(height * Math.sin(theta));
+const rotatedHeight =
+  Math.abs(width * Math.sin(theta)) + Math.abs(height * Math.cos(theta));
+const scale = Math.min(1022 / rotatedWidth, 1022 / rotatedHeight);
+```
+
+The two-pixel reduction provides a one-pixel output inset on all sides for the
+resampling footprint. Fit locks zoom to `1`, pan to `{ x: 0, y: 0 }`, disables
+those controls, and recenters after every rotation. Switching back to crop
+restores independent crop controls. Rotation remains available in fit mode,
+but no fit-mode transform may move a rotated source boundary outside the
+1024-square output.
 
 The server treats the client render as untrusted. It enforces a bounded request
 size for a 1024-square PNG, fully decodes the pixels, rejects animation or extra
@@ -198,35 +317,84 @@ can still add another candidate, the server publishes `initial-import-fill`
 generation jobs for exactly `5 - readyCount` images. These jobs use the clean
 session's default preference seed, generate one standalone square candidate
 each, and may be delegated concurrently up to `workerLimit`. They are separate
-from winner-pinned refill jobs because no comparison exists yet.
+from winner-pinned refill jobs because no comparison exists yet. Every result
+retains `source: "generated"`; it is not relabeled as imported merely because
+it satisfies an import session's initial shortfall.
+
+An initial-fill attempt has a durable attempt ID and per-job pending, ready, or
+failed state. Any failure yields one display-safe session failure containing no
+mailbox path or worker payload. Session-level **Retry initial fill** requires
+the expected failed attempt ID plus a client request ID. Its receipt is
+persisted before publication, so repeating the same request ID returns the same
+replacement job set, while a different request against an old attempt returns 409. Retry archives the failed attempt after recording the receipt and
+publishes exactly `5 - readyCount` replacement jobs; successful candidates from
+the prior attempt remain ready and are never regenerated.
 
 Activation requires both a sealed editor and five ready candidates. The first
 five are ordered by annotation or initial-fill completion time with the durable
-item ID as a tie-breaker. Two form the first comparison and three enter the
-ready queue. Further completed import annotations append to the prioritized
-imported queue.
+import item ID or initial-fill job ID as a tie-breaker. Two form the first
+comparison and three enter the ready queue. Further completed import
+annotations append to the prioritized imported queue.
 
-Activation is atomic. A failure while validating assets or constructing either
-repository leaves the previous game and the staged import unchanged and
-retryable.
+Activation is recoverably transactional. A failure before aggregate writes
+rolls the prepared intent back to the unchanged staged import. A failure after
+the writing phase begins is completed forward from the durable full aggregate
+before any game read, selection, restart reconciliation, or refill planning is
+allowed. Superseded jobs remain live until the committed phase is durable.
 
 ## Challenger and Pool Behavior
 
 Domain provenance expands to include `source: "imported"` for candidate ratings
-and buffered candidates. API and snapshot schemas preserve this source without
-exposing mailbox paths.
+and buffered candidates. Every buffered entry and initial rating also carries
+`importItemId: string | null`: a real item ID for imported candidates and null
+for initial-fill generated candidates. API and snapshot schemas preserve this
+provenance without exposing mailbox paths.
 
-Only the two initially displayed imports receive initial rating records at
-activation. An imported ready candidate receives an initial rating when it is
-first drawn into a comparison. After that comparison, the existing Elo update
-and pool-admission path evaluates it exactly like an eligible generated
-candidate.
+Only the two initially displayed candidates receive initial rating records at
+activation. Whether imported or initial-fill generated, each starts with
+`poolMember: false` and `poolEligible: true`. A queued candidate receives the
+same initial rating only when it is first drawn into a comparison. Display
+never grants membership. After any ordinary recorded comparison outcome, both
+compared candidate IDs pass through one generalized strict-rank admission
+function that evaluates imported and generated candidates identically. Equal
+ratings never displace an existing member.
 
 Pool resize remains rank-based and bounded by the configured `poolMaximum`.
 An imported candidate never displaces a strictly stronger member, ties do not
 displace an existing member, and an imported loser can fail to enter a full
 pool. This makes an oversized import self-pruning through ordinary comparisons
 instead of arbitrary import-order truncation.
+
+All ways of obtaining the next challenger call one source-aware dequeue
+primitive. This includes normal winner selection, champion retirement, tie,
+both-lose, prepared-selection recovery, and game-restart reconciliation. The
+primitive returns `{ candidate, provenance, importItemId }`, where provenance
+distinguishes imported queue, ordinary ready queue, and eligible pool fallback.
+For an imported draw it persists a `ServedImportReceipt` before changing the
+item to served under the canonical import -> game -> challenger lock order. The
+receipt key is `(importSessionId, importItemId, roundNumber)`, so replay returns
+the same draw without consuming another item or marking it served twice.
+
+Each dequeue result also produces an immutable `ImportSupplySnapshot` from the
+same locked state:
+
+```ts
+interface ImportSupplySnapshot {
+  importSessionId: string | null;
+  annotating: number;
+  failed: number;
+  readyUnserved: number;
+  servedReceiptCount: number;
+  initialFillPending: number;
+  initialFillFailed: number;
+  terminal: boolean;
+}
+```
+
+This exact snapshot, rather than a later unlocked repository read, is passed
+to refill planning and persisted with any prepared selection. Recovery reuses
+the receipt and snapshot, making dequeue, served state, and generation gating
+one replayable decision.
 
 Refill planning accounts for three sources of pending supply:
 
@@ -235,10 +403,11 @@ Refill planning accounts for three sources of pending supply:
 - ordinary ready or generated work.
 
 No ordinary generated refill is published while either of the first two import
-sources remains. Existing eligible pool fallback may continue at its normal
-cadence if the imported ready queue temporarily runs dry. Once every retained
-imported candidate has been displayed at least once and every import annotation
-is terminal, the import session becomes completed and ordinary refill planning
+sources remains or initial-fill recovery is pending. Existing eligible pool
+fallback may continue at its normal cadence if the imported ready queue
+temporarily runs dry. Once every retained imported candidate has a durable
+served receipt and every import annotation and initial-fill attempt is
+terminal, the import session becomes completed and ordinary refill planning
 resumes.
 
 ## UI Status and Recovery
@@ -247,11 +416,15 @@ The editing modal shows separate counts for inputs awaiting approval,
 annotations in progress, candidates ready, failures requiring action, and the
 five-candidate activation threshold.
 
-Before activation, closing the modal pauses the workflow. Reopening Import
-Images resumes the server-owned session and allows the user to add or reselect
-browser inputs. An explicit **Abandon import** action removes the staging record
-after confirmation but does not delete immutable assets or disturb the current
-game.
+While browser inputs remain unresolved, modal close, Escape, backdrop click,
+and Pause are disabled; a browser navigation attempt raises the unsaved-input
+warning. The only exit is **Abandon import**, which requires confirmation,
+removes the staging record, and does not delete immutable assets or disturb the
+current game. Once every browser input is approved or removed, the editor seals
+and Pause/close becomes available while server-owned annotation or initial-fill
+work continues. Reopening Import Images resumes that sealed session. After a
+refresh, any browser-only inputs lost despite the warning must be selected
+again.
 
 After activation, background import progress moves to Queue details. A failed
 late annotation raises a persistent, nonblocking notice that opens the same
@@ -271,8 +444,9 @@ The client uses narrow routes for:
 
 - creating or reading the one active import session;
 - approving one normalized PNG;
-- sealing, pausing, or abandoning the session;
+- sealing, pausing after seal, or abandoning the session;
 - retrying, manually annotating, or removing one item; and
+- retrying a failed initial-fill attempt at session level; and
 - polling import progress as display-safe status.
 
 Mutation routes require the expected session and item identifiers and reject
@@ -281,6 +455,13 @@ metadata and progress only; filesystem paths, original filenames, raw mailbox
 records, and worker reasoning beyond the validated annotation summary remain
 private.
 
+`PATCH /api/game/import` with action `retry-initial-fill` carries the expected
+session ID, failed attempt ID, and client request ID. It returns the same
+display-safe status for an exact duplicate request and 409 for stale session or
+attempt IDs. Pause on this route is valid only for a sealed session; an editing
+session with unresolved browser inputs returns 409 even if a stale client tries
+to pause it.
+
 ## Failure Handling
 
 - One invalid source does not discard the rest of the browser queue.
@@ -288,10 +469,13 @@ private.
 - Duplicate normalized images never create duplicate annotation work or
   challenger candidates.
 - Initial-fill failure leaves the import staged with Retry and Abandon options.
+- A duplicate initial-fill Retry is idempotent; a stale Retry cannot publish
+  replacement work.
 - Refresh or process restart reconciles completed mailbox results before
   publishing replacement work.
-- Selection and import activation share the existing idle-state lock, so a
-  game cannot activate across a concurrent comparison.
+- Activation and every dequeue/recovery path use the canonical import, game,
+  challenger, bootstrap lock order, so activation cannot cross a comparison or
+  deadlock restart reconciliation.
 - Late or duplicate terminal publications are idempotent and cannot append a
   candidate twice.
 - Abandoning an import archives pending jobs and ignores late results. Active
@@ -305,10 +489,15 @@ Unit, route, protocol, and browser tests use deterministic local fixtures and
 the mock provider unless a mailbox script itself is under test. They prove:
 
 1. Still PNG, JPEG, and WebP files with landscape, portrait, square, very small,
-   and large dimensions enter the editor; animation and unsupported bytes do
-   not.
+   and large dimensions enter the editor; structurally valid APNG, animated
+   WebP, MPF/MPO JPEG, truncated chunks/segments, malformed chunk lengths,
+   multiple JPEG images, and unsupported bytes do not. Decoy marker substrings
+   inside still-image pixel data do not cause false rejection.
 2. Crop transforms and fit/background transforms render the expected canonical
-   1024-square pixels with orientation applied and metadata removed.
+   1024-square pixels with orientation applied and metadata removed. At 0, 90,
+   and an arbitrary non-right-angle rotation, pixel-boundary fixtures prove
+   every source edge pixel remains visible in fit mode and pan/zoom cannot clip
+   it.
 3. Every input requires its own approval and no bulk-approval control exists.
 4. Canonical server re-encoding is deterministic and digest deduplication blocks
    identical normalized images within an import.
@@ -323,15 +512,19 @@ the mock provider unless a mailbox script itself is under test. They prove:
 9. The current game remains byte-for-byte unchanged before activation.
 10. A sealed import with five ready candidates creates a clean game with two
     displayed candidates, three buffered candidates, empty history, default
-    preferences, and no prior ratings or pool members.
+    preferences, and no pool members. Displayed imported and initial-fill
+    generated candidates retain distinct provenance and begin
+    `poolMember: false`, `poolEligible: true`.
 11. Imports with zero through four retained images publish exactly the missing
     number of initial-fill generation jobs after annotation resolution.
 12. Later annotation results append once and in deterministic completion order.
 13. No ordinary generated refill is published while an annotation can still
     produce a candidate or an imported candidate remains unserved.
 14. Generation resumes after the import stream is exhausted.
-15. Imported candidates receive initial Elo only when first displayed, then use
-    the ordinary comparison, admission, tie, both-lose, and pool-resize paths.
+15. Imported and initial-fill generated candidates receive initial Elo only
+    when first displayed. Display alone does not grant membership; every
+    recorded selection, tie, or both-lose comparison then invokes the same
+    generalized strict-rank admission path for the compared candidates.
 16. An import larger than `poolMaximum` is not truncated on upload; ordinary
     rating and pool rules keep membership within quota as candidates play.
 17. Refresh resumes approved items and reports that unapproved browser inputs
@@ -343,6 +536,20 @@ the mock provider unless a mailbox script itself is under test. They prove:
 20. Desktop and narrow browser tests preserve exactly two independent candidate
     images and the retained winner's exact ID, URL, bytes, metadata, side, and
     DOM node across imported-stream comparisons.
+21. Failure injection after intent persistence, every aggregate repository
+    write, commit marking, and every job archive proves restart either rolls
+    back a prepared intent with no writes or completes the intended aggregate
+    and cleanup without exposing mixed state.
+22. Normal, retirement, tie, both-lose, prepared-selection, and restart paths
+    all use the same source-aware dequeue; crash/replay preserves candidate,
+    provenance, import item ID, served receipt, and refill supply snapshot
+    without double consumption.
+23. Initial-fill failure status is display-safe. Session-level Retry publishes
+    only the remaining deficit, exact duplicate requests return the original
+    result, and stale requests return 409 without a side effect.
+24. Close, Escape, backdrop, and Pause cannot leave an editor with unresolved
+    browser inputs; confirmed Abandon is the only exit until all are approved
+    or removed and the session seals.
 
 Formatting, documentation checks, linting, type checking, unit and protocol
 tests, a production build, Playwright coverage, and manual desktop and narrow
