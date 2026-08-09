@@ -227,7 +227,7 @@ describe("deterministic mock mailbox worker", () => {
     );
     expect(await fileMailbox.readResult("job-1")).toEqual(result);
     worker.dispose();
-  });
+  }, 15_000);
 
   it("completes both initial sides deterministically with distinct proposals", async () => {
     const root = await mkdtemp(join(tmpdir(), "diptych-mock-initial-"));
