@@ -4,7 +4,7 @@
 
 **Goal:** Let a player explicitly edit any number of still images into normalized square candidates, annotate them automatically or manually, and start a clean game whose imported challenger stream precedes generated refills.
 
-**Architecture:** A durable import-session repository stages canonical content-addressed assets and annotation state separately from the current game. New mailbox job kinds annotate imported images and generate an exact initial shortfall, while the challenger repository gains a prioritized imported queue that uses the existing comparison, Elo, and pool-admission paths. A browser editor performs one human-approved crop or fit per input and activates the staged game only after editing is sealed and five candidates are ready.
+**Architecture:** A durable import-session repository stages canonical content-addressed assets and annotation state separately from the current game, while an independent activation-intent repository journals replacement of the game, challenger, bootstrap, and import targets. New mailbox job kinds annotate imported images and generate an exact initial shortfall, while the challenger repository gains a prioritized imported queue whose deterministic operation receipts feed the existing comparison, Elo, and pool-admission paths. A browser editor performs one human-approved crop or fit per input and activates the staged game only after editing is sealed and five candidates are ready.
 
 **Tech Stack:** Next.js 16 App Router, React 19, TypeScript 6, Zod 4, Sharp 0.35, Vitest 4, Testing Library, Node test runner, Playwright 1.61, file-backed JSON repositories and mailbox helpers.
 
@@ -22,7 +22,8 @@
 - Imported candidates must be served before ordinary generated refills and must enter Elo and pool membership only through ordinary comparison behavior.
 - Preserve imported versus initial-fill generated provenance per candidate; display starts both at `poolMember: false`, `poolEligible: true`.
 - Use one source-aware, receipt-backed dequeue for normal selection, retirement, tie, both-lose, prepared recovery, and restart recovery.
-- Acquire state locks only in import session -> game -> challenger -> initial bootstrap order; publish or archive mailbox work only after releasing repository locks.
+- Keep the activation journal in a separate repository outside every aggregate target; retain it through cleaned verification and clear it only afterward.
+- Acquire state locks only in activation journal -> import session -> game -> challenger -> initial bootstrap order; publish or archive mailbox work only after releasing repository locks.
 - While browser inputs remain unresolved, disable Close and Pause; confirmed Abandon is the only exit until the session seals.
 - Fit mode must keep every rotated source pixel visible and must not expose pan or zoom controls that can clip it.
 - Structurally parse bounded PNG, WebP, and JPEG containers; reject malformed, truncated, animated, MPF/MPO, and multiple-image sources.
@@ -46,6 +47,8 @@
 - Create: `src/domain/import-session.ts`
 - Create: `src/server/import-session-repository.ts`
 - Create: `src/server/import-session-repository.test.ts`
+- Create: `src/server/import-activation-intent-repository.ts`
+- Create: `src/server/import-activation-intent-repository.test.ts`
 - Modify: `src/domain/challenger-state.ts`
 - Modify: `src/server/challenger-repository.ts`
 - Modify: `src/server/challenger-repository.test.ts`
@@ -53,18 +56,24 @@
 **Interfaces:**
 
 - Produces: `ImportSession`, `ImportItem`, `ImportedAssetMetadata`, `ImportedCandidateAnnotation`, `ImportSessionRepository`, `JsonImportSessionRepository`, and `parseImportSession(value: unknown): ImportSession`.
-- Produces: `ImportActivationIntent`, `InitialFillRetryReceipt`, `ServedImportReceipt`, `ImportSupplySnapshot`, and durable activation/dequeue receipt collections.
+- Produces: `ImportActivationIntent`, `ImportActivationIntentRepository`, `JsonImportActivationIntentRepository`, `InitialFillRetryReceipt`, `ServedImportReceipt`, `ImportSupplySnapshot`, and durable dequeue receipt collections.
+- Produces: a separately persisted activation journal that is never nested in `ImportSession` or any target aggregate.
 - Produces: `ChallengerState.importQueue: BufferedCandidate[]`, provenance unions containing `"imported"`, and `importItemId: string | null` on buffered candidates and ratings.
 - Consumes: existing atomic JSON, lock, and Zod patterns from `src/server/repository.ts` and `src/server/challenger-repository.ts`.
 
 - [ ] **Step 1: Write failing repository and schema tests**
 
-Add tests that parse and round-trip a session with one annotating item, one ready
-item, an initial-fill retry receipt, a served receipt, and a prepared activation
-intent containing the full new aggregate. Reject duplicate item IDs, digests,
-served receipt keys, activation IDs, and retry request IDs; reject an annotation
-without style tags; and prove atomic `load`, `save`, `clear`, and `withLock`
-behavior.
+Add import-session tests that parse and round-trip a session with one annotating
+item, one ready item, an initial-fill retry receipt, and a served receipt, and
+prove the schema has no embedded activation journal. In the separate
+activation-intent repository tests, round-trip a prepared intent containing the
+full new aggregate, `bootstrap: null`, and `outcome: "undecided"`; reject
+duplicate archived job IDs, archived IDs outside `supersededJobIds`, cleaned
+commit intents whose archived set is incomplete, and rollback intents with a
+commit timestamp or archived superseded jobs. Prove independent atomic `load`,
+`save`, expected-ID `clear`, and `withLock` behavior. Reject duplicate item IDs,
+digests, dequeue operation IDs, and retry request IDs, and reject an annotation
+without style tags.
 
 ```ts
 const session: ImportSession = {
@@ -78,7 +87,6 @@ const session: ImportSession = {
   initialFillJobs: [],
   initialFillRetry: null,
   servedReceipts: [],
-  activation: null,
 };
 
 await repository.save(session);
@@ -93,9 +101,11 @@ expect(() =>
 
 - [ ] **Step 2: Run the focused tests and verify the missing-module failure**
 
-Run: `npx vitest run src/server/import-session-repository.test.ts src/server/challenger-repository.test.ts`
+Run: `npx vitest run src/server/import-session-repository.test.ts src/server/import-activation-intent-repository.test.ts src/server/challenger-repository.test.ts`
 
-Expected: FAIL because `@/domain/import-session` and `JsonImportSessionRepository` do not exist and challenger schemas reject imported state.
+Expected: FAIL because `@/domain/import-session`,
+`JsonImportSessionRepository`, and `JsonImportActivationIntentRepository` do
+not exist and challenger schemas reject imported state.
 
 - [ ] **Step 3: Implement strict import types and persistence**
 
@@ -119,16 +129,30 @@ export interface ImportSessionRepository {
   clear(): Promise<void>;
   withLock<T>(operation: () => Promise<T>): Promise<T>;
 }
+
+export interface ImportActivationIntentRepository {
+  load(): Promise<ImportActivationIntent | null>;
+  save(intent: ImportActivationIntent): Promise<void>;
+  clear(expectedIntentId: string): Promise<void>;
+  withLock<T>(operation: () => Promise<T>): Promise<T>;
+}
 ```
 
 Use `.strict()` Zod objects, the existing candidate constraints, unique item
 IDs, unique nonremoved digests, unique
-`(importSessionId, importItemId, roundNumber)` served receipts, normalized
+`dequeueOperationId` served receipts whose stored import session, original
+comparison receipt, and replacement slot reproduce that ID; normalized
 filenames matching `/^[a-f0-9]{64}\.png$/`, and atomic temp-file rename. The
-activation schema must require the expected old import session ID, game
-revision ID, challenger session ID, and bootstrap batch ID; exact full new
-game/challenger/bootstrap/import values; superseded job IDs; and phase
-`prepared | writing | committed | cleaned`. Add `importQueue`
+separate activation schema must require the expected old import session ID,
+game revision ID, challenger session ID, and bootstrap batch ID; exact full new
+game/challenger/bootstrap/import values with bootstrap typed
+`InitialBootstrap | null`; superseded and archived-superseded job IDs; phase
+`prepared | writing | committed | cleaned`; and outcome
+`undecided | commit | rollback`. A cleaned commit intent requires every
+superseded ID to be archived. The activation service may persist a cleaned
+rollback only after verifying expected-old targets. Both terminal outcomes
+remain loadable until expected-ID clear. The
+import-session schema must reject an `activation` property. Add `importQueue`
 with a default of `[]` when older challenger state is parsed. Expand
 `CandidateRating.source` and `BufferedCandidate.source` to include
 `"imported"`; add required `importItemId: string | null` with legacy generated
@@ -136,14 +160,14 @@ and seed entries parsed as null.
 
 - [ ] **Step 4: Run the focused tests and type checker**
 
-Run: `npx vitest run src/server/import-session-repository.test.ts src/server/challenger-repository.test.ts && npm run typecheck`
+Run: `npx vitest run src/server/import-session-repository.test.ts src/server/import-activation-intent-repository.test.ts src/server/challenger-repository.test.ts && npm run typecheck`
 
 Expected: PASS with legacy challenger documents parsed as `importQueue: []`.
 
 - [ ] **Step 5: Commit Task 1**
 
 ```bash
-git add src/domain/import-session.ts src/domain/challenger-state.ts src/server/import-session-repository.ts src/server/import-session-repository.test.ts src/server/challenger-repository.ts src/server/challenger-repository.test.ts
+git add src/domain/import-session.ts src/domain/challenger-state.ts src/server/import-session-repository.ts src/server/import-session-repository.test.ts src/server/import-activation-intent-repository.ts src/server/import-activation-intent-repository.test.ts src/server/challenger-repository.ts src/server/challenger-repository.test.ts
 git commit -m "Add durable image import sessions"
 ```
 
@@ -429,6 +453,8 @@ git commit -m "Add image import workflow API"
 - Modify: `src/server/import-session-service.test.ts`
 - Modify: `src/server/import-session-repository.ts`
 - Modify: `src/server/import-session-repository.test.ts`
+- Modify: `src/server/import-activation-intent-repository.ts`
+- Modify: `src/server/import-activation-intent-repository.test.ts`
 - Modify: `src/server/challenger-repository.ts`
 - Modify: `src/server/challenger-repository.test.ts`
 - Modify: `src/server/repository.ts`
@@ -452,8 +478,8 @@ git commit -m "Add image import workflow API"
 **Interfaces:**
 
 - Consumes: ready import items from Task 4.
-- Produces: `ImportActivationService.reconcile(): Promise<GameStartState | null>`, durable `ImportActivationIntent` replay, and `kind: "initial-import-fill-batch"` mailbox claims.
-- Produces: `StateLockCoordinator.withStateLocks` as the sole canonical import -> game -> challenger -> initial-bootstrap lock entry point.
+- Produces: `ImportActivationService.reconcile(): Promise<GameStartState | null>`, replay from the separate `ImportActivationIntentRepository`, and `kind: "initial-import-fill-batch"` mailbox claims.
+- Produces: `StateLockCoordinator.withStateLocks` as the sole canonical activation-journal -> import -> game -> challenger -> initial-bootstrap lock entry point.
 - Produces: `CandidateDequeueService.dequeueLocked(context, request): Promise<CandidateDequeueResult>` as the only source-aware challenger draw and served-receipt writer; its locked-context token prevents use outside the coordinator.
 - Produces: `RefillCapacityService.plan(state, context, importSupply)` with the dequeue-time `ImportSupplySnapshot` rather than an unlocked import lookup.
 
@@ -490,7 +516,7 @@ expect(challengers.ratings.map(({ poolMember }) => poolMember)).toEqual([
 
 - [ ] **Step 2: Run focused tests and verify failure**
 
-Run: `npx vitest run src/server/import-activation-service.test.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.test.ts src/server/game-comparison.test.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts`
+Run: `npx vitest run src/server/import-activation-service.test.ts src/server/import-activation-intent-repository.test.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.test.ts src/server/game-comparison.test.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts`
 
 Expected: FAIL because activation and import priority are missing.
 
@@ -513,24 +539,35 @@ Retry requests replay the same IDs.
 
 Add `withLock` to `InitialBootstrapRepository`. Implement
 `StateLockCoordinator` and route every multi-repository operation through it,
-requesting the smallest needed lock subset while always acquiring import
-session, game, challenger, then initial bootstrap. Pass an opaque locked-context
-token to activation and dequeue helpers so they cannot reacquire nested locks.
-Mailbox publication and archival happen after repository locks are released.
+requesting the smallest needed lock subset while always acquiring the separate
+activation-intent journal, import session, game, challenger, then initial
+bootstrap. Pass an opaque locked-context token to activation and dequeue
+helpers so they cannot reacquire nested locks. Mailbox publication and archival
+happen after repository locks are released.
 
 Activation first validates five assets and constructs the complete new
-game/challenger/bootstrap/import aggregate. Give the game repository envelope a
-durable revision ID and persist an `ImportActivationIntent` with expected old
-import session ID, game revision ID, challenger session ID, bootstrap batch ID,
-and exact superseded job IDs before changing an active repository. Change its
-phase to `writing`, then install game,
-challenger, bootstrap, and active import values in canonical order. Every write
-accepts either the expected old ID or byte-equivalent intended new value and
-rejects any third state. Mark `committed` only after all four match; that marker
-is the commit point. Archive superseded jobs afterward and finally mark
-`cleaned`. Startup and request reconciliation clears a `prepared` intent only
-when no aggregate write happened; once `writing` exists it completes forward
-before any game is returned.
+game/challenger/bootstrap/import aggregate, using `bootstrap: null` because a
+ready activation clears superseded initial bootstrap work. Give the game
+repository envelope a durable revision ID. Persist `ImportActivationIntent` in
+the separate intent repository, with expected old import session ID, game
+revision ID, challenger session ID, bootstrap batch ID, and exact superseded
+job IDs, before changing a target repository. `ImportSession` must not contain
+the journal. Change the separate journal to `writing` with outcome `commit`,
+then install game, challenger, null bootstrap, and active import values in
+canonical order. Every write accepts either the expected old ID or
+byte-equivalent intended new value and rejects any third state. Mark the journal
+`committed` only after all four targets match; that marker is the commit point.
+
+Archive superseded jobs afterward. Following each idempotent archive, append
+that job ID to `archivedSupersededJobIds` in the separate journal. After all
+archives, reacquire journal and target locks in canonical order, verify every
+target equals the intended full value including null bootstrap, and persist
+`cleaned`. Retain the cleaned journal until a subsequent expected-ID clear.
+Restart with a cleaned journal repeats target/archive verification before
+clear. Startup and request reconciliation rolls a `prepared` journal back only
+when no target write happened: set outcome `rollback`, verify every target still
+matches its expected-old identity, persist `cleaned`, then clear. Once
+`writing` exists it completes forward before any game is returned.
 
 Create ratings only for the displayed pair, preserving each candidate's
 `source` and `importItemId`, with `poolMember: false` and `poolEligible: true`.
@@ -546,21 +583,19 @@ callback:
 
 ```ts
 interface CandidateDequeueRequest {
-  reason:
-    | "selection"
-    | "retirement-left"
-    | "retirement-right"
-    | "tie-left"
-    | "tie-right"
-    | "both-lose-left"
-    | "both-lose-right"
-    | "prepared-recovery"
-    | "restart-recovery";
+  dequeueOperationId: string;
+  importSessionId: string | null;
+  challengerSessionId: string;
+  originalReceipt: PendingComparisonReceipt;
+  replacementSlot: "single" | "pair-left" | "pair-right";
+  reason: "selection" | "retirement" | "tie" | "both-lose";
+  invocation: "live" | "prepared-recovery" | "restart-recovery";
   roundNumber: number;
   excludedCandidateIds: string[];
 }
 
 interface CandidateDequeueResult {
+  dequeueOperationId: string;
   candidate: Candidate | null;
   provenance: "imported" | "ready" | "pool-fallback" | null;
   importItemId: string | null;
@@ -569,23 +604,40 @@ interface CandidateDequeueResult {
 }
 ```
 
-Under import -> game -> challenger locks, draw imported first, then ordinary
-ready, then the existing eligible pool fallback. For an imported draw, persist
-the served receipt keyed by import session, item, and round before saving queue
-removal or returning.
+Provide
+`deriveDequeueOperationId(importSessionId, challengerSessionId, originalReceipt, replacementSlot)`.
+Its namespace is the exact import session ID when nonnull and
+`"game:" + challengerSessionId` otherwise; it returns
+`"dequeue-" + sha256(canonicalJson([namespace, originalReceipt, replacementSlot]))`.
+Canonical receipt encoding includes outcome, original round number, both
+candidate IDs, and selection timestamp. Normal one-candidate replacement uses
+`single`. Retirement, tie, and both-lose pair replacement call the helper with
+`pair-left` and `pair-right`, producing distinct IDs even though they share one
+comparison receipt. A null import session cannot produce a
+`ServedImportReceipt`.
+
+Under journal -> import -> game -> challenger locks, draw imported first, then
+ordinary ready, then the existing eligible pool fallback. For an imported draw,
+persist the served receipt keyed by `dequeueOperationId`, including the original
+receipt and replacement slot, before saving queue removal or returning.
 An exact replay returns the receipt's original candidate/provenance without
 consuming another queue entry. Replace direct `popReady`, `drawFallback`, and
 `drawFallbackBatch` calls in `game-selection-service.ts`,
 `prepared-selection-reconciler.ts`, and `game-reconciler.ts`; normal selection,
 two retirement draws, two tie draws, two both-lose draws, prepared completion,
 and restart completion must all use this interface. Persist the returned supply
-snapshot with prepared-selection state.
+snapshot, original receipt, replacement slot, and operation ID with
+prepared-selection state. Prepared and restart recovery reuse that stored
+request and operation ID while changing only `invocation`; they must not derive
+an ID from the recovery reason or current time.
 
 Write crash/replay tests for each reason with failure after served-receipt/item
-state persistence, challenger queue save, prepared supply-snapshot save,
-prepared game save, and completed game save. Each replay must return the full
-candidate stored in the receipt, the same provenance and import item ID,
-produce one served receipt, and never skip the next import.
+state persistence, challenger queue save, prepared operation/supply-snapshot
+save, prepared game save, and completed game save. Cover `single`, `pair-left`,
+and `pair-right`: pair IDs must differ, and live, prepared, and restart replay
+for each slot must use the original ID. Each replay returns the full candidate
+stored in the receipt, the same provenance and import item ID, produces one
+served receipt per operation ID, and never skips the next import.
 
 - [ ] **Step 6: Apply generalized admission after recorded comparisons**
 
@@ -607,13 +659,19 @@ fallback remains available from already-rated clean-session candidates.
 
 - [ ] **Step 8: Add activation failure-injection coverage**
 
-Inject a process failure after intent persistence, writing-phase persistence,
-each of the four aggregate repository writes, committed-phase persistence, each
-superseded-job archive, and cleaned-phase persistence. Restart reconciliation
-must roll back a no-write prepared intent or complete the full intended
-aggregate and remaining archives. At no injection point may a read return a
-new game with old challengers/bootstrap/import state, or archive old jobs before
-the committed marker is durable.
+Inject a process failure after separate-journal persistence, writing-phase
+persistence, each target write (game, challenger, bootstrap clear to null,
+import), committed-phase persistence, each superseded-job archive, each
+archived-ID journal update, final target verification, cleaned-phase
+persistence, and journal clear. Restart reconciliation must take a no-write
+prepared journal through verified cleaned rollback or complete the full
+intended aggregate and remaining archives. A cleaned journal must remain
+readable until verification has passed; if clear itself is interrupted, restart
+re-verifies and clears idempotently. At no injection point may a read return a
+new game with old
+challengers/bootstrap/import state, lose the only journal before cleanup, retain
+a nonnull bootstrap after ready activation, or archive old jobs before the
+committed marker is durable.
 
 - [ ] **Step 9: Document initial-fill monitor behavior**
 
@@ -624,14 +682,14 @@ failure publication, no retained-winner mutation, and continued polling.
 
 - [ ] **Step 10: Run focused tests and type checking**
 
-Run: `npx vitest run src/server/import-activation-service.test.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.test.ts src/server/import-session-repository.test.ts src/server/challenger-repository.test.ts src/server/repository.test.ts src/server/initial-bootstrap.test.ts src/server/game-service.test.ts src/server/game-comparison.test.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts && npm run typecheck`
+Run: `npx vitest run src/server/import-activation-service.test.ts src/server/import-activation-intent-repository.test.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.test.ts src/server/import-session-repository.test.ts src/server/challenger-repository.test.ts src/server/repository.test.ts src/server/initial-bootstrap.test.ts src/server/game-service.test.ts src/server/game-comparison.test.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.test.ts src/domain/challenger-state.test.ts && npm run typecheck`
 
 Expected: PASS, including retained-winner identity tests.
 
 - [ ] **Step 11: Commit Task 5**
 
 ```bash
-git add src/domain/challenger-state.ts src/domain/challenger-state.test.ts src/server/import-activation-service.ts src/server/import-activation-service.test.ts src/server/state-lock-coordinator.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.ts src/server/candidate-dequeue-service.test.ts src/server/import-session-service.ts src/server/import-session-service.test.ts src/server/import-session-repository.ts src/server/import-session-repository.test.ts src/server/agent-mailbox.ts src/server/agent-mailbox.test.ts src/server/mock-agent.ts src/server/challenger-repository.ts src/server/challenger-repository.test.ts src/server/repository.ts src/server/repository.test.ts src/server/initial-bootstrap.ts src/server/initial-bootstrap.test.ts src/server/game-service.ts src/server/game-service.test.ts src/server/game-comparison.ts src/server/game-comparison.test.ts src/server/game-selection-service.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.ts src/server/refill-capacity-service.test.ts src/server/runtime.ts .agents/skills/run-diptych-picker
+git add src/domain/challenger-state.ts src/domain/challenger-state.test.ts src/server/import-activation-service.ts src/server/import-activation-service.test.ts src/server/import-activation-intent-repository.ts src/server/import-activation-intent-repository.test.ts src/server/state-lock-coordinator.ts src/server/state-lock-coordinator.test.ts src/server/candidate-dequeue-service.ts src/server/candidate-dequeue-service.test.ts src/server/import-session-service.ts src/server/import-session-service.test.ts src/server/import-session-repository.ts src/server/import-session-repository.test.ts src/server/agent-mailbox.ts src/server/agent-mailbox.test.ts src/server/mock-agent.ts src/server/challenger-repository.ts src/server/challenger-repository.test.ts src/server/repository.ts src/server/repository.test.ts src/server/initial-bootstrap.ts src/server/initial-bootstrap.test.ts src/server/game-service.ts src/server/game-service.test.ts src/server/game-comparison.ts src/server/game-comparison.test.ts src/server/game-selection-service.ts src/server/game-selection-service.test.ts src/server/prepared-selection-reconciler.ts src/server/prepared-selection-reconciler.test.ts src/server/game-reconciler.ts src/server/game-reconciler.test.ts src/server/refill-capacity-service.ts src/server/refill-capacity-service.test.ts src/server/runtime.ts .agents/skills/run-diptych-picker
 git commit -m "Feed imports through the challenger stream"
 ```
 
@@ -651,7 +709,7 @@ git commit -m "Feed imports through the challenger stream"
 
 **Interfaces:**
 
-- Consumes: active import session, imported queue, activation intent, served receipts, supply snapshots, and source-aware dequeue service.
+- Consumes: active import session, imported queue, separate activation-intent repository, served receipts with operation IDs, supply snapshots, and source-aware dequeue service.
 - Produces: snapshot version support for active import state and runtime reconciliation on status reads.
 - Produces: display-safe import progress on `GameStartState` or the existing game status envelope.
 
@@ -659,10 +717,14 @@ git commit -m "Feed imports through the challenger stream"
 
 Test export/restore of imported and initial-fill generated candidate provenance,
 import item IDs, served receipts, and queued supply; omission of old job IDs and
-activation intents; fresh annotation/initial-fill ownership after restore;
-asset verification through `LocalAssetStore`; activation-intent reconciliation
-before any game read; import reconciliation before refill planning; and an
-unchanged export when an unrelated staged import has not activated.
+the separate activation journal; fresh annotation/initial-fill ownership after
+restore; asset verification through `LocalAssetStore`; activation-intent
+reconciliation before any game read; import reconciliation before refill
+planning; and an unchanged export when an unrelated staged import has not
+activated.
+Assert restored served and prepared dequeue records preserve original receipts
+and slots but derive operation IDs from the fresh import session ID, with
+pair-left and pair-right remaining distinct.
 
 ```ts
 const exported = await service.export();
@@ -685,22 +747,28 @@ Expected: FAIL because snapshots and reconciliation do not know imported state.
 Bump the snapshot schema with backward parsing for existing saves. Include an
 activated import session, imported queue, normalized asset metadata, resolved
 annotations, per-candidate `source`/`importItemId`, served status, and pending
-supply. Strip job IDs, activation intent, retry request IDs, and session
-ownership from exported JSON. On restore, verify every imported asset, create
-fresh game/challenger/import session IDs, derive fresh served receipts for
-already-displayed imported candidates, and publish unfinished work exactly
-once.
+supply. Strip job IDs and retry request IDs from exported JSON; never read or
+embed the separate activation journal in a snapshot. On restore, verify every
+imported asset and create fresh game/challenger/import session IDs. Re-key each
+exported served receipt and unfinished prepared dequeue by deriving a fresh
+operation ID from the new import session ID plus its preserved original receipt
+and replacement slot; do not fabricate a dequeue receipt for a candidate first
+displayed directly by activation. Publish unfinished work exactly once.
 
 - [ ] **Step 4: Reconcile import outcomes before serving game state**
 
 Runtime `getOrCreateGame`, selection completion, buffer health, and `/api/game`
-reads must first finish or roll back any activation intent, then reconcile
-annotation and initial-fill results, activate when eligible, append later ready
-imports once, and only then plan ordinary refill capacity. `game-reconciler.ts`
+reads must first finish or roll back any separately journaled activation intent,
+then reconcile annotation and initial-fill results, activate when eligible,
+append later ready imports once, and only then plan ordinary refill capacity.
+`game-reconciler.ts`
 must use `CandidateDequeueService` for restart completion and pass its locked
 `ImportSupplySnapshot` to refill planning; it may not call `popReady` or
-`drawFallback` directly. Crash/replay tests assert the recovered candidate,
-provenance, import item ID, and served receipt are stable.
+`drawFallback` directly. It loads the original prepared dequeue request and
+reuses its `dequeueOperationId`, original receipt, and replacement slot while
+setting `invocation: "restart-recovery"`; it never derives identity from the
+recovery reason. Crash/replay tests assert the recovered operation ID,
+candidate, provenance, import item ID, and served receipt are stable.
 
 Expose counts only:
 

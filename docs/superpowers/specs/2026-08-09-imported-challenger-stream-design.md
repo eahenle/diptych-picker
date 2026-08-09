@@ -90,7 +90,6 @@ interface ImportSession {
   initialFillJobs: InitialFillJobRecord[];
   initialFillRetry: InitialFillRetryReceipt | null;
   servedReceipts: ServedImportReceipt[];
-  activation: ImportActivationIntent | null;
 }
 
 interface ImportItem {
@@ -128,6 +127,7 @@ interface InitialFillRetryReceipt {
 interface ImportActivationIntent {
   id: string;
   phase: "prepared" | "writing" | "committed" | "cleaned";
+  outcome: "undecided" | "commit" | "rollback";
   expectedOld: {
     importSessionId: string;
     gameRevisionId: string | null;
@@ -137,16 +137,28 @@ interface ImportActivationIntent {
   next: {
     game: GameState;
     challengers: ChallengerState;
-    bootstrap: InitialBootstrap;
-    importSession: Omit<ImportSession, "activation">;
+    bootstrap: InitialBootstrap | null;
+    importSession: ImportSession;
   };
   supersededJobIds: string[];
+  archivedSupersededJobIds: string[];
   preparedAt: string;
   committedAt: string | null;
+  cleanedAt: string | null;
+}
+
+interface ImportActivationIntentRepository {
+  load(): Promise<ImportActivationIntent | null>;
+  save(intent: ImportActivationIntent): Promise<void>;
+  clear(expectedIntentId: string): Promise<void>;
+  withLock<T>(operation: () => Promise<T>): Promise<T>;
 }
 
 interface ServedImportReceipt {
+  dequeueOperationId: string;
   importSessionId: string;
+  originalReceipt: PendingComparisonReceipt;
+  replacementSlot: "single" | "pair-left" | "pair-right";
   importItemId: string;
   candidateId: string;
   candidate: Candidate;
@@ -162,33 +174,53 @@ unapproved inputs must be selected again. The modal explains this boundary
 before the player leaves an unfinished editor.
 
 Separate JSON repositories cannot be replaced atomically by locks alone.
-Activation therefore uses the durable `ImportActivationIntent` as a
-write-ahead transaction. It records the expected old repository session IDs,
-the complete new game/challenger/bootstrap/import aggregate, and the exact
-superseded job IDs before any active repository is changed. One shared
-state-lock coordinator makes nested lock acquisition impossible. Every
-activation and selection path asks it for the needed subset of locks in this
-canonical order:
+Activation therefore uses a dedicated `ImportActivationIntentRepository` as a
+write-ahead journal. The journal is a separate file outside the game,
+challenger, bootstrap, and import-session aggregate it replaces; no target
+repository contains the only copy of its own recovery intent. The intent
+records the expected old repository identities, the complete new
+game/challenger/bootstrap/import aggregate, and the exact superseded job IDs
+before any target is changed. For an activation with five ready candidates,
+`next.bootstrap` is `null`, explicitly clearing any superseded initial
+bootstrap.
 
-1. import session;
-2. game;
-3. challenger;
-4. initial bootstrap; and
-5. mailbox publication or archival, which occurs only after repository locks
+One shared state-lock coordinator makes nested lock acquisition impossible.
+Every activation and selection path asks it for the needed subset of locks in
+this canonical order:
+
+1. activation-intent journal;
+2. import session;
+3. game;
+4. challenger;
+5. initial bootstrap; and
+6. mailbox publication or archival, which occurs only after repository locks
    are released.
 
-Preparation validates all assets and persists `phase: "prepared"`. The writer
-then changes the phase to `"writing"` and installs each new repository value in
+Preparation validates all assets and persists `phase: "prepared"` with
+`outcome: "undecided"`. The writer then changes the phase to `"writing"` and
+the outcome to `"commit"` before installing each new repository value in
 canonical order. Each install is compare-and-set idempotent: the repository
-must match either its expected old session ID or the exact intended new value;
-any third state is a conflict. If preparation fails before the first aggregate
-write, reconciliation clears the intent and leaves the staged import retryable.
-Once `"writing"` begins, startup reconciliation completes forward from the
-intent rather than exposing a mixed aggregate. After every repository matches,
-it persists the import session with `phase: "committed"`; this is the commit
-point. Only then may it archive superseded initial and refill jobs. Archival is
-idempotent, and `phase: "cleaned"` records its completion, so a restart can
-repeat any unfinished write or cleanup side effect safely.
+must match either its expected old identity or the exact intended new value;
+any third state is a conflict. If preparation fails before writing begins,
+reconciliation chooses `outcome: "rollback"`, verifies every target still
+matches its expected old identity, persists `phase: "cleaned"`, and only then
+clears the journal, leaving the staged import retryable. Once `"writing"`
+begins, startup reconciliation completes forward from the separate journal
+rather than exposing a mixed aggregate. After every target
+repository matches its intended value, the journal moves to
+`phase: "committed"`; this is the commit point. Only then may it archive
+superseded initial and refill jobs. Each successful archive is added
+idempotently to `archivedSupersededJobIds` in the journal.
+
+After all listed jobs are archived, reconciliation reacquires journal -> import
+-> game -> challenger -> bootstrap locks, verifies every target still equals
+the full intended value (including `bootstrap === null`), and persists
+`phase: "cleaned"`. The cleaned journal remains durable through that phase.
+Only a subsequent idempotent `clear(intent.id)` may remove it. A restart with a
+cleaned commit journal repeats intended-target and archive verification before
+clearing; a cleaned rollback journal repeats expected-old-target verification.
+A failure during or after journal clearing is safe because every required
+target and archive side effect for its outcome was already verified.
 
 The committed aggregate creates a new session ID and starts with default
 preferences, an empty history, and no prior rating catalog. Two ready
@@ -337,10 +369,12 @@ comparison and three enter the ready queue. Further completed import
 annotations append to the prioritized imported queue.
 
 Activation is recoverably transactional. A failure before aggregate writes
-rolls the prepared intent back to the unchanged staged import. A failure after
-the writing phase begins is completed forward from the durable full aggregate
-before any game read, selection, restart reconciliation, or refill planning is
-allowed. Superseded jobs remain live until the committed phase is durable.
+marks the separately journaled transaction as a verified cleaned rollback
+before clearing it and leaves the staged import unchanged. A failure after the writing phase begins is completed forward from
+the separate durable journal before any game read, selection, restart
+reconciliation, or refill planning is allowed. Superseded jobs remain live
+until the committed phase is durable. The journal is retained until targets,
+archives, and the cleaned phase have all been durably verified.
 
 ## Challenger and Pool Behavior
 
@@ -367,13 +401,32 @@ instead of arbitrary import-order truncation.
 
 All ways of obtaining the next challenger call one source-aware dequeue
 primitive. This includes normal winner selection, champion retirement, tie,
-both-lose, prepared-selection recovery, and game-restart reconciliation. The
-primitive returns `{ candidate, provenance, importItemId }`, where provenance
+both-lose, prepared-selection recovery, and game-restart reconciliation. Every
+request carries a stable `dequeueOperationId` equal to
+`"dequeue-" + sha256(canonicalJson([importSessionId, originalReceipt, replacementSlot]))`.
+The canonical receipt includes its outcome, original round number, compared
+candidate IDs, and selection timestamp. A one-candidate draw uses slot
+`"single"`; a two-candidate draw uses distinct `"pair-left"` and
+`"pair-right"` slots. Thus two replacements from the same receipt cannot share
+an identity. A legacy game with no import uses
+`"game:" + challengerSessionId` in the namespace position and cannot create a
+`ServedImportReceipt`; an active imported stream always uses its exact import
+session ID.
+
+The primitive returns
+`{ dequeueOperationId, candidate, provenance, importItemId }`, where provenance
 distinguishes imported queue, ordinary ready queue, and eligible pool fallback.
-For an imported draw it persists a `ServedImportReceipt` before changing the
-item to served under the canonical import -> game -> challenger lock order. The
-receipt key is `(importSessionId, importItemId, roundNumber)`, so replay returns
-the same draw without consuming another item or marking it served twice.
+For an imported draw it persists a `ServedImportReceipt` keyed by
+`dequeueOperationId` before changing the item to served under the canonical
+journal -> import -> game -> challenger lock order. The receipt also stores the
+import item and full candidate, so replay returns the same draw without
+consuming another item or marking it served twice.
+
+Prepared selection persists the original receipt, replacement slot, and
+derived operation ID beside each pending replacement. Prepared-selection and
+restart reconciliation must reuse that exact operation ID. Recovery reasons
+are diagnostic only and never participate in identity derivation or create a
+new receipt.
 
 Each dequeue result also produces an immutable `ImportSupplySnapshot` from the
 same locked state:
@@ -433,10 +486,13 @@ the failure is resolved.
 
 Game snapshots include the active import stream, resolved imported candidates,
 normalized asset metadata, and pending item state. They exclude session-bound
-annotation and initial-fill job IDs. Restore verifies every referenced
-immutable asset, creates a fresh game and import session ID, and republishes
-only unfinished annotation or initial-fill work. A staged import that has not
-activated is not included when exporting the still-current game.
+annotation and initial-fill job IDs, and they never embed or clear the separate
+activation journal. Restore verifies every referenced immutable asset and
+creates fresh game and import session IDs. It re-keys exported served receipts
+and unfinished prepared dequeues from the fresh import ID plus each preserved
+original receipt and replacement slot, keeping pair slots distinct, then
+republishes only unfinished annotation or initial-fill work. A staged import
+that has not activated is not included when exporting the still-current game.
 
 ## API Boundaries
 
@@ -473,9 +529,9 @@ to pause it.
   replacement work.
 - Refresh or process restart reconciles completed mailbox results before
   publishing replacement work.
-- Activation and every dequeue/recovery path use the canonical import, game,
-  challenger, bootstrap lock order, so activation cannot cross a comparison or
-  deadlock restart reconciliation.
+- Activation and every dequeue/recovery path use the canonical activation
+  journal, import, game, challenger, bootstrap lock order, so activation cannot
+  cross a comparison or deadlock restart reconciliation.
 - Late or duplicate terminal publications are idempotent and cannot append a
   candidate twice.
 - Abandoning an import archives pending jobs and ignores late results. Active
@@ -536,14 +592,19 @@ the mock provider unless a mailbox script itself is under test. They prove:
 20. Desktop and narrow browser tests preserve exactly two independent candidate
     images and the retained winner's exact ID, URL, bytes, metadata, side, and
     DOM node across imported-stream comparisons.
-21. Failure injection after intent persistence, every aggregate repository
-    write, commit marking, and every job archive proves restart either rolls
-    back a prepared intent with no writes or completes the intended aggregate
-    and cleanup without exposing mixed state.
+21. Failure injection after separate-journal persistence, every aggregate
+    repository write including bootstrap clear-to-null, commit marking, every
+    job archive and archived-ID journal update, target verification, cleaned
+    marking, and journal clear proves restart either takes a no-write prepared
+    intent through verified cleaned rollback or completes the intended
+    aggregate and cleanup without exposing mixed state or losing the journal
+    early.
 22. Normal, retirement, tie, both-lose, prepared-selection, and restart paths
-    all use the same source-aware dequeue; crash/replay preserves candidate,
-    provenance, import item ID, served receipt, and refill supply snapshot
-    without double consumption.
+    all use the same source-aware dequeue. One-candidate and pair-left/pair-right
+    draws derive distinct stable operation IDs from the original durable
+    receipt. Crash/replay preserves operation ID, candidate, provenance, import
+    item ID, served receipt, and refill supply snapshot without double
+    consumption; prepared and restart recovery reuse the original ID.
 23. Initial-fill failure status is display-safe. Session-level Retry publishes
     only the remaining deficit, exact duplicate requests return the original
     result, and stale requests return 409 without a side effect.
