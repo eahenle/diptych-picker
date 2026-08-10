@@ -70,7 +70,8 @@ const candidateSchema = z
 const bufferedCandidateSchema = z
   .object({
     candidate: candidateSchema,
-    source: z.enum(["seed", "generated"]),
+    source: z.enum(["seed", "generated", "imported"]),
+    importItemId: z.string().min(1).nullable().default(null),
     pinnedWinnerId: z.string().min(1).nullable(),
     enqueuedAt: z.string().min(1),
   })
@@ -82,7 +83,8 @@ const candidateRatingSchema = z
     rating: z.number().finite(),
     wins: z.number().int().nonnegative(),
     losses: z.number().int().nonnegative(),
-    source: z.enum(["curated", "generated"]),
+    source: z.enum(["curated", "generated", "imported"]),
+    importItemId: z.string().min(1).nullable().default(null),
     poolMember: z.boolean(),
     poolEligible: z.boolean().optional(),
     lastServedAt: z.string().min(1).nullable(),
@@ -246,11 +248,12 @@ const refillGenerationJobSnapshotSchema = z
     path: ["pinnedWinnerId"],
   });
 
-const challengerStateSchema: z.ZodType<ChallengerState> = z
+const challengerStateSchema = z
   .object({
     version: z.literal(1),
     sessionId: z.string().min(1),
     ready: z.array(bufferedCandidateSchema),
+    importQueue: z.array(bufferedCandidateSchema).default([]),
     refillJobs: z.array(
       z
         .object({
@@ -368,7 +371,7 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
   .strict();
 
 export function parseChallengerState(value: unknown): ChallengerState {
-  return challengerStateSchema.parse(value);
+  return challengerStateSchema.parse(value) as ChallengerState;
 }
 
 const processLockTails = new Map<string, Promise<void>>();
@@ -396,7 +399,7 @@ function resetSession(
   state: ChallengerState,
   sessionId: string,
 ): ChallengerState {
-  return challengerStateSchema.parse({
+  return parseChallengerState({
     ...state,
     sessionId,
     ready: [],
@@ -432,7 +435,7 @@ export class JsonChallengerRepository implements ChallengerRepository {
   async load(): Promise<ChallengerState | null> {
     try {
       const parsed: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
-      return challengerStateSchema.parse(parsed);
+      return parseChallengerState(parsed);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -440,7 +443,7 @@ export class JsonChallengerRepository implements ChallengerRepository {
   }
 
   async save(state: ChallengerState): Promise<void> {
-    const validated = challengerStateSchema.parse(state);
+    const validated = parseChallengerState(state);
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
     let handle;
@@ -574,15 +577,15 @@ export class MemoryChallengerRepository implements ChallengerRepository {
   private state: ChallengerState | null;
 
   constructor(state: ChallengerState | null = null) {
-    this.state = state ? challengerStateSchema.parse(state) : null;
+    this.state = state ? parseChallengerState(state) : null;
   }
 
   async load(): Promise<ChallengerState | null> {
-    return this.state ? challengerStateSchema.parse(this.state) : null;
+    return this.state ? parseChallengerState(this.state) : null;
   }
 
   async save(state: ChallengerState): Promise<void> {
-    this.state = challengerStateSchema.parse(state);
+    this.state = parseChallengerState(state);
   }
 
   async clearSession(sessionId: string): Promise<void> {

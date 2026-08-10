@@ -20,7 +20,10 @@ export interface CandidateRating {
   rating: number;
   wins: number;
   losses: number;
+  // Legacy consumers only understand curated/generated ratings. The durable
+  // challenger parser accepts imported ratings for the activation handoff.
   source: "curated" | "generated";
+  importItemId?: string | null;
   poolMember: boolean;
   poolEligible?: boolean;
   lastServedAt: string | null;
@@ -29,7 +32,8 @@ export interface CandidateRating {
 
 export interface BufferedCandidate {
   candidate: Candidate;
-  source: "seed" | "generated";
+  source: "seed" | "generated" | "imported";
+  importItemId?: string | null;
   pinnedWinnerId: string | null;
   enqueuedAt: string;
 }
@@ -147,6 +151,7 @@ export interface ChallengerState {
   version: 1;
   sessionId: string;
   ready: BufferedCandidate[];
+  importQueue?: BufferedCandidate[];
   refillJobs: RefillJobRecord[];
   leaderboardProfileJob?: LeaderboardProfileJobRecord | null;
   leaderboardVisualProfile?: LeaderboardVisualProfile | null;

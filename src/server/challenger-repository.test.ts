@@ -70,10 +70,12 @@ const populatedState: ChallengerState = {
     {
       candidate: candidate("ready-1"),
       source: "generated",
+      importItemId: null,
       pinnedWinnerId: "winner-1",
       enqueuedAt: "2026-07-16T20:01:00.000Z",
     },
   ],
+  importQueue: [],
   refillJobs: [
     {
       jobId: "job-1",
@@ -94,6 +96,7 @@ const populatedState: ChallengerState = {
       wins: 1,
       losses: 0,
       source: "curated",
+      importItemId: null,
       poolMember: true,
       favorite: true,
       lastServedAt: "2026-07-16T20:03:00.000Z",
