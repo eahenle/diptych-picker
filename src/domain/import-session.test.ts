@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Candidate } from "./game";
-import { importSessionFixture } from "./import-session-fixture";
+import {
+  completedImportSessionFixture,
+  importSessionFixture,
+} from "./import-session-fixture";
 import {
   deriveActivationDisplayReceiptId,
   deriveDequeueOperationId,
@@ -52,6 +55,73 @@ const session = importSessionFixture;
 describe("import session schema", () => {
   it("round-trips durable annotations, retry evidence, and both served receipt kinds", () => {
     expect(parseImportSession(session())).toEqual(session());
+  });
+
+  it("requires completed sessions to be fully served and terminal", () => {
+    expect(parseImportSession(completedImportSessionFixture())).toMatchObject({
+      status: "completed",
+      items: expect.arrayContaining([
+        expect.objectContaining({ status: "served" }),
+      ]),
+    });
+
+    const unsealed = completedImportSessionFixture();
+    unsealed.sealedAt = null;
+    expect(() => parseImportSession(unsealed)).toThrow(/completed.*sealed/i);
+
+    const unactivated = completedImportSessionFixture();
+    unactivated.activatedAt = null;
+    expect(() => parseImportSession(unactivated)).toThrow(
+      /completed.*activated/i,
+    );
+
+    for (const status of ["annotating", "ready", "failed"] as const) {
+      const incompleteItem = completedImportSessionFixture();
+      incompleteItem.items[0] = {
+        ...incompleteItem.items[0],
+        status,
+      };
+      expect(() => parseImportSession(incompleteItem)).toThrow(
+        /completed.*served/i,
+      );
+    }
+
+    const missingReceipt = completedImportSessionFixture();
+    missingReceipt.servedReceipts.pop();
+    expect(() => parseImportSession(missingReceipt)).toThrow(
+      /completed.*receipt/i,
+    );
+
+    const annotationPending = completedImportSessionFixture();
+    annotationPending.items[0].annotationJob = session().items[0].annotationJob;
+    expect(() => parseImportSession(annotationPending)).toThrow(
+      /completed.*annotation/i,
+    );
+
+    const removedWithAnnotation = completedImportSessionFixture();
+    removedWithAnnotation.items[0] = {
+      ...removedWithAnnotation.items[0],
+      status: "removed",
+      annotationJob: session().items[0].annotationJob,
+    };
+    removedWithAnnotation.servedReceipts =
+      removedWithAnnotation.servedReceipts.filter(
+        (receipt) => receipt.importItemId !== removedWithAnnotation.items[0].id,
+      );
+    expect(() => parseImportSession(removedWithAnnotation)).toThrow(
+      /completed.*annotation/i,
+    );
+
+    const initialFillPending = completedImportSessionFixture();
+    initialFillPending.initialFillJobs[0] = {
+      ...initialFillPending.initialFillJobs[0],
+      status: "pending",
+      candidate: null,
+      completedAt: null,
+    };
+    expect(() => parseImportSession(initialFillPending)).toThrow(
+      /completed.*initial/i,
+    );
   });
 
   it("requires the complete merged item, annotation-job, initial-fill, and retry evidence", () => {

@@ -2,7 +2,10 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { importSessionFixture } from "@/domain/import-session-fixture";
+import {
+  completedImportSessionFixture,
+  importSessionFixture,
+} from "@/domain/import-session-fixture";
 import { JsonImportSessionRepository } from "./import-session-repository";
 
 describe("JsonImportSessionRepository", () => {
@@ -61,7 +64,7 @@ describe("JsonImportSessionRepository", () => {
     } as never);
 
     await expect(
-      interrupted.save({ ...previous, status: "completed" }),
+      interrupted.save(completedImportSessionFixture()),
     ).rejects.toThrow("interrupted rename");
     await expect(repository.load()).resolves.toEqual(previous);
   });

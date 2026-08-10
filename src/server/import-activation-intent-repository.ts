@@ -107,6 +107,7 @@ const intentEnvelopeSchema = z
     committedAt: timestampSchema.nullable(),
     cleanedAt: timestampSchema.nullable(),
   })
+  .strict()
   .superRefine((intent, context) => {
     const superseded = new Set(intent.supersededJobIds);
     if (superseded.size !== intent.supersededJobIds.length) {

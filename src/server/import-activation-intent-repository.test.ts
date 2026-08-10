@@ -118,6 +118,12 @@ describe("import activation intent schema", () => {
     expect(parseImportActivationIntent(intent())).toEqual(intent());
   });
 
+  it("rejects unknown top-level activation intent fields", () => {
+    expect(() =>
+      parseImportActivationIntent({ ...intent(), unexpectedWalField: true }),
+    ).toThrow(/unrecognized|unexpected/i);
+  });
+
   it("accepts every valid phase and evidence combination", () => {
     const writing = intent();
     writing.phase = "writing";

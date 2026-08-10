@@ -154,3 +154,65 @@ export const importSessionFixture = (): ImportSession => ({
     dequeueReceipt,
   ],
 });
+
+export const completedImportSessionFixture = (): ImportSession => {
+  const session = importSessionFixture();
+  const items = session.items.map((entry, index) => {
+    const candidateId = `candidate-completed-${index + 1}`;
+    return {
+      ...entry,
+      status: "served" as const,
+      annotationJob: null,
+      annotation: entry.annotation ?? {
+        concept: `${entry.id} concept`,
+        prompt: `${entry.id} prompt`,
+        style: ["cinematic"],
+        reasoningSummary: "Visible composition and palette.",
+        source: "automated" as const,
+      },
+      candidateId,
+      failureMessage: null,
+      approvedAt: "2026-08-09T20:05:00.000Z",
+      servedAt: `2026-08-09T20:0${index + 2}:00.000Z`,
+    };
+  });
+  return {
+    ...session,
+    status: "completed",
+    sealedAt: "2026-08-09T20:01:00.000Z",
+    activatedAt: "2026-08-09T20:04:00.000Z",
+    items,
+    initialFillJobs: [
+      {
+        ...session.initialFillJobs[0],
+        status: "ready",
+        candidate: candidate("initial-fill-completed"),
+        completedAt: "2026-08-09T20:05:00.000Z",
+      },
+    ],
+    servedReceipts: items.map((entry, index) => {
+      const receipt = {
+        ...originalReceipt,
+        roundNumber: index + 1,
+      };
+      return {
+        kind: "dequeue" as const,
+        dequeueOperationId: deriveDequeueOperationId(
+          session.id,
+          "",
+          receipt,
+          "single",
+        ),
+        importSessionId: session.id,
+        originalReceipt: receipt,
+        replacementSlot: "single" as const,
+        importItemId: entry.id,
+        candidateId: entry.candidateId!,
+        candidate: candidate(entry.candidateId!),
+        provenance: "imported" as const,
+        roundNumber: index + 1,
+        servedAt: entry.servedAt!,
+      };
+    }),
+  };
+};

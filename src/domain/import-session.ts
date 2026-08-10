@@ -513,6 +513,59 @@ const importSessionSchema: z.ZodType<ImportSession> = z
       }
     }
 
+    if (session.status === "completed") {
+      if (!session.sealedAt) {
+        context.addIssue({
+          code: "custom",
+          path: ["sealedAt"],
+          message: "Completed import sessions must be sealed",
+        });
+      }
+      if (!session.activatedAt) {
+        context.addIssue({
+          code: "custom",
+          path: ["activatedAt"],
+          message: "Completed import sessions must be activated",
+        });
+      }
+      for (const [index, item] of session.items.entries()) {
+        if (item.annotationJob) {
+          context.addIssue({
+            code: "custom",
+            path: ["items", index, "annotationJob"],
+            message: "Completed import sessions cannot retain annotation work",
+          });
+        }
+        if (item.status === "removed") continue;
+        if (item.status !== "served") {
+          context.addIssue({
+            code: "custom",
+            path: ["items", index, "status"],
+            message:
+              "Completed import sessions require every retained item to be served",
+          });
+        }
+        if (!servedItemIds.has(item.id)) {
+          context.addIssue({
+            code: "custom",
+            path: ["items", index],
+            message:
+              "Completed import sessions require served receipt evidence",
+          });
+        }
+      }
+      for (const [index, job] of session.initialFillJobs.entries()) {
+        if (job.status === "pending") {
+          context.addIssue({
+            code: "custom",
+            path: ["initialFillJobs", index, "status"],
+            message:
+              "Completed import sessions require terminal initial-fill work",
+          });
+        }
+      }
+    }
+
     const jobIds = new Set<string>();
     const attemptIds = new Set<string>();
     const jobsById = new Map<string, InitialFillJobRecord>();
