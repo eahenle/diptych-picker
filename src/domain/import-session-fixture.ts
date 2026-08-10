@@ -36,7 +36,7 @@ const item = (
     byteLength: 1_024,
   },
   annotationJob:
-    status === "annotating"
+    status === "annotating" || status === "failed"
       ? {
           id: `${id}-annotation`,
           kind: "import-annotation",
@@ -55,7 +55,7 @@ const item = (
         }
       : null,
   annotation:
-    status === "annotating"
+    status === "annotating" || status === "failed"
       ? null
       : {
           concept: `${id} concept`,
@@ -66,7 +66,8 @@ const item = (
         },
   candidateId:
     status === "ready" || status === "served" ? `candidate-${id}` : null,
-  failureMessage: null,
+  failureMessage:
+    status === "failed" ? "Annotation worker failed safely." : null,
   approvedAt: "2026-08-09T20:00:00.000Z",
   servedAt:
     status === "served"
@@ -118,6 +119,16 @@ export const importSessionFixture = (): ImportSession => ({
     item("served-dequeue", digest("d"), "served"),
   ],
   initialFillJobs: [
+    {
+      id: "initial-fill-failed-1",
+      attemptId: "fill-attempt-1",
+      status: "failed",
+      candidate: null,
+      source: "generated",
+      importItemId: null,
+      failureMessage: "Initial fill worker failed safely.",
+      completedAt: "2026-08-09T20:01:15.000Z",
+    },
     {
       id: "initial-fill-1",
       attemptId: "fill-attempt-2",
@@ -184,14 +195,15 @@ export const completedImportSessionFixture = (): ImportSession => {
     sealedAt: "2026-08-09T20:01:00.000Z",
     activatedAt: "2026-08-09T20:04:00.000Z",
     items,
-    initialFillJobs: [
-      {
-        ...session.initialFillJobs[0],
-        status: "ready",
-        candidate: candidate("initial-fill-completed"),
-        completedAt: "2026-08-09T20:05:00.000Z",
-      },
-    ],
+    initialFillJobs: session.initialFillJobs.map((job) =>
+      job.status === "ready"
+        ? {
+            ...job,
+            candidate: candidate("initial-fill-completed"),
+            completedAt: "2026-08-09T20:05:00.000Z",
+          }
+        : job,
+    ),
     servedReceipts: items.map((entry, index) => {
       const receipt = {
         ...originalReceipt,

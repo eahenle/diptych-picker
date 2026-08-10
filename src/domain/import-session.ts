@@ -251,8 +251,8 @@ const itemSchema = z
     }
     if (
       item.status === "failed" &&
-      (!item.failureMessage ||
-        item.annotationJob ||
+      (!item.annotationJob ||
+        !item.failureMessage ||
         item.annotation ||
         item.candidateId ||
         item.servedAt)
@@ -260,7 +260,8 @@ const itemSchema = z
       context.addIssue({
         code: "custom",
         path: ["status"],
-        message: "Failed import items require terminal failure evidence only",
+        message:
+          "Failed import items require their annotation job and terminal failure evidence only",
       });
     }
     if (item.status === "removed" && (item.annotationJob || item.servedAt)) {
@@ -580,12 +581,6 @@ const importSessionSchema: z.ZodType<ImportSession> = z
     const hasServedEvidence =
       session.servedReceipts.length > 0 ||
       session.items.some((item) => item.status === "served");
-    const hasLiveOrUnresolvedAnnotation = session.items.some(
-      (item) =>
-        item.annotationJob !== null ||
-        item.status === "annotating" ||
-        item.status === "failed",
-    );
     const hasPendingInitialFill = session.initialFillJobs.some(
       (job) => job.status === "pending",
     );
@@ -618,16 +613,13 @@ const importSessionSchema: z.ZodType<ImportSession> = z
     }
     if (
       (session.status === "active" || session.status === "completed") &&
-      (!session.sealedAt ||
-        !session.activatedAt ||
-        hasLiveOrUnresolvedAnnotation ||
-        hasPendingInitialFill)
+      (!session.sealedAt || !session.activatedAt || hasPendingInitialFill)
     ) {
       context.addIssue({
         code: "custom",
         path: ["status"],
         message:
-          "Active and completed import sessions require activation and terminal annotation and fill work",
+          "Active and completed import sessions require activation and terminal initial-fill work",
       });
     }
 
@@ -721,6 +713,20 @@ const importSessionSchema: z.ZodType<ImportSession> = z
       });
     }
     if (session.initialFillRetry) {
+      if (
+        !session.initialFillJobs.some(
+          (job) =>
+            job.attemptId === session.initialFillRetry!.failedAttemptId &&
+            (job.status === "failed" || job.status === "superseded"),
+        )
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["initialFillRetry", "failedAttemptId"],
+          message:
+            "Initial fill retry must reference an attempt with failed or superseded work",
+        });
+      }
       for (const [
         index,
         jobId,

@@ -100,7 +100,7 @@ const itemForStatus = (status: ImportItemStatus): ImportItem => {
       return {
         ...base,
         status,
-        annotationJob: null,
+        annotationJob: liveAnnotationJob(base),
         annotation: null,
         candidateId: null,
         failureMessage: "Annotation worker failed safely.",
@@ -156,6 +156,50 @@ const sessionForItemStatus = (status: ImportItemStatus): ImportSession => {
     initialFillRetry: null,
     servedReceipts: [],
   };
+};
+
+const activeSessionWithUnresolvedItem = (
+  status: "annotating" | "failed",
+): ImportSession => {
+  const value = sessionForItemStatus(status);
+  return {
+    ...value,
+    status: "active",
+    sealedAt: "2026-08-09T20:01:00.000Z",
+    activatedAt: "2026-08-09T20:04:00.000Z",
+  };
+};
+
+const sessionWithRetryHistory = (
+  status: "pending" | "ready" | "failed" | "superseded",
+): ImportSession => {
+  const value = sessionWithInitialFill("ready");
+  if (status === "pending") {
+    value.status = "preparing";
+    value.activatedAt = null;
+  }
+  value.initialFillJobs.unshift({
+    id: "initial-fill-history-1",
+    attemptId: "fill-attempt-0",
+    status,
+    candidate:
+      status === "ready" ? candidate("initial-fill-history-candidate") : null,
+    source: "generated",
+    importItemId: null,
+    failureMessage:
+      status === "failed" || status === "superseded"
+        ? "Initial fill worker failed safely."
+        : null,
+    completedAt: status === "pending" ? null : "2026-08-09T20:04:00.000Z",
+  });
+  value.initialFillRetry = {
+    failedAttemptId: "fill-attempt-0",
+    requestId: "retry-request-1",
+    replacementAttemptId: "fill-attempt-1",
+    replacementJobIds: ["initial-fill-1"],
+    createdAt: "2026-08-09T20:04:30.000Z",
+  };
+  return value;
 };
 
 const sessionWithInitialFill = (
@@ -305,6 +349,14 @@ describe("import session schema", () => {
       },
     ],
     [
+      "failed missing annotation job",
+      () => {
+        const value = sessionForItemStatus("failed");
+        value.items[0].annotationJob = null;
+        return value;
+      },
+    ],
+    [
       "failed candidate evidence",
       () => {
         const value = sessionForItemStatus("failed");
@@ -377,6 +429,11 @@ describe("import session schema", () => {
     const retrySession = completedImportSessionFixture();
     retrySession.initialFillJobs[0] = {
       ...retrySession.initialFillJobs[0],
+      id: "Failed_Job-9",
+      attemptId: "Failed_A-9",
+    };
+    retrySession.initialFillJobs[1] = {
+      ...retrySession.initialFillJobs[1],
       id: "Fill_A-9",
       attemptId: "Attempt_A-9",
     };
@@ -551,6 +608,16 @@ describe("import session schema", () => {
   });
 
   it.each([
+    ["annotating", () => activeSessionWithUnresolvedItem("annotating")],
+    ["failed", () => activeSessionWithUnresolvedItem("failed")],
+  ] as const)(
+    "keeps an active %s import item in durable supply",
+    (_status, build) => {
+      expect(parseImportSession(build()).status).toBe("active");
+    },
+  );
+
+  it.each([
     [
       "editing seal evidence",
       () => {
@@ -598,16 +665,6 @@ describe("import session schema", () => {
       () => {
         const value = sessionWithInitialFill("ready");
         value.activatedAt = null;
-        return value;
-      },
-    ],
-    [
-      "active live annotation work",
-      () => {
-        const value = sessionForItemStatus("annotating");
-        value.status = "active";
-        value.sealedAt = "2026-08-09T20:01:00.000Z";
-        value.activatedAt = "2026-08-09T20:04:00.000Z";
         return value;
       },
     ],
@@ -690,16 +747,33 @@ describe("import session schema", () => {
     );
 
     const initialFillPending = completedImportSessionFixture();
-    initialFillPending.initialFillJobs[0] = {
-      ...initialFillPending.initialFillJobs[0],
+    const readyJobIndex = initialFillPending.initialFillJobs.findIndex(
+      (job) => job.status === "ready",
+    );
+    initialFillPending.initialFillJobs[readyJobIndex] = {
+      ...initialFillPending.initialFillJobs[readyJobIndex],
       status: "pending",
       candidate: null,
+      failureMessage: null,
       completedAt: null,
     };
     expect(() => parseImportSession(initialFillPending)).toThrow(
       /completed.*initial/i,
     );
   });
+
+  it.each(["annotating", "failed"] as const)(
+    "rejects a completed session with an unresolved %s item",
+    (status) => {
+      const value = completedImportSessionFixture();
+      value.items[0] = itemForStatus(status);
+      value.servedReceipts = value.servedReceipts.filter(
+        (receipt) => receipt.importItemId !== value.items[0].id,
+      );
+
+      expect(() => parseImportSession(value)).toThrow();
+    },
+  );
 
   it("parses complete annotation-job, initial-fill, and retry evidence", () => {
     const annotationSession = sessionForItemStatus("annotating");
@@ -710,17 +784,40 @@ describe("import session schema", () => {
       importItemId: annotationSession.items[0].id,
     });
 
-    const fillSession = sessionWithInitialFill("ready");
-    fillSession.initialFillRetry = {
-      requestId: "retry-request-1",
-      failedAttemptId: "attempt-0",
-      replacementAttemptId: "fill-attempt-1",
-      replacementJobIds: ["initial-fill-1"],
-      createdAt: "2026-08-09T20:01:30.000Z",
-    };
+    const fillSession = sessionWithRetryHistory("failed");
     expect(parseImportSession(fillSession).initialFillRetry).toMatchObject({
       replacementAttemptId: "fill-attempt-1",
     });
+  });
+
+  it.each([
+    ["failed", () => sessionWithRetryHistory("failed")],
+    ["superseded", () => sessionWithRetryHistory("superseded")],
+  ] as const)(
+    "accepts retry history with a %s failed attempt",
+    (_status, build) => {
+      expect(
+        parseImportSession(build()).initialFillRetry?.failedAttemptId,
+      ).toBe("fill-attempt-0");
+    },
+  );
+
+  it.each([
+    [
+      "a nonexistent failed attempt",
+      () => {
+        const value = sessionWithRetryHistory("failed");
+        value.initialFillRetry = {
+          ...value.initialFillRetry!,
+          failedAttemptId: "missing-attempt",
+        };
+        return value;
+      },
+    ],
+    ["a ready-only failed attempt", () => sessionWithRetryHistory("ready")],
+    ["a pending-only failed attempt", () => sessionWithRetryHistory("pending")],
+  ] as const)("rejects retry history with %s", (_name, build) => {
+    expect(() => parseImportSession(build())).toThrow();
   });
 
   it("rejects annotation work for a different import session", () => {
@@ -748,8 +845,11 @@ describe("import session schema", () => {
 
   it("rejects ready initial-fill jobs without a candidate and completion time", () => {
     const withoutCandidate = session();
-    withoutCandidate.initialFillJobs[0] = {
-      ...withoutCandidate.initialFillJobs[0],
+    const withoutCandidateIndex = withoutCandidate.initialFillJobs.findIndex(
+      (job) => job.status === "ready",
+    );
+    withoutCandidate.initialFillJobs[withoutCandidateIndex] = {
+      ...withoutCandidate.initialFillJobs[withoutCandidateIndex],
       status: "ready",
       candidate: null,
       completedAt: "2026-08-09T20:02:30.000Z",
@@ -759,8 +859,11 @@ describe("import session schema", () => {
     );
 
     const withoutCompletion = session();
-    withoutCompletion.initialFillJobs[0] = {
-      ...withoutCompletion.initialFillJobs[0],
+    const withoutCompletionIndex = withoutCompletion.initialFillJobs.findIndex(
+      (job) => job.status === "ready",
+    );
+    withoutCompletion.initialFillJobs[withoutCompletionIndex] = {
+      ...withoutCompletion.initialFillJobs[withoutCompletionIndex],
       status: "ready",
       candidate: candidate("initial-fill-candidate"),
       completedAt: null,
@@ -779,8 +882,11 @@ describe("import session schema", () => {
     expect(() => parseImportSession(missingJob)).toThrow(/replacement.*job/i);
 
     const wrongAttempt = session();
-    wrongAttempt.initialFillJobs[0] = {
-      ...wrongAttempt.initialFillJobs[0],
+    const replacementJobIndex = wrongAttempt.initialFillJobs.findIndex(
+      (job) => job.id === wrongAttempt.initialFillRetry!.replacementJobIds[0],
+    );
+    wrongAttempt.initialFillJobs[replacementJobIndex] = {
+      ...wrongAttempt.initialFillJobs[replacementJobIndex],
       attemptId: "different-attempt",
     };
     expect(() => parseImportSession(wrongAttempt)).toThrow(
