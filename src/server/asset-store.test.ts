@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { LocalAssetStore } from "./asset-store";
+import type { ImportedAssetMetadata } from "@/domain/import-session";
 import type { CompletedAssetMetadata } from "./providers";
 
 const metadata = (byteLength: number): CompletedAssetMetadata => ({
@@ -170,5 +172,86 @@ describe("LocalAssetStore.verifyExistingPng", () => {
     await expect(store.verifyExistingPng("rectangle.png")).rejects.toThrow(
       /square PNG/i,
     );
+  });
+});
+
+describe("LocalAssetStore.verifyImportedAsset", () => {
+  it("accepts a fully decoded canonical imported asset", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-assets-"));
+    const store = new LocalAssetStore(directory);
+    const bytes = await sharp({
+      create: {
+        width: 1024,
+        height: 1024,
+        channels: 4,
+        background: "#46145a",
+      },
+    })
+      .png()
+      .toBuffer();
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const asset: ImportedAssetMetadata = {
+      digest,
+      filename: `${digest}.png`,
+      url: `/api/assets/${digest}.png`,
+      contentType: "image/png",
+      width: 1024,
+      height: 1024,
+      byteLength: bytes.length,
+    };
+    await writeFile(join(directory, asset.filename), bytes);
+
+    await expect(store.verifyImportedAsset(asset)).resolves.toBeUndefined();
+  });
+
+  it("rejects imported metadata that does not describe the canonical bytes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-assets-"));
+    const store = new LocalAssetStore(directory);
+    const bytes = await squarePng();
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const asset: ImportedAssetMetadata = {
+      digest,
+      filename: `${digest}.png`,
+      url: `/api/assets/${digest}.png`,
+      contentType: "image/png",
+      width: 1024,
+      height: 1024,
+      byteLength: bytes.length,
+    };
+    await writeFile(join(directory, asset.filename), bytes);
+
+    await expect(
+      store.verifyImportedAsset({ ...asset, url: "/api/assets/other.png" }),
+    ).rejects.toThrow(/URL/i);
+    await expect(
+      store.verifyImportedAsset({ ...asset, byteLength: bytes.length + 1 }),
+    ).rejects.toThrow(/byte length/i);
+    await expect(
+      store.verifyImportedAsset({ ...asset, width: 1023 }),
+    ).rejects.toThrow(/1024/i);
+
+    const mismatchedDigest = "0".repeat(64);
+    await writeFile(join(directory, `${mismatchedDigest}.png`), bytes);
+    await expect(
+      store.verifyImportedAsset({
+        ...asset,
+        digest: mismatchedDigest,
+        filename: `${mismatchedDigest}.png`,
+        url: `/api/assets/${mismatchedDigest}.png`,
+      }),
+    ).rejects.toThrow(/digest/i);
+
+    const corrupt = Buffer.from("not a PNG");
+    const corruptDigest = createHash("sha256").update(corrupt).digest("hex");
+    await writeFile(join(directory, `${corruptDigest}.png`), corrupt);
+    await expect(
+      store.verifyImportedAsset({
+        ...asset,
+        digest: corruptDigest,
+        filename: `${corruptDigest}.png`,
+        url: `/api/assets/${corruptDigest}.png`,
+        byteLength: corrupt.length,
+      }),
+    ).rejects.toThrow(/unsupported|format/i);
   });
 });

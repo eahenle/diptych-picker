@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
+import type { ImportedAssetMetadata } from "@/domain/import-session";
 import type {
   AssetStore,
   CompletedAssetMetadata,
@@ -72,6 +73,67 @@ export class LocalAssetStore implements AssetStore {
       metadata.width !== metadata.height
     ) {
       throw new Error("Existing asset must be a square PNG");
+    }
+    await image.raw().toBuffer();
+  }
+
+  async verifyImportedAsset(asset: ImportedAssetMetadata): Promise<void> {
+    const maximumByteLength = 20 * 1024 * 1024;
+    const maximumPixels = 1024 * 1024;
+    if (!/^[a-f0-9]{64}$/.test(asset.digest)) {
+      throw new Error("Imported asset digest must be a SHA-256 digest");
+    }
+    if (asset.filename !== `${asset.digest}.png`) {
+      throw new Error("Imported asset filename must match its digest");
+    }
+    if (asset.url !== `/api/assets/${asset.filename}`) {
+      throw new Error("Imported asset URL must match its filename");
+    }
+    if (asset.contentType !== "image/png") {
+      throw new Error("Imported asset must use image/png");
+    }
+    if (asset.width !== 1024 || asset.height !== 1024) {
+      throw new Error("Imported asset must be exactly 1024x1024");
+    }
+    if (asset.byteLength <= 0 || asset.byteLength > maximumByteLength) {
+      throw new Error(
+        `Imported asset byte length must be within the ${maximumByteLength} byte limit`,
+      );
+    }
+
+    const assetPath = join(
+      /* turbopackIgnore: true */ this.directory,
+      asset.filename,
+    );
+    const file = await stat(assetPath);
+    if (file.size > maximumByteLength) {
+      throw new Error(
+        `Imported asset byte length ${file.size} exceeds the ${maximumByteLength} byte limit`,
+      );
+    }
+    const bytes = await readFile(assetPath);
+    if (bytes.length !== asset.byteLength) {
+      throw new Error(
+        `Imported asset byte length ${bytes.length} does not match reported ${asset.byteLength}`,
+      );
+    }
+    if (contentDigest(bytes) !== asset.digest) {
+      throw new Error("Imported asset digest does not match its bytes");
+    }
+
+    const image = sharp(bytes, {
+      animated: false,
+      failOn: "error",
+      limitInputPixels: maximumPixels,
+    });
+    const metadata = await image.metadata();
+    if (
+      metadata.format !== "png" ||
+      (metadata.pages ?? 1) > 1 ||
+      metadata.width !== 1024 ||
+      metadata.height !== 1024
+    ) {
+      throw new Error("Imported asset bytes must be one 1024x1024 PNG");
     }
     await image.raw().toBuffer();
   }
