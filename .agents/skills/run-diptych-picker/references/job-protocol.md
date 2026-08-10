@@ -28,8 +28,8 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `agent-work/<jobId>/annotation.json`: import-annotation metadata passed by file
 - `agent-work/<jobId>/suggestions.json`: two prompt-card editor proposals passed by file
 - `agent-work/<jobId>/suggestion.json`: one prompt-card blender or writer proposal passed by file
-- `profile-sources/<sha256-of-normalized-png-bytes>.png`: private, metadata-stripped source upload
-- `assets/<sha256-of-png-bytes>.png`: immutable content-addressed generated candidate asset
+- `profile-sources/<sha256-of-normalized-png-bytes>.png`: private analysis copy for source-profile, leaderboard-profile, or prompt-card-writer work
+- `assets/<sha256-of-png-bytes>.png`: immutable content-addressed candidate asset, either generated or a canonical imported normalized asset
 - `output/artifacts/<sha256-of-png-bytes>.png`: discoverable immutable export of every completed candidate
 
 Only the helper scripts move or create mailbox artifacts. The app archives terminal artifacts after reconciling them into game state.
@@ -201,6 +201,15 @@ An import annotation contains only metadata for one immutable normalized asset. 
 ```
 
 The monitor treats annotations as analysis-only interactive work. After any interactive singleton, it may atomically claim up to `workerLimit` oldest annotations, capped at three, and emit one strict batch. Each entry receives exactly one fresh worker and is completed independently.
+
+Before handing an import annotation to its worker, the monitor resolves its image in this order:
+
+1. Resolve the data root as `${LOCAL_DATA_DIR:-.local-data}` and derive the only candidate path as `<data-root>/assets/<asset.filename>`.
+2. Require `asset.filename` to be `<asset.digest>.png`, `asset.url` to be `/api/assets/<asset.filename>`, `asset.contentType` to be `image/png`, dimensions to be 1024 by 1024, and `asset.byteLength` to be present.
+3. Realpath the asset root and candidate file; require the file to stay contained beneath the real asset root and to be a regular file.
+4. Hash the exact file bytes; require that SHA-256 equals `asset.digest` and the byte count equals `asset.byteLength`.
+
+Only then may the monitor give that resolved canonical imported candidate asset to a worker. An import job supplies no arbitrary path and never looks up `profile-sources`; that private directory is only for source-profile, leaderboard-profile, and prompt-card-writer analysis copies.
 
 An interactive source-image analysis has no comparison or preference context. The server fully decodes the PNG, JPEG, or WebP upload, strips metadata by normalizing it to PNG, stores it privately under the data root, and enqueues:
 
