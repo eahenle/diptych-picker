@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Candidate } from "./game";
+import { GENERATION_JOB_ID_PATTERN, type Candidate } from "./game";
 import type { PendingComparisonReceipt } from "./challenger-state";
 import { z } from "zod";
 
@@ -41,6 +41,7 @@ export interface ImportItem {
 
 export interface ImportAnnotationJobRecord {
   id: string;
+  kind: "import-annotation";
   createdAt: string;
   importSessionId: string;
   importItemId: string;
@@ -123,6 +124,9 @@ export interface ImportSupplySnapshot {
 }
 
 const nonBlank = z.string().trim().min(1);
+const durableId = z
+  .string()
+  .regex(GENERATION_JOB_ID_PATTERN, "Invalid durable ID");
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const timestampSchema = z.string().datetime({ offset: true });
 
@@ -175,16 +179,17 @@ export const importedCandidateAnnotationSchema = z
 
 const itemSchema = z
   .object({
-    id: nonBlank,
+    id: durableId,
     normalizedDigest: digestSchema,
     status: z.enum(["annotating", "ready", "failed", "removed", "served"]),
     asset: assetSchema,
     annotationJob: z
       .object({
-        id: nonBlank,
+        id: durableId,
+        kind: z.literal("import-annotation"),
         createdAt: timestampSchema,
-        importSessionId: nonBlank,
-        importItemId: nonBlank,
+        importSessionId: durableId,
+        importItemId: durableId,
         asset: assetSchema,
       })
       .strict()
@@ -197,15 +202,6 @@ const itemSchema = z
   })
   .strict()
   .superRefine((item, context) => {
-    const requiresAnnotation =
-      item.status === "ready" || item.status === "served";
-    if (requiresAnnotation && !item.annotation) {
-      context.addIssue({
-        code: "custom",
-        path: ["annotation"],
-        message: "Ready and served import items require an annotation",
-      });
-    }
     if (
       item.normalizedDigest !== item.asset.digest ||
       (item.annotationJob &&
@@ -225,18 +221,68 @@ const itemSchema = z
         message: "Annotating import items require an annotation job",
       });
     }
-    if (item.status === "failed" && !item.failureMessage) {
+    if (
+      item.status === "annotating" &&
+      (item.annotation ||
+        item.candidateId ||
+        item.failureMessage ||
+        item.servedAt)
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["failureMessage"],
-        message: "Failed import items require a failure message",
+        path: ["status"],
+        message: "Annotating import items may retain only live annotation work",
       });
     }
-    if (item.status === "served" && (!item.candidateId || !item.servedAt)) {
+    if (
+      item.status === "ready" &&
+      (!item.annotation ||
+        !item.candidateId ||
+        item.annotationJob ||
+        item.failureMessage ||
+        item.servedAt)
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["servedAt"],
-        message: "Served import items require candidate and served timestamps",
+        path: ["status"],
+        message:
+          "Ready import items require annotation and candidate evidence only",
+      });
+    }
+    if (
+      item.status === "failed" &&
+      (!item.failureMessage ||
+        item.annotationJob ||
+        item.annotation ||
+        item.candidateId ||
+        item.servedAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Failed import items require terminal failure evidence only",
+      });
+    }
+    if (item.status === "removed" && (item.annotationJob || item.servedAt)) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Removed import items cannot retain live or served evidence",
+      });
+    }
+    if (
+      item.status === "served" &&
+      (!item.annotation ||
+        !item.candidateId ||
+        !item.servedAt ||
+        item.annotationJob ||
+        item.failureMessage)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message:
+          "Served import items require annotation, candidate, and served evidence only",
       });
     }
   });
@@ -301,11 +347,11 @@ const pendingComparisonReceiptSchema = z.union([
 const activationDisplayReceiptSchema = z
   .object({
     kind: z.literal("activation-display"),
-    activationDisplayReceiptId: nonBlank,
-    activationIntentId: nonBlank,
-    importSessionId: nonBlank,
+    activationDisplayReceiptId: durableId,
+    activationIntentId: durableId,
+    importSessionId: durableId,
     replacementSlot: z.enum(["initial-left", "initial-right"]),
-    importItemId: nonBlank,
+    importItemId: durableId,
     candidateId: nonBlank,
     candidate: candidateSchema,
     provenance: z.literal("imported"),
@@ -332,11 +378,11 @@ const activationDisplayReceiptSchema = z
 const dequeueReceiptSchema = z
   .object({
     kind: z.literal("dequeue"),
-    dequeueOperationId: nonBlank,
-    importSessionId: nonBlank,
+    dequeueOperationId: durableId,
+    importSessionId: durableId,
     originalReceipt: pendingComparisonReceiptSchema,
     replacementSlot: z.enum(["single", "pair-left", "pair-right"]),
-    importItemId: nonBlank,
+    importItemId: durableId,
     candidateId: nonBlank,
     candidate: candidateSchema,
     provenance: z.literal("imported"),
@@ -364,8 +410,8 @@ const dequeueReceiptSchema = z
 
 const initialFillJobSchema = z
   .object({
-    id: nonBlank,
-    attemptId: nonBlank,
+    id: durableId,
+    attemptId: durableId,
     status: z.enum(["pending", "ready", "failed", "superseded"]),
     candidate: candidateSchema.nullable(),
     source: z.literal("generated"),
@@ -375,28 +421,46 @@ const initialFillJobSchema = z
   })
   .strict()
   .superRefine((job, context) => {
-    if (job.status === "ready" && !job.candidate) {
+    if (
+      job.status === "pending" &&
+      (job.candidate || job.failureMessage || job.completedAt)
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["candidate"],
-        message: "Ready initial-fill jobs require a candidate",
+        path: ["status"],
+        message: "Pending initial-fill jobs cannot retain terminal evidence",
       });
     }
-    if (job.status === "ready" && !job.completedAt) {
+    if (
+      job.status === "ready" &&
+      (!job.candidate || !job.completedAt || job.failureMessage)
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["completedAt"],
-        message: "Ready initial-fill jobs require a completion time",
+        path: ["status"],
+        message:
+          "Ready initial-fill jobs require candidate and completion evidence only",
+      });
+    }
+    if (
+      (job.status === "failed" || job.status === "superseded") &&
+      (job.candidate || !job.failureMessage || !job.completedAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message:
+          "Terminal initial-fill jobs require failure and completion evidence only",
       });
     }
   });
 
 const initialFillRetrySchema = z
   .object({
-    failedAttemptId: nonBlank,
-    requestId: nonBlank,
-    replacementAttemptId: nonBlank,
-    replacementJobIds: z.array(nonBlank).min(1),
+    failedAttemptId: durableId,
+    requestId: durableId,
+    replacementAttemptId: durableId,
+    replacementJobIds: z.array(durableId).min(1),
     createdAt: timestampSchema,
   })
   .strict()
@@ -416,7 +480,7 @@ const initialFillRetrySchema = z
 const importSessionSchema: z.ZodType<ImportSession> = z
   .object({
     version: z.literal(1),
-    id: nonBlank,
+    id: durableId,
     status: z.enum(["editing", "preparing", "active", "completed"]),
     createdAt: timestampSchema,
     sealedAt: timestampSchema.nullable(),
@@ -511,6 +575,60 @@ const importSessionSchema: z.ZodType<ImportSession> = z
             "Served receipt candidate and item IDs must match a served import item",
         });
       }
+    }
+
+    const hasServedEvidence =
+      session.servedReceipts.length > 0 ||
+      session.items.some((item) => item.status === "served");
+    const hasLiveOrUnresolvedAnnotation = session.items.some(
+      (item) =>
+        item.annotationJob !== null ||
+        item.status === "annotating" ||
+        item.status === "failed",
+    );
+    const hasPendingInitialFill = session.initialFillJobs.some(
+      (job) => job.status === "pending",
+    );
+
+    if (
+      session.status === "editing" &&
+      (session.sealedAt ||
+        session.activatedAt ||
+        session.initialFillJobs.length > 0 ||
+        session.initialFillRetry ||
+        hasServedEvidence)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message:
+          "Editing import sessions are unsealed and contain no fill or served evidence",
+      });
+    }
+    if (
+      session.status === "preparing" &&
+      (!session.sealedAt || session.activatedAt || hasServedEvidence)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message:
+          "Preparing import sessions are sealed, unactivated, and unserved",
+      });
+    }
+    if (
+      (session.status === "active" || session.status === "completed") &&
+      (!session.sealedAt ||
+        !session.activatedAt ||
+        hasLiveOrUnresolvedAnnotation ||
+        hasPendingInitialFill)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message:
+          "Active and completed import sessions require activation and terminal annotation and fill work",
+      });
     }
 
     if (session.status === "completed") {

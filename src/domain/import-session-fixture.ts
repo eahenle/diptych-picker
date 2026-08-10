@@ -39,6 +39,7 @@ const item = (
     status === "annotating"
       ? {
           id: `${id}-annotation`,
+          kind: "import-annotation",
           createdAt: "2026-08-09T20:00:00.000Z",
           importSessionId: "import-session-1",
           importItemId: id,
@@ -63,7 +64,8 @@ const item = (
           reasoningSummary: "Visible composition and palette.",
           source: "automated",
         },
-  candidateId: status === "served" ? `candidate-${id}` : null,
+  candidateId:
+    status === "ready" || status === "served" ? `candidate-${id}` : null,
   failureMessage: null,
   approvedAt: "2026-08-09T20:00:00.000Z",
   servedAt:
@@ -110,7 +112,7 @@ export const importSessionFixture = (): ImportSession => ({
   sealedAt: "2026-08-09T20:01:00.000Z",
   activatedAt: "2026-08-09T20:04:00.000Z",
   items: [
-    item("annotating", digest("a"), "annotating"),
+    item("ready-primary", digest("a"), "ready"),
     item("ready", digest("b"), "ready"),
     item("served-display", digest("c"), "served"),
     item("served-dequeue", digest("d"), "served"),
@@ -119,12 +121,12 @@ export const importSessionFixture = (): ImportSession => ({
     {
       id: "initial-fill-1",
       attemptId: "fill-attempt-2",
-      status: "pending",
-      candidate: null,
+      status: "ready",
+      candidate: candidate("initial-fill-1"),
       source: "generated",
       importItemId: null,
       failureMessage: null,
-      completedAt: null,
+      completedAt: "2026-08-09T20:02:30.000Z",
     },
   ],
   initialFillRetry: {

@@ -118,6 +118,44 @@ describe("import activation intent schema", () => {
     expect(parseImportActivationIntent(intent())).toEqual(intent());
   });
 
+  it("accepts durable activation IDs and rejects spaces or punctuation", () => {
+    expect(
+      parseImportActivationIntent({
+        ...intent(),
+        expectedOld: {
+          ...intent().expectedOld,
+          gameRevisionId: "Game_Revision-9",
+        },
+        next: {
+          ...intent().next,
+          game: { revisionId: "Game_Next-9", state: game },
+        },
+        supersededJobIds: ["Superseded_Job-9"],
+      }),
+    ).toMatchObject({
+      expectedOld: { gameRevisionId: "Game_Revision-9" },
+      next: { game: { revisionId: "Game_Next-9" } },
+    });
+
+    for (const build of [
+      () => ({ ...intent(), id: "activation intent" }),
+      () => ({
+        ...intent(),
+        expectedOld: { ...intent().expectedOld, gameRevisionId: "game!" },
+      }),
+      () => ({
+        ...intent(),
+        next: {
+          ...intent().next,
+          game: { revisionId: "game revision", state: game },
+        },
+      }),
+      () => ({ ...intent(), supersededJobIds: ["superseded job"] }),
+    ]) {
+      expect(() => parseImportActivationIntent(build())).toThrow();
+    }
+  });
+
   it("rejects unknown top-level activation intent fields", () => {
     expect(() =>
       parseImportActivationIntent({ ...intent(), unexpectedWalField: true }),

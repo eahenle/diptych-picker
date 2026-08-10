@@ -9,6 +9,9 @@ import {
   deriveDequeueOperationId,
   parseImportedCandidateAnnotation,
   parseImportSession,
+  type ImportItem,
+  type ImportItemStatus,
+  type ImportSession,
 } from "./import-session";
 
 const digest = (character: string) => character.repeat(64);
@@ -53,6 +56,136 @@ const dequeueReceipt = {
 
 const session = importSessionFixture;
 
+const annotation = () => ({
+  concept: "copper observatory",
+  prompt: "A copper observatory under a dark coastal sky.",
+  style: ["cinematic"],
+  reasoningSummary: "Visible composition and palette.",
+  source: "automated" as const,
+});
+
+const liveAnnotationJob = (item: ImportItem) => ({
+  id: "annotation-job-1",
+  kind: "import-annotation" as const,
+  createdAt: "2026-08-09T20:00:00.000Z",
+  importSessionId: "import-session-1",
+  importItemId: item.id,
+  asset: item.asset,
+});
+
+const itemForStatus = (status: ImportItemStatus): ImportItem => {
+  const base = completedImportSessionFixture().items[0];
+  switch (status) {
+    case "annotating":
+      return {
+        ...base,
+        status,
+        annotationJob: liveAnnotationJob(base),
+        annotation: null,
+        candidateId: null,
+        failureMessage: null,
+        servedAt: null,
+      };
+    case "ready":
+      return {
+        ...base,
+        status,
+        annotationJob: null,
+        annotation: annotation(),
+        candidateId: "candidate-ready-1",
+        failureMessage: null,
+        servedAt: null,
+      };
+    case "failed":
+      return {
+        ...base,
+        status,
+        annotationJob: null,
+        annotation: null,
+        candidateId: null,
+        failureMessage: "Annotation worker failed safely.",
+        servedAt: null,
+      };
+    case "removed":
+      return {
+        ...base,
+        status,
+        annotationJob: null,
+        annotation: null,
+        candidateId: null,
+        failureMessage: null,
+        servedAt: null,
+      };
+    case "served":
+      return {
+        ...base,
+        status,
+        annotationJob: null,
+        annotation: annotation(),
+        candidateId: "candidate-completed-1",
+        failureMessage: null,
+        servedAt: "2026-08-09T20:02:00.000Z",
+      };
+  }
+};
+
+const sessionForItemStatus = (status: ImportItemStatus): ImportSession => {
+  if (status === "served") {
+    const completed = completedImportSessionFixture();
+    return {
+      ...completed,
+      status: "active",
+      items: [completed.items[0]],
+      initialFillJobs: [],
+      initialFillRetry: null,
+      servedReceipts: [completed.servedReceipts[0]],
+    };
+  }
+  const item = itemForStatus(status);
+  return {
+    ...completedImportSessionFixture(),
+    status:
+      status === "removed" || status === "annotating" ? "editing" : "preparing",
+    sealedAt:
+      status === "ready" || status === "failed"
+        ? "2026-08-09T20:01:00.000Z"
+        : null,
+    activatedAt: null,
+    items: [item],
+    initialFillJobs: [],
+    initialFillRetry: null,
+    servedReceipts: [],
+  };
+};
+
+const sessionWithInitialFill = (
+  status: "pending" | "ready" | "failed" | "superseded",
+): ImportSession => {
+  const base = sessionForItemStatus("removed");
+  return {
+    ...base,
+    status: status === "pending" ? "preparing" : "active",
+    sealedAt: "2026-08-09T20:01:00.000Z",
+    activatedAt: status === "pending" ? null : "2026-08-09T20:04:00.000Z",
+    initialFillJobs: [
+      {
+        id: "initial-fill-1",
+        attemptId: "fill-attempt-1",
+        status,
+        candidate:
+          status === "ready" ? candidate("initial-fill-candidate") : null,
+        source: "generated",
+        importItemId: null,
+        failureMessage:
+          status === "failed" || status === "superseded"
+            ? "Initial fill worker failed safely."
+            : null,
+        completedAt: status === "pending" ? null : "2026-08-09T20:05:00.000Z",
+      },
+    ],
+  };
+};
+
 describe("import session schema", () => {
   it("parses imported annotations at the 120, 500, and 1000 character boundaries", () => {
     const annotation = {
@@ -86,6 +219,417 @@ describe("import session schema", () => {
 
   it("round-trips durable annotations, retry evidence, and both served receipt kinds", () => {
     expect(parseImportSession(session())).toEqual(session());
+  });
+
+  it.each([
+    ["annotating", () => sessionForItemStatus("annotating")],
+    ["ready", () => sessionForItemStatus("ready")],
+    ["failed", () => sessionForItemStatus("failed")],
+    ["removed", () => sessionForItemStatus("removed")],
+    ["served", () => sessionForItemStatus("served")],
+  ] as const)("accepts a coherent %s import item", (_status, build) => {
+    expect(parseImportSession(build())).toEqual(build());
+  });
+
+  it.each([
+    [
+      "annotating annotation evidence",
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.items[0].annotation = annotation();
+        return value;
+      },
+    ],
+    [
+      "annotating candidate evidence",
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.items[0].candidateId = "candidate-1";
+        return value;
+      },
+    ],
+    [
+      "annotating served evidence",
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.items[0].servedAt = "2026-08-09T20:02:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "ready live annotation work",
+      () => {
+        const value = sessionForItemStatus("ready");
+        value.items[0].annotationJob = liveAnnotationJob(value.items[0]);
+        return value;
+      },
+    ],
+    [
+      "ready missing candidate",
+      () => {
+        const value = sessionForItemStatus("ready");
+        value.items[0].candidateId = null;
+        return value;
+      },
+    ],
+    [
+      "ready failure evidence",
+      () => {
+        const value = sessionForItemStatus("ready");
+        value.items[0].failureMessage = "not allowed";
+        return value;
+      },
+    ],
+    [
+      "ready missing annotation evidence",
+      () => {
+        const value = sessionForItemStatus("ready");
+        value.items[0].annotation = null;
+        return value;
+      },
+    ],
+    [
+      "ready served evidence",
+      () => {
+        const value = sessionForItemStatus("ready");
+        value.items[0].servedAt = "2026-08-09T20:02:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "failed annotation evidence",
+      () => {
+        const value = sessionForItemStatus("failed");
+        value.items[0].annotation = annotation();
+        return value;
+      },
+    ],
+    [
+      "failed candidate evidence",
+      () => {
+        const value = sessionForItemStatus("failed");
+        value.items[0].candidateId = "candidate-1";
+        return value;
+      },
+    ],
+    [
+      "failed served evidence",
+      () => {
+        const value = sessionForItemStatus("failed");
+        value.items[0].servedAt = "2026-08-09T20:02:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "removed live annotation work",
+      () => {
+        const value = sessionForItemStatus("removed");
+        value.items[0].annotationJob = liveAnnotationJob(value.items[0]);
+        return value;
+      },
+    ],
+    [
+      "removed served evidence",
+      () => {
+        const value = sessionForItemStatus("removed");
+        value.items[0].servedAt = "2026-08-09T20:02:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "served live annotation work",
+      () => {
+        const value = sessionForItemStatus("served");
+        value.items[0].annotationJob = liveAnnotationJob(value.items[0]);
+        return value;
+      },
+    ],
+    [
+      "served failure evidence",
+      () => {
+        const value = sessionForItemStatus("served");
+        value.items[0].failureMessage = "not allowed";
+        return value;
+      },
+    ],
+  ] as const)("rejects %s", (_name, build) => {
+    expect(() => parseImportSession(build())).toThrow();
+  });
+
+  it("accepts durable IDs at the mailbox boundary and rejects spaces or punctuation", () => {
+    const annotationSession = sessionForItemStatus("annotating");
+    annotationSession.id = "Session_A-9";
+    annotationSession.items[0].id = "Item_A-9";
+    annotationSession.items[0].annotationJob = {
+      ...annotationSession.items[0].annotationJob!,
+      id: "Annotation_A-9",
+      importSessionId: "Session_A-9",
+      importItemId: "Item_A-9",
+    };
+    expect(
+      parseImportSession(annotationSession).items[0].annotationJob,
+    ).toMatchObject({
+      id: "Annotation_A-9",
+      importSessionId: "Session_A-9",
+      importItemId: "Item_A-9",
+    });
+
+    const retrySession = completedImportSessionFixture();
+    retrySession.initialFillJobs[0] = {
+      ...retrySession.initialFillJobs[0],
+      id: "Fill_A-9",
+      attemptId: "Attempt_A-9",
+    };
+    retrySession.initialFillRetry = {
+      failedAttemptId: "Failed_A-9",
+      requestId: "Retry_A-9",
+      replacementAttemptId: "Attempt_A-9",
+      replacementJobIds: ["Fill_A-9"],
+      createdAt: "2026-08-09T20:01:30.000Z",
+    };
+    expect(parseImportSession(retrySession).initialFillRetry).toMatchObject({
+      requestId: "Retry_A-9",
+      replacementJobIds: ["Fill_A-9"],
+    });
+
+    const invalidIds = [
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.id = "session id";
+        value.items[0].annotationJob = {
+          ...value.items[0].annotationJob!,
+          importSessionId: value.id,
+        };
+        return value;
+      },
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.items[0].id = "item!";
+        value.items[0].annotationJob = {
+          ...value.items[0].annotationJob!,
+          importItemId: value.items[0].id,
+        };
+        return value;
+      },
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.items[0].annotationJob = {
+          ...value.items[0].annotationJob!,
+          id: "annotation job",
+        };
+        return value;
+      },
+      () => {
+        const value = sessionWithInitialFill("ready");
+        value.initialFillJobs[0].id = "fill!";
+        return value;
+      },
+      () => {
+        const value = sessionWithInitialFill("ready");
+        value.initialFillJobs[0].attemptId = "attempt id";
+        return value;
+      },
+      () => {
+        const value = completedImportSessionFixture();
+        value.initialFillRetry = {
+          ...value.initialFillRetry!,
+          requestId: "retry id",
+        };
+        return value;
+      },
+      () => {
+        const value = completedImportSessionFixture();
+        value.initialFillRetry = {
+          ...value.initialFillRetry!,
+          failedAttemptId: "failed!",
+        };
+        return value;
+      },
+      () => {
+        const value = completedImportSessionFixture();
+        value.initialFillRetry = {
+          ...value.initialFillRetry!,
+          replacementAttemptId: "replacement attempt",
+        };
+        return value;
+      },
+      () => {
+        const value = completedImportSessionFixture();
+        value.initialFillRetry = {
+          ...value.initialFillRetry!,
+          replacementJobIds: ["replacement!"],
+        };
+        return value;
+      },
+    ];
+    for (const build of invalidIds) {
+      expect(() => parseImportSession(build())).toThrow();
+    }
+  });
+
+  it.each([
+    ["pending", () => sessionWithInitialFill("pending")],
+    ["ready", () => sessionWithInitialFill("ready")],
+    ["failed", () => sessionWithInitialFill("failed")],
+    ["superseded", () => sessionWithInitialFill("superseded")],
+  ] as const)("accepts a coherent %s initial-fill job", (_status, build) => {
+    expect(parseImportSession(build())).toEqual(build());
+  });
+
+  it.each([
+    [
+      "pending terminal evidence",
+      () => {
+        const value = sessionWithInitialFill("pending");
+        value.initialFillJobs[0].completedAt = "2026-08-09T20:05:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "ready failure evidence",
+      () => {
+        const value = sessionWithInitialFill("ready");
+        value.initialFillJobs[0].failureMessage = "not allowed";
+        return value;
+      },
+    ],
+    [
+      "ready missing candidate evidence",
+      () => {
+        const value = sessionWithInitialFill("ready");
+        value.initialFillJobs[0].candidate = null;
+        return value;
+      },
+    ],
+    [
+      "failed candidate evidence",
+      () => {
+        const value = sessionWithInitialFill("failed");
+        value.initialFillJobs[0].candidate = candidate(
+          "initial-fill-candidate",
+        );
+        return value;
+      },
+    ],
+    [
+      "failed missing terminal failure evidence",
+      () => {
+        const value = sessionWithInitialFill("failed");
+        value.initialFillJobs[0].failureMessage = null;
+        return value;
+      },
+    ],
+    [
+      "superseded candidate evidence",
+      () => {
+        const value = sessionWithInitialFill("superseded");
+        value.initialFillJobs[0].candidate = candidate(
+          "initial-fill-candidate",
+        );
+        return value;
+      },
+    ],
+    [
+      "superseded missing terminal failure evidence",
+      () => {
+        const value = sessionWithInitialFill("superseded");
+        value.initialFillJobs[0].failureMessage = null;
+        return value;
+      },
+    ],
+  ] as const)("rejects %s initial-fill job", (_name, build) => {
+    expect(() => parseImportSession(build())).toThrow();
+  });
+
+  it.each([
+    ["editing", () => sessionForItemStatus("annotating")],
+    ["preparing", () => sessionForItemStatus("failed")],
+    ["active", () => sessionWithInitialFill("ready")],
+    ["completed", () => completedImportSessionFixture()],
+  ] as const)("accepts a coherent %s import session", (_status, build) => {
+    expect(parseImportSession(build()).status).toBe(_status);
+  });
+
+  it.each([
+    [
+      "editing seal evidence",
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.sealedAt = "2026-08-09T20:01:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "editing initial-fill work",
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.initialFillJobs =
+          sessionWithInitialFill("pending").initialFillJobs;
+        return value;
+      },
+    ],
+    [
+      "preparing activation evidence",
+      () => {
+        const value = sessionForItemStatus("failed");
+        value.activatedAt = "2026-08-09T20:04:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "preparing served evidence",
+      () => {
+        const value = sessionForItemStatus("served");
+        value.status = "preparing";
+        value.activatedAt = null;
+        return value;
+      },
+    ],
+    [
+      "active without seal evidence",
+      () => {
+        const value = sessionWithInitialFill("ready");
+        value.sealedAt = null;
+        return value;
+      },
+    ],
+    [
+      "active without activation evidence",
+      () => {
+        const value = sessionWithInitialFill("ready");
+        value.activatedAt = null;
+        return value;
+      },
+    ],
+    [
+      "active live annotation work",
+      () => {
+        const value = sessionForItemStatus("annotating");
+        value.status = "active";
+        value.sealedAt = "2026-08-09T20:01:00.000Z";
+        value.activatedAt = "2026-08-09T20:04:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "active pending initial-fill work",
+      () => {
+        const value = sessionWithInitialFill("pending");
+        value.status = "active";
+        value.activatedAt = "2026-08-09T20:04:00.000Z";
+        return value;
+      },
+    ],
+    [
+      "completed without seal evidence",
+      () => {
+        const value = completedImportSessionFixture();
+        value.sealedAt = null;
+        return value;
+      },
+    ],
+  ] as const)("rejects %s", (_name, build) => {
+    expect(() => parseImportSession(build())).toThrow();
   });
 
   it("requires completed sessions to be fully served and terminal", () => {
@@ -124,7 +668,9 @@ describe("import session schema", () => {
     );
 
     const annotationPending = completedImportSessionFixture();
-    annotationPending.items[0].annotationJob = session().items[0].annotationJob;
+    annotationPending.items[0].annotationJob = liveAnnotationJob(
+      annotationPending.items[0],
+    );
     expect(() => parseImportSession(annotationPending)).toThrow(
       /completed.*annotation/i,
     );
@@ -133,7 +679,7 @@ describe("import session schema", () => {
     removedWithAnnotation.items[0] = {
       ...removedWithAnnotation.items[0],
       status: "removed",
-      annotationJob: session().items[0].annotationJob,
+      annotationJob: liveAnnotationJob(removedWithAnnotation.items[0]),
     };
     removedWithAnnotation.servedReceipts =
       removedWithAnnotation.servedReceipts.filter(
@@ -155,71 +701,47 @@ describe("import session schema", () => {
     );
   });
 
-  it("requires the complete merged item, annotation-job, initial-fill, and retry evidence", () => {
-    const value = session() as unknown as Record<string, unknown>;
-    const items = value.items as Array<Record<string, unknown>>;
-    value.status = "preparing";
-    value.items = items.map((entry, index) => ({
-      ...entry,
-      normalizedDigest: (entry.asset as { digest: string }).digest,
-      annotationJob:
-        index === 0
-          ? {
-              id: "annotating-job",
-              createdAt: "2026-08-09T20:00:00.000Z",
-              importSessionId: "import-session-1",
-              importItemId: "annotating",
-              asset: entry.asset,
-            }
-          : null,
-      candidateId:
-        index === 2
-          ? "candidate-served-display"
-          : index === 3
-            ? "candidate-served-dequeue"
-            : null,
-      approvedAt: "2026-08-09T20:00:00.000Z",
-      servedAt:
-        index === 2
-          ? "2026-08-09T20:02:00.000Z"
-          : index === 3
-            ? "2026-08-09T20:03:00.000Z"
-            : null,
-    }));
-    value.initialFillJobs = [
-      {
-        id: "initial-fill-1",
-        attemptId: "attempt-1",
-        status: "ready",
-        candidate: candidate("initial-fill-candidate"),
-        source: "generated",
-        importItemId: null,
-        failureMessage: null,
-        completedAt: "2026-08-09T20:02:30.000Z",
-      },
-    ];
-    value.initialFillRetry = {
+  it("parses complete annotation-job, initial-fill, and retry evidence", () => {
+    const annotationSession = sessionForItemStatus("annotating");
+    expect(
+      parseImportSession(annotationSession).items[0].annotationJob,
+    ).toMatchObject({
+      kind: "import-annotation",
+      importItemId: annotationSession.items[0].id,
+    });
+
+    const fillSession = sessionWithInitialFill("ready");
+    fillSession.initialFillRetry = {
       requestId: "retry-request-1",
       failedAttemptId: "attempt-0",
-      replacementAttemptId: "attempt-1",
+      replacementAttemptId: "fill-attempt-1",
       replacementJobIds: ["initial-fill-1"],
       createdAt: "2026-08-09T20:01:30.000Z",
     };
-    const parsed = parseImportSession(value);
-    expect(parsed.status).toBe("preparing");
-    expect(parsed.items[0]).toMatchObject({
-      normalizedDigest: "a".repeat(64),
-      annotationJob: { importItemId: "annotating" },
+    expect(parseImportSession(fillSession).initialFillRetry).toMatchObject({
+      replacementAttemptId: "fill-attempt-1",
     });
-    expect(parsed.initialFillRetry?.replacementAttemptId).toBe("attempt-1");
   });
 
   it("rejects annotation work for a different import session", () => {
     const value = session();
-    value.items[0].annotationJob = {
-      ...value.items[0].annotationJob!,
-      importSessionId: "different-import-session",
+    value.items[0] = {
+      ...value.items[0],
+      status: "annotating",
+      annotation: null,
+      candidateId: null,
+      annotationJob: {
+        ...liveAnnotationJob(value.items[0]),
+        importSessionId: "different-import-session",
+      },
     };
+    value.status = "editing";
+    value.sealedAt = null;
+    value.activatedAt = null;
+    value.items = [value.items[0]];
+    value.initialFillJobs = [];
+    value.initialFillRetry = null;
+    value.servedReceipts = [];
 
     expect(() => parseImportSession(value)).toThrow(/annotation.*session/i);
   });
@@ -229,6 +751,7 @@ describe("import session schema", () => {
     withoutCandidate.initialFillJobs[0] = {
       ...withoutCandidate.initialFillJobs[0],
       status: "ready",
+      candidate: null,
       completedAt: "2026-08-09T20:02:30.000Z",
     };
     expect(() => parseImportSession(withoutCandidate)).toThrow(
@@ -240,6 +763,7 @@ describe("import session schema", () => {
       ...withoutCompletion.initialFillJobs[0],
       status: "ready",
       candidate: candidate("initial-fill-candidate"),
+      completedAt: null,
     };
     expect(() => parseImportSession(withoutCompletion)).toThrow(
       /ready.*completion/i,
@@ -299,7 +823,10 @@ describe("import session schema", () => {
 
   it("rejects duplicate item IDs and nonremoved asset digests", () => {
     const duplicateId = session();
-    duplicateId.items[1] = { ...duplicateId.items[1], id: "annotating" };
+    duplicateId.items[1] = {
+      ...duplicateId.items[1],
+      id: duplicateId.items[0].id,
+    };
     expect(() => parseImportSession(duplicateId)).toThrow(
       /item.*unique|unique.*item/i,
     );

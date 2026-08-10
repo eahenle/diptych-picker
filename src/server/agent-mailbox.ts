@@ -664,8 +664,9 @@ export type PromptCardWriterJob = z.infer<typeof promptCardWriterJobSchema>;
 export type PromptCardWriterResult = z.infer<
   typeof promptCardWriterResultSchema
 >;
-export type ImportAnnotationRequest = z.infer<
-  typeof importAnnotationJobSchema
+export type ImportAnnotationRequest = Omit<
+  z.infer<typeof importAnnotationJobSchema>,
+  "asset"
 > & {
   asset: ImportedAssetMetadata;
 };
@@ -843,7 +844,9 @@ export class FileGenerationMailbox
     await this.enqueueValidated(validated);
   }
 
-  private async enqueueValidated(validated: AgentJob): Promise<void> {
+  private async enqueueValidated(
+    validated: z.infer<typeof mailboxJobSchema>,
+  ): Promise<void> {
     const operationKey = `${resolve(this.rootDirectory)}\0${validated.id}`;
     const operationToken = crypto.randomUUID();
     if (FileGenerationMailbox.inFlightEnqueues.has(operationKey)) {

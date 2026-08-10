@@ -10,7 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseImportedCandidateAnnotation } from "@/domain/import-session";
+import {
+  parseImportedCandidateAnnotation,
+  parseImportSession,
+} from "@/domain/import-session";
+import { importSessionFixture } from "@/domain/import-session-fixture";
 import {
   FileGenerationMailbox,
   generationJobSchema,
@@ -314,6 +318,45 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("enqueues an annotation request parsed from durable import state", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const session = importSessionFixture();
+    const importItem = session.items[0];
+    const annotationJob = {
+      ...importAnnotationJob(),
+      importSessionId: session.id,
+      importItemId: importItem.id,
+      asset: importItem.asset,
+    };
+    const parsed = parseImportSession({
+      ...session,
+      status: "editing",
+      sealedAt: null,
+      activatedAt: null,
+      items: [
+        {
+          ...importItem,
+          status: "annotating",
+          annotationJob,
+          annotation: null,
+          candidateId: null,
+          failureMessage: null,
+          servedAt: null,
+        },
+      ],
+      initialFillJobs: [],
+      initialFillRetry: null,
+      servedReceipts: [],
+    });
+
+    await mailbox.enqueueImportAnnotation(parsed.items[0].annotationJob!);
+
+    await expect(
+      mailbox.readImportAnnotationWork(annotationJob.id),
+    ).resolves.toEqual(annotationJob);
+  });
+
   it("rejects annotations beyond the domain contract and returns domain-reconcilable metadata", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);

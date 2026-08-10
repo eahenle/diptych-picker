@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { ChallengerState } from "@/domain/challenger-state";
-import type { GameState } from "@/domain/game";
+import { GENERATION_JOB_ID_PATTERN, type GameState } from "@/domain/game";
 import {
   parseImportSession,
   type ImportSession,
@@ -67,40 +67,43 @@ interface LockOwner {
 }
 
 const nonBlank = z.string().trim().min(1);
+const durableId = z
+  .string()
+  .regex(GENERATION_JOB_ID_PATTERN, "Invalid durable ID");
 const timestampSchema = z.string().datetime({ offset: true });
 const bootstrapSchema: z.ZodType<InitialBootstrap> = z
   .object({
-    batchId: nonBlank,
+    batchId: durableId,
     createdAt: timestampSchema,
     preferenceSeed: nonBlank,
     jobs: z.tuple([
-      z.object({ id: nonBlank, side: z.literal("left") }).strict(),
-      z.object({ id: nonBlank, side: z.literal("right") }).strict(),
+      z.object({ id: durableId, side: z.literal("left") }).strict(),
+      z.object({ id: durableId, side: z.literal("right") }).strict(),
     ]),
   })
   .strict();
 
 const intentEnvelopeSchema = z
   .object({
-    id: nonBlank,
+    id: durableId,
     expectedOld: z
       .object({
-        importSessionId: nonBlank,
-        gameRevisionId: nonBlank.nullable(),
-        challengerSessionId: nonBlank.nullable(),
-        bootstrapBatchId: nonBlank.nullable(),
+        importSessionId: durableId,
+        gameRevisionId: durableId.nullable(),
+        challengerSessionId: durableId.nullable(),
+        bootstrapBatchId: durableId.nullable(),
       })
       .strict(),
     next: z
       .object({
-        game: z.object({ revisionId: nonBlank, state: z.unknown() }).strict(),
+        game: z.object({ revisionId: durableId, state: z.unknown() }).strict(),
         challengers: z.unknown(),
         bootstrap: bootstrapSchema.nullable(),
         importSession: z.unknown(),
       })
       .strict(),
-    supersededJobIds: z.array(nonBlank),
-    archivedSupersededJobIds: z.array(nonBlank),
+    supersededJobIds: z.array(durableId),
+    archivedSupersededJobIds: z.array(durableId),
     phase: z.enum(["prepared", "writing", "committed", "cleaned"]),
     outcome: z.enum(["undecided", "commit", "rollback"]),
     preparedAt: timestampSchema,
