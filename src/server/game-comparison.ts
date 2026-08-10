@@ -4,6 +4,7 @@ import {
   type CandidateRating,
   type ChallengerState,
   type PendingComparisonReceipt,
+  type ReusableCandidateSource,
 } from "@/domain/challenger-state";
 import {
   candidateAt,
@@ -19,9 +20,12 @@ export interface ComparisonRatingConfig {
   poolMaximum: number;
 }
 
-export function candidateSource(
-  candidate: Candidate,
-): CandidateRating["source"] {
+const reusableCandidateSources = new Set<ReusableCandidateSource>([
+  "curated",
+  "generated",
+]);
+
+export function candidateSource(candidate: Candidate): ReusableCandidateSource {
   return candidate.imageUrl.startsWith("/seed-assets/")
     ? "curated"
     : "generated";
@@ -29,10 +33,13 @@ export function candidateSource(
 
 export function createCandidateRating(
   candidate: Candidate,
-  source: CandidateRating["source"],
+  source: ReusableCandidateSource,
   poolMember: boolean,
   initialRating: number,
 ): CandidateRating {
+  if (!reusableCandidateSources.has(source)) {
+    throw new Error("Imported ratings require an import item ID");
+  }
   return {
     candidate,
     rating: initialRating,

@@ -75,7 +75,10 @@ const intent = (): ImportActivationIntent => ({
     bootstrapBatchId: "bootstrap-previous",
   },
   next: {
-    game,
+    game: {
+      revisionId: "game-revision-next",
+      state: game,
+    },
     challengers,
     bootstrap: null,
     importSession: importSessionFixture(),
@@ -158,6 +161,43 @@ describe("import activation intent schema", () => {
     );
   });
 
+  it("rejects a cleaned intent whose outcome is still undecided", () => {
+    const value = intent();
+    value.phase = "cleaned";
+    value.cleanedAt = "2026-08-09T20:07:00.000Z";
+
+    expect(() => parseImportActivationIntent(value)).toThrow(
+      /cleaned.*outcome|outcome.*cleaned/i,
+    );
+  });
+
+  it("round-trips the intended game revision envelope", () => {
+    const value = intent() as unknown as Record<string, unknown>;
+    (value.next as Record<string, unknown>).game = {
+      revisionId: "game-revision-next",
+      state: game,
+    };
+
+    expect(parseImportActivationIntent(value)).toMatchObject({
+      next: {
+        game: {
+          revisionId: "game-revision-next",
+          state: game,
+        },
+      },
+    });
+  });
+
+  it("rejects an intended game revision envelope without a revision ID", () => {
+    const value = intent() as unknown as Record<string, unknown>;
+    (value.next as Record<string, unknown>).game = {
+      revisionId: "",
+      state: game,
+    };
+
+    expect(() => parseImportActivationIntent(value)).toThrow(/revision/i);
+  });
+
   it("rejects duplicate and unknown archived job IDs", () => {
     const duplicate = intent();
     duplicate.archivedSupersededJobIds = [
@@ -235,8 +275,37 @@ describe("JsonImportActivationIntentRepository", () => {
       /expected|intent/i,
     );
     await expect(repository.load()).resolves.toEqual(value);
-    await repository.clear(value.id);
+    await expect(repository.clear(value.id)).rejects.toThrow(/cleaned/i);
+    const cleaned = intent();
+    cleaned.phase = "cleaned";
+    cleaned.outcome = "rollback";
+    cleaned.cleanedAt = "2026-08-09T20:07:00.000Z";
+    await repository.save(cleaned);
+    await repository.clear(cleaned.id);
     await expect(repository.load()).resolves.toBeNull();
+  });
+
+  it("preserves the prior intent when atomic save is interrupted", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "diptych-activation-intent-"),
+    );
+    const file = join(directory, "activation-intent.json");
+    const repository = new JsonImportActivationIntentRepository(file);
+    const previous = intent();
+    await repository.save(previous);
+    const interrupted = new JsonImportActivationIntentRepository(file, {
+      renameFile: async () => {
+        throw new Error("interrupted rename");
+      },
+    } as never);
+
+    await expect(
+      interrupted.save({
+        ...previous,
+        preparedAt: "2026-08-09T20:05:01.000Z",
+      }),
+    ).rejects.toThrow("interrupted rename");
+    await expect(repository.load()).resolves.toEqual(previous);
   });
 
   it("preserves the matching intent when atomic clear is interrupted", async () => {
@@ -246,6 +315,9 @@ describe("JsonImportActivationIntentRepository", () => {
     const file = join(directory, "activation-intent.json");
     const repository = new JsonImportActivationIntentRepository(file);
     const value = intent();
+    value.phase = "cleaned";
+    value.outcome = "rollback";
+    value.cleanedAt = "2026-08-09T20:07:00.000Z";
     await repository.save(value);
     const interrupted = new JsonImportActivationIntentRepository(file, {
       renameFile: async () => {
@@ -257,7 +329,12 @@ describe("JsonImportActivationIntentRepository", () => {
       "interrupted rename",
     );
     await expect(repository.load()).resolves.toEqual(value);
-    await repository.clear(value.id);
+    const cleaned = intent();
+    cleaned.phase = "cleaned";
+    cleaned.outcome = "rollback";
+    cleaned.cleanedAt = "2026-08-09T20:07:00.000Z";
+    await repository.save(cleaned);
+    await repository.clear(cleaned.id);
     await expect(repository.load()).resolves.toBeNull();
   });
 

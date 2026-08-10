@@ -75,7 +75,15 @@ const populatedState: ChallengerState = {
       enqueuedAt: "2026-07-16T20:01:00.000Z",
     },
   ],
-  importQueue: [],
+  importQueue: [
+    {
+      candidate: candidate("imported-queue-item"),
+      source: "imported",
+      importItemId: "import-item-queue-1",
+      pinnedWinnerId: null,
+      enqueuedAt: "2026-07-16T20:01:00.000Z",
+    },
+  ],
   refillJobs: [
     {
       jobId: "job-1",
@@ -117,6 +125,7 @@ async function expectSessionReset(
     ...populatedState,
     sessionId: "next-session",
     ready: [],
+    importQueue: [],
     refillJobs: [],
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,

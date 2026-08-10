@@ -48,6 +48,24 @@ describe("JsonImportSessionRepository", () => {
     await expect(repository.load()).resolves.toBeNull();
   });
 
+  it("preserves the prior session when atomic save is interrupted", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-import-session-"));
+    const file = join(directory, "import-session.json");
+    const repository = new JsonImportSessionRepository(file);
+    const previous = importSessionFixture();
+    await repository.save(previous);
+    const interrupted = new JsonImportSessionRepository(file, {
+      renameFile: async () => {
+        throw new Error("interrupted rename");
+      },
+    } as never);
+
+    await expect(
+      interrupted.save({ ...previous, status: "completed" }),
+    ).rejects.toThrow("interrupted rename");
+    await expect(repository.load()).resolves.toEqual(previous);
+  });
+
   it("serializes operations across repository instances for one session file", async () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-import-session-"));
     const file = join(directory, "import-session.json");

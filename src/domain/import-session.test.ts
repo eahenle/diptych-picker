@@ -113,6 +113,56 @@ describe("import session schema", () => {
     expect(parsed.initialFillRetry?.replacementAttemptId).toBe("attempt-1");
   });
 
+  it("rejects annotation work for a different import session", () => {
+    const value = session();
+    value.items[0].annotationJob = {
+      ...value.items[0].annotationJob!,
+      importSessionId: "different-import-session",
+    };
+
+    expect(() => parseImportSession(value)).toThrow(/annotation.*session/i);
+  });
+
+  it("rejects ready initial-fill jobs without a candidate and completion time", () => {
+    const withoutCandidate = session();
+    withoutCandidate.initialFillJobs[0] = {
+      ...withoutCandidate.initialFillJobs[0],
+      status: "ready",
+      completedAt: "2026-08-09T20:02:30.000Z",
+    };
+    expect(() => parseImportSession(withoutCandidate)).toThrow(
+      /ready.*candidate/i,
+    );
+
+    const withoutCompletion = session();
+    withoutCompletion.initialFillJobs[0] = {
+      ...withoutCompletion.initialFillJobs[0],
+      status: "ready",
+      candidate: candidate("initial-fill-candidate"),
+    };
+    expect(() => parseImportSession(withoutCompletion)).toThrow(
+      /ready.*completion/i,
+    );
+  });
+
+  it("requires retry replacement jobs to exist in the replacement attempt", () => {
+    const missingJob = session();
+    missingJob.initialFillRetry = {
+      ...missingJob.initialFillRetry!,
+      replacementJobIds: ["missing-job"],
+    };
+    expect(() => parseImportSession(missingJob)).toThrow(/replacement.*job/i);
+
+    const wrongAttempt = session();
+    wrongAttempt.initialFillJobs[0] = {
+      ...wrongAttempt.initialFillJobs[0],
+      attemptId: "different-attempt",
+    };
+    expect(() => parseImportSession(wrongAttempt)).toThrow(
+      /replacement.*attempt/i,
+    );
+  });
+
   it("rejects an activation journal embedded in the import aggregate", () => {
     expect(() =>
       parseImportSession({ ...session(), activation: { id: "not-allowed" } }),

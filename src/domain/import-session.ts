@@ -373,7 +373,23 @@ const initialFillJobSchema = z
     failureMessage: nonBlank.nullable(),
     completedAt: timestampSchema.nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((job, context) => {
+    if (job.status === "ready" && !job.candidate) {
+      context.addIssue({
+        code: "custom",
+        path: ["candidate"],
+        message: "Ready initial-fill jobs require a candidate",
+      });
+    }
+    if (job.status === "ready" && !job.completedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["completedAt"],
+        message: "Ready initial-fill jobs require a completion time",
+      });
+    }
+  });
 
 const initialFillRetrySchema = z
   .object({
@@ -428,6 +444,16 @@ const importSessionSchema: z.ZodType<ImportSession> = z
         });
       }
       itemIds.add(item.id);
+      if (
+        item.annotationJob &&
+        item.annotationJob.importSessionId !== session.id
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["items", index, "annotationJob", "importSessionId"],
+          message: "Annotation job must reference this import session",
+        });
+      }
       if (item.status !== "removed") {
         if (activeDigests.has(item.asset.digest)) {
           context.addIssue({
@@ -489,6 +515,7 @@ const importSessionSchema: z.ZodType<ImportSession> = z
 
     const jobIds = new Set<string>();
     const attemptIds = new Set<string>();
+    const jobsById = new Map<string, InitialFillJobRecord>();
     for (const [index, job] of session.initialFillJobs.entries()) {
       if (jobIds.has(job.id)) {
         context.addIssue({
@@ -499,6 +526,7 @@ const importSessionSchema: z.ZodType<ImportSession> = z
       }
       jobIds.add(job.id);
       attemptIds.add(job.attemptId);
+      jobsById.set(job.id, job);
     }
     if (
       session.initialFillRetry &&
@@ -520,6 +548,25 @@ const importSessionSchema: z.ZodType<ImportSession> = z
         path: ["initialFillRetry", "replacementAttemptId"],
         message: "Initial fill retry must reference its replacement attempt",
       });
+    }
+    if (session.initialFillRetry) {
+      for (const [
+        index,
+        jobId,
+      ] of session.initialFillRetry.replacementJobIds.entries()) {
+        const job = jobsById.get(jobId);
+        if (
+          !job ||
+          job.attemptId !== session.initialFillRetry.replacementAttemptId
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["initialFillRetry", "replacementJobIds", index],
+            message:
+              "Retry replacement jobs must exist in the replacement attempt",
+          });
+        }
+      }
     }
   });
 

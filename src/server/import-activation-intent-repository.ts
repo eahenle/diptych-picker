@@ -32,7 +32,7 @@ export interface ImportActivationIntent {
     bootstrapBatchId: string | null;
   };
   next: {
-    game: GameState;
+    game: { revisionId: string; state: GameState };
     challengers: ChallengerState;
     bootstrap: InitialBootstrap | null;
     importSession: ImportSession;
@@ -93,7 +93,7 @@ const intentEnvelopeSchema = z
       .strict(),
     next: z
       .object({
-        game: z.unknown(),
+        game: z.object({ revisionId: nonBlank, state: z.unknown() }).strict(),
         challengers: z.unknown(),
         bootstrap: bootstrapSchema.nullable(),
         importSession: z.unknown(),
@@ -107,7 +107,6 @@ const intentEnvelopeSchema = z
     committedAt: timestampSchema.nullable(),
     cleanedAt: timestampSchema.nullable(),
   })
-  .strict()
   .superRefine((intent, context) => {
     const superseded = new Set(intent.supersededJobIds);
     if (superseded.size !== intent.supersededJobIds.length) {
@@ -144,6 +143,13 @@ const intentEnvelopeSchema = z
         path: ["phase"],
         message:
           "Prepared intents cannot contain commit, cleanup, or archive evidence",
+      });
+    }
+    if (intent.phase === "cleaned" && intent.outcome === "undecided") {
+      context.addIssue({
+        code: "custom",
+        path: ["outcome"],
+        message: "Cleaned intents require a commit or rollback outcome",
       });
     }
     if (
@@ -208,7 +214,10 @@ export function parseImportActivationIntent(
   const parsed = intentEnvelopeSchema.parse(value);
   const importSession = parseImportSession(parsed.next.importSession);
   const challengers = parseChallengerState(parsed.next.challengers);
-  const game = parseGameState(parsed.next.game);
+  const game = {
+    revisionId: parsed.next.game.revisionId,
+    state: parseGameState(parsed.next.game.state),
+  };
   if (importSession.id !== parsed.expectedOld.importSessionId) {
     throw new Error(
       "Expected import session must match the intended import session",
@@ -310,6 +319,9 @@ export class JsonImportActivationIntentRepository implements ImportActivationInt
       throw new Error(
         `Expected activation intent ${expectedIntentId}, found ${current.id}`,
       );
+    }
+    if (current && current.phase !== "cleaned") {
+      throw new Error("Only cleaned activation intents can be cleared");
     }
     if (current) await this.writeNull();
   }

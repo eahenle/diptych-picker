@@ -804,6 +804,30 @@ describe("challenger state", () => {
     expect(evidence.entries).toHaveLength(6);
   });
 
+  it("reranks reusable evidence after excluding an imported leader", () => {
+    const evidence = summarizeLeaderboardPreferenceEvidence(
+      state({
+        ratings: [
+          rating("imported", 1200, {
+            source: "imported",
+            importItemId: "import-item-1",
+          }),
+          rating("reusable-first", 1180),
+          rating("reusable-second", 1160),
+        ],
+      }),
+      3,
+    );
+
+    expect(evidence).toMatchObject({
+      poolSize: 2,
+      entries: [
+        { rank: 1, candidateId: "reusable-first" },
+        { rank: 2, candidateId: "reusable-second" },
+      ],
+    });
+  });
+
   it("builds newest-first display-safe comparison history", () => {
     const entries = summarizeComparisonHistory(
       [
