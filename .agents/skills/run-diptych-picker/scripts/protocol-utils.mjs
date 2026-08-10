@@ -31,7 +31,7 @@ export function exportDirectory() {
 }
 
 export function parseArgs(values, booleanNames = []) {
-  const parsed = {};
+  const parsed = Object.create(null);
   const booleans = new Set(booleanNames);
   for (let index = 0; index < values.length;) {
     const key = values[index];

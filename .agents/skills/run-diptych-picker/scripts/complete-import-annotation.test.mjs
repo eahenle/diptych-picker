@@ -128,6 +128,9 @@ test("rejects unknown flags and explicit image input before outcome reservation"
   for (const extraArgs of [
     ["--unexpected", "value"],
     ["--image", "candidate.png"],
+    ["--__proto__", "ignored"],
+    ["--constructor", "ignored"],
+    ["--prototype", "ignored"],
   ]) {
     const root = await setup();
     await assert.rejects(() => run(root, annotation, extraArgs));

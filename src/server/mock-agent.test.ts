@@ -107,8 +107,8 @@ describe("deterministic mock mailbox worker", () => {
       now: () => "2026-08-09T18:01:00.000Z",
     });
     const mailbox = new MockImportAnnotationMailbox(fileMailbox, worker);
-    const firstJob = importAnnotationJob("import-annotation-1");
-    const secondJob = importAnnotationJob("import-annotation-2");
+    const firstJob = importAnnotationJob("import-annotation-32932");
+    const secondJob = importAnnotationJob("import-annotation-104572");
 
     await mailbox.enqueueImportAnnotation(firstJob);
     await mailbox.enqueueImportAnnotation(secondJob);
