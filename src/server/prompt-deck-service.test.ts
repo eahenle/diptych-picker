@@ -57,6 +57,7 @@ function challengers(
     version: 1,
     sessionId: "session-1",
     ready: [],
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     pendingSelectionBaseline: null,
@@ -72,6 +73,7 @@ function challengers(
       source: item.id.startsWith("favorite-")
         ? ("generated" as const)
         : ("curated" as const),
+      importItemId: null,
       poolMember: true,
       lastServedAt: null,
       ...(item.id.startsWith("favorite-") ? { favorite: true } : {}),

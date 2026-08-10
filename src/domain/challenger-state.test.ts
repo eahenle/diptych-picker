@@ -36,6 +36,7 @@ const candidate = (id: string): Candidate => ({
 const buffered = (id: string): BufferedCandidate => ({
   candidate: candidate(id),
   source: "generated",
+  importItemId: null,
   pinnedWinnerId: "winner",
   enqueuedAt: "2026-07-16T00:00:00.000Z",
 });
@@ -50,6 +51,7 @@ const rating = (
   wins: 0,
   losses: 0,
   source: "generated",
+  importItemId: null,
   poolMember: true,
   lastServedAt: null,
   ...overrides,
@@ -59,6 +61,7 @@ const state = (overrides: Partial<ChallengerState> = {}): ChallengerState => ({
   version: 1,
   sessionId: "session-1",
   ready: [],
+  importQueue: [],
   refillJobs: [],
   pendingComparison: null,
   ratings: [],

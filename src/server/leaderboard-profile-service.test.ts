@@ -33,6 +33,7 @@ function rating(id: string, value: number): CandidateRating {
     wins: Math.max(0, Math.round((value - 900) / 20)),
     losses: Math.max(0, Math.round((1100 - value) / 20)),
     source: "generated",
+    importItemId: null,
     poolMember: true,
     lastServedAt: null,
   };
@@ -43,6 +44,7 @@ function state(ratings: CandidateRating[]): ChallengerState {
     version: 1,
     sessionId: "session-1",
     ready: [],
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     ratings,

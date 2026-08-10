@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { session } from "@/domain/import-session.test";
+import { importSessionFixture } from "@/domain/import-session-fixture";
 import type { ChallengerState } from "@/domain/challenger-state";
 import type { GameState } from "@/domain/game";
 import {
@@ -67,9 +67,7 @@ const challengers: ChallengerState = {
 };
 
 const intent = (): ImportActivationIntent => ({
-  version: 1,
   id: "activation-intent-1",
-  createdAt: "2026-08-09T20:05:00.000Z",
   expectedOld: {
     importSessionId: "import-session-1",
     gameRevisionId: "game-revision-previous",
@@ -77,21 +75,87 @@ const intent = (): ImportActivationIntent => ({
     bootstrapBatchId: "bootstrap-previous",
   },
   next: {
-    game: { revisionId: "game-revision-1", state: game },
-    challenger: challengers,
+    game,
+    challengers,
     bootstrap: null,
-    importSession: session(),
+    importSession: importSessionFixture(),
   },
   supersededJobIds: ["bootstrap-previous", "superseded-job-1"],
   archivedSupersededJobIds: [],
   phase: "prepared",
   outcome: "undecided",
+  preparedAt: "2026-08-09T20:05:00.000Z",
   committedAt: null,
+  cleanedAt: null,
 });
 
 describe("import activation intent schema", () => {
+  it("requires the merged journal fields and coherent phase evidence", () => {
+    const prepared = intent() as unknown as Record<string, unknown>;
+    expect(parseImportActivationIntent(prepared)).toMatchObject({
+      phase: "prepared",
+      preparedAt: "2026-08-09T20:05:00.000Z",
+    });
+
+    const preparedWithCommit = structuredClone(prepared);
+    preparedWithCommit.committedAt = "2026-08-09T20:06:00.000Z";
+    expect(() => parseImportActivationIntent(preparedWithCommit)).toThrow(
+      /prepared|commit/i,
+    );
+
+    const writingWithArchive = structuredClone(prepared);
+    writingWithArchive.phase = "writing";
+    writingWithArchive.outcome = "commit";
+    writingWithArchive.archivedSupersededJobIds = ["superseded-job-1"];
+    expect(() => parseImportActivationIntent(writingWithArchive)).toThrow(
+      /writing|archive/i,
+    );
+  });
   it("round-trips the complete intended aggregate with null bootstrap", () => {
     expect(parseImportActivationIntent(intent())).toEqual(intent());
+  });
+
+  it("accepts every valid phase and evidence combination", () => {
+    const writing = intent();
+    writing.phase = "writing";
+    writing.outcome = "commit";
+
+    const committed = structuredClone(writing);
+    committed.phase = "committed";
+    committed.committedAt = "2026-08-09T20:06:00.000Z";
+    committed.archivedSupersededJobIds = ["superseded-job-1"];
+
+    const cleanedCommit = structuredClone(committed);
+    cleanedCommit.phase = "cleaned";
+    cleanedCommit.archivedSupersededJobIds = [
+      "bootstrap-previous",
+      "superseded-job-1",
+    ];
+    cleanedCommit.cleanedAt = "2026-08-09T20:07:00.000Z";
+
+    const cleanedRollback = intent();
+    cleanedRollback.phase = "cleaned";
+    cleanedRollback.outcome = "rollback";
+    cleanedRollback.cleanedAt = "2026-08-09T20:07:00.000Z";
+
+    for (const value of [
+      intent(),
+      writing,
+      committed,
+      cleanedCommit,
+      cleanedRollback,
+    ]) {
+      expect(parseImportActivationIntent(value)).toEqual(value);
+    }
+  });
+
+  it("requires the intended import session to match the expected session", () => {
+    const value = intent();
+    value.expectedOld.importSessionId = "different-import-session";
+
+    expect(() => parseImportActivationIntent(value)).toThrow(
+      /expected.*import|import.*expected/i,
+    );
   });
 
   it("rejects duplicate and unknown archived job IDs", () => {
@@ -169,6 +233,28 @@ describe("JsonImportActivationIntentRepository", () => {
 
     await expect(repository.clear("other-intent")).rejects.toThrow(
       /expected|intent/i,
+    );
+    await expect(repository.load()).resolves.toEqual(value);
+    await repository.clear(value.id);
+    await expect(repository.load()).resolves.toBeNull();
+  });
+
+  it("preserves the matching intent when atomic clear is interrupted", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "diptych-activation-intent-"),
+    );
+    const file = join(directory, "activation-intent.json");
+    const repository = new JsonImportActivationIntentRepository(file);
+    const value = intent();
+    await repository.save(value);
+    const interrupted = new JsonImportActivationIntentRepository(file, {
+      renameFile: async () => {
+        throw new Error("interrupted rename");
+      },
+    } as never);
+
+    await expect(interrupted.clear(value.id)).rejects.toThrow(
+      "interrupted rename",
     );
     await expect(repository.load()).resolves.toEqual(value);
     await repository.clear(value.id);

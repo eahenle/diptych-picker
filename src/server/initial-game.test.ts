@@ -96,6 +96,7 @@ function queue() {
 function challengerState(
   overrides: Partial<ChallengerState> = {},
 ): ChallengerState {
+  const { importQueue = [], ...rest } = overrides;
   return {
     version: 1,
     sessionId: "old-session",
@@ -106,7 +107,8 @@ function challengerState(
     generationTurnaroundEmaMs: 42_000,
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,
-    ...overrides,
+    ...rest,
+    importQueue,
   };
 }
 
@@ -268,6 +270,7 @@ describe("InitialGameService", () => {
       wins: 7,
       losses: 2,
       source: "generated" as const,
+      importItemId: null,
       poolMember: true,
       lastServedAt: "2026-07-15T12:00:00.000Z",
     };

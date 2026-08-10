@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  isReusablePoolLeaderboardEntry,
   summarizePoolLeaderboard,
   type CandidateRating,
   type ChallengerState,
@@ -40,6 +41,7 @@ function rating(item: Candidate, rank: number): CandidateRating {
     wins: 5 - rank,
     losses: rank,
     source: "generated",
+    importItemId: null,
     poolMember: true,
     lastServedAt: null,
   };
@@ -69,6 +71,7 @@ function game(adaptive = true): GameState {
 function challengerState(
   overrides: Partial<ChallengerState> = {},
 ): ChallengerState {
+  const { importQueue = [], ...rest } = overrides;
   return {
     version: 1,
     sessionId: "session-1",
@@ -82,7 +85,8 @@ function challengerState(
     generationTurnaroundEmaMs: 100_000,
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,
-    ...overrides,
+    ...rest,
+    importQueue,
   };
 }
 
@@ -91,7 +95,9 @@ function coordinatorFixture() {
   const results = new Map<string, LeaderboardProfileResult>();
   const desired = vi.fn<LeaderboardProfileCoordinator["desired"]>((state) => ({
     fingerprint: FINGERPRINT,
-    entries: summarizePoolLeaderboard(state).slice(0, 4),
+    entries: summarizePoolLeaderboard(state)
+      .filter(isReusablePoolLeaderboardEntry)
+      .slice(0, 4),
   }));
   const prepare = vi.fn<LeaderboardProfileCoordinator["prepare"]>(
     async (id, createdAt, request) => ({
@@ -347,7 +353,9 @@ describe("LeaderboardProfileReconciler", () => {
     expect(service.current(initial, game(false))).toBeUndefined();
     fixture.desired.mockReturnValue({
       fingerprint: "d".repeat(64),
-      entries: summarizePoolLeaderboard(initial).slice(0, 4),
+      entries: summarizePoolLeaderboard(initial)
+        .filter(isReusablePoolLeaderboardEntry)
+        .slice(0, 4),
     });
     expect(service.current(initial, game())).toBeUndefined();
   });

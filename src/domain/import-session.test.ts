@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Candidate } from "./game";
+import { importSessionFixture } from "./import-session-fixture";
 import {
   deriveActivationDisplayReceiptId,
   deriveDequeueOperationId,
   parseImportSession,
-  type ImportItem,
-  type ImportSession,
 } from "./import-session";
 
 const digest = (character: string) => character.repeat(64);
@@ -18,36 +17,6 @@ const candidate = (id: string): Candidate => ({
   style: ["cinematic"],
   createdAt: "2026-08-09T20:00:00.000Z",
   winCount: 0,
-});
-
-const item = (
-  id: string,
-  assetDigest: string,
-  status: ImportItem["status"],
-): ImportItem => ({
-  id,
-  status,
-  asset: {
-    digest: assetDigest,
-    filename: `${assetDigest}.png`,
-    url: `/api/assets/${assetDigest}.png`,
-    contentType: "image/png",
-    width: 1024,
-    height: 1024,
-    byteLength: 1_024,
-  },
-  annotation:
-    status === "annotating"
-      ? null
-      : {
-          concept: `${id} concept`,
-          prompt: `${id} prompt`,
-          style: ["cinematic"],
-          reasoningSummary: "Visible composition and palette.",
-          source: "automated",
-        },
-  annotationJobId: status === "annotating" ? `${id}-annotation` : null,
-  failureMessage: null,
 });
 
 const originalReceipt = {
@@ -71,57 +40,77 @@ const dequeueReceipt = {
   originalReceipt,
   replacementSlot: "single" as const,
   importItemId: "served-dequeue",
-  candidateId: "served-dequeue",
-  candidate: candidate("served-dequeue"),
+  candidateId: "candidate-served-dequeue",
+  candidate: candidate("candidate-served-dequeue"),
   provenance: "imported" as const,
   roundNumber: 2,
   servedAt: "2026-08-09T20:03:00.000Z",
 };
 
-const session = (): ImportSession => ({
-  version: 1,
-  id: "import-session-1",
-  status: "active",
-  createdAt: "2026-08-09T20:00:00.000Z",
-  sealedAt: "2026-08-09T20:01:00.000Z",
-  activatedAt: "2026-08-09T20:04:00.000Z",
-  items: [
-    item("annotating", digest("a"), "annotating"),
-    item("ready", digest("b"), "ready"),
-    item("served-display", digest("c"), "served"),
-    item("served-dequeue", digest("d"), "served"),
-  ],
-  initialFillJobs: [],
-  initialFillRetry: {
-    failedAttemptId: "fill-attempt-1",
-    requestId: "retry-request-1",
-    replacementJobIds: ["initial-fill-1"],
-    requestedAt: "2026-08-09T20:01:30.000Z",
-  },
-  servedReceipts: [
-    {
-      kind: "activation-display",
-      activationDisplayReceiptId: deriveActivationDisplayReceiptId(
-        "activation-intent-1",
-        "import-session-1",
-        "initial-left",
-      ),
-      activationIntentId: "activation-intent-1",
-      importSessionId: "import-session-1",
-      replacementSlot: "initial-left",
-      importItemId: "served-display",
-      candidateId: "served-display",
-      candidate: candidate("served-display"),
-      provenance: "imported",
-      servedAt: "2026-08-09T20:02:00.000Z",
-    },
-    dequeueReceipt,
-  ],
-});
+const session = importSessionFixture;
 
 describe("import session schema", () => {
   it("round-trips durable annotations, retry evidence, and both served receipt kinds", () => {
     expect(parseImportSession(session())).toEqual(session());
+  });
+
+  it("requires the complete merged item, annotation-job, initial-fill, and retry evidence", () => {
+    const value = session() as unknown as Record<string, unknown>;
+    const items = value.items as Array<Record<string, unknown>>;
+    value.status = "preparing";
+    value.items = items.map((entry, index) => ({
+      ...entry,
+      normalizedDigest: (entry.asset as { digest: string }).digest,
+      annotationJob:
+        index === 0
+          ? {
+              id: "annotating-job",
+              createdAt: "2026-08-09T20:00:00.000Z",
+              importSessionId: "import-session-1",
+              importItemId: "annotating",
+              asset: entry.asset,
+            }
+          : null,
+      candidateId:
+        index === 2
+          ? "candidate-served-display"
+          : index === 3
+            ? "candidate-served-dequeue"
+            : null,
+      approvedAt: "2026-08-09T20:00:00.000Z",
+      servedAt:
+        index === 2
+          ? "2026-08-09T20:02:00.000Z"
+          : index === 3
+            ? "2026-08-09T20:03:00.000Z"
+            : null,
+    }));
+    value.initialFillJobs = [
+      {
+        id: "initial-fill-1",
+        attemptId: "attempt-1",
+        status: "ready",
+        candidate: candidate("initial-fill-candidate"),
+        source: "generated",
+        importItemId: null,
+        failureMessage: null,
+        completedAt: "2026-08-09T20:02:30.000Z",
+      },
+    ];
+    value.initialFillRetry = {
+      requestId: "retry-request-1",
+      failedAttemptId: "attempt-0",
+      replacementAttemptId: "attempt-1",
+      replacementJobIds: ["initial-fill-1"],
+      createdAt: "2026-08-09T20:01:30.000Z",
+    };
+    const parsed = parseImportSession(value);
+    expect(parsed.status).toBe("preparing");
+    expect(parsed.items[0]).toMatchObject({
+      normalizedDigest: "a".repeat(64),
+      annotationJob: { importItemId: "annotating" },
+    });
+    expect(parsed.initialFillRetry?.replacementAttemptId).toBe("attempt-1");
   });
 
   it("rejects an activation journal embedded in the import aggregate", () => {
@@ -250,6 +239,25 @@ describe("import session schema", () => {
       ),
     );
   });
-});
 
-export { candidate, dequeueReceipt, item, session };
+  it("canonicalizes an omitted selection kind before deriving dequeue IDs", () => {
+    const omittedKind = {
+      selectedAt: "2026-08-09T20:02:00.000Z",
+      roundNumber: 1,
+      winnerSide: "left" as const,
+      winnerId: "left",
+      loserId: "right",
+    };
+
+    expect(
+      deriveDequeueOperationId("import-session-1", "", omittedKind, "single"),
+    ).toBe(
+      deriveDequeueOperationId(
+        "import-session-1",
+        "",
+        { ...omittedKind, kind: "selection" },
+        "single",
+      ),
+    );
+  });
+});

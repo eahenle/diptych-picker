@@ -77,6 +77,7 @@ function state(refillJobs: RefillJobRecord[]): ChallengerState {
     version: 1,
     sessionId: "session-1",
     ready: [],
+    importQueue: [],
     refillJobs,
     pendingComparison: null,
     ratings: [],

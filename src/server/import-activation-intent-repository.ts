@@ -24,18 +24,16 @@ export type ImportActivationPhase =
 export type ImportActivationOutcome = "undecided" | "commit" | "rollback";
 
 export interface ImportActivationIntent {
-  version: 1;
   id: string;
-  createdAt: string;
   expectedOld: {
-    importSessionId: string | null;
+    importSessionId: string;
     gameRevisionId: string | null;
     challengerSessionId: string | null;
     bootstrapBatchId: string | null;
   };
   next: {
-    game: { revisionId: string; state: GameState };
-    challenger: ChallengerState;
+    game: GameState;
+    challengers: ChallengerState;
     bootstrap: InitialBootstrap | null;
     importSession: ImportSession;
   };
@@ -43,7 +41,9 @@ export interface ImportActivationIntent {
   archivedSupersededJobIds: string[];
   phase: ImportActivationPhase;
   outcome: ImportActivationOutcome;
+  preparedAt: string;
   committedAt: string | null;
+  cleanedAt: string | null;
 }
 
 export interface ImportActivationIntentRepository {
@@ -57,6 +57,7 @@ interface RepositoryLockOptions {
   lockTimeoutMs?: number;
   staleLockMs?: number;
   retryDelayMs?: number;
+  renameFile?: typeof rename;
 }
 
 interface LockOwner {
@@ -81,12 +82,10 @@ const bootstrapSchema: z.ZodType<InitialBootstrap> = z
 
 const intentEnvelopeSchema = z
   .object({
-    version: z.literal(1),
     id: nonBlank,
-    createdAt: timestampSchema,
     expectedOld: z
       .object({
-        importSessionId: nonBlank.nullable(),
+        importSessionId: nonBlank,
         gameRevisionId: nonBlank.nullable(),
         challengerSessionId: nonBlank.nullable(),
         bootstrapBatchId: nonBlank.nullable(),
@@ -94,8 +93,8 @@ const intentEnvelopeSchema = z
       .strict(),
     next: z
       .object({
-        game: z.object({ revisionId: nonBlank, state: z.unknown() }).strict(),
-        challenger: z.unknown(),
+        game: z.unknown(),
+        challengers: z.unknown(),
         bootstrap: bootstrapSchema.nullable(),
         importSession: z.unknown(),
       })
@@ -104,7 +103,9 @@ const intentEnvelopeSchema = z
     archivedSupersededJobIds: z.array(nonBlank),
     phase: z.enum(["prepared", "writing", "committed", "cleaned"]),
     outcome: z.enum(["undecided", "commit", "rollback"]),
+    preparedAt: timestampSchema,
     committedAt: timestampSchema.nullable(),
+    cleanedAt: timestampSchema.nullable(),
   })
   .strict()
   .superRefine((intent, context) => {
@@ -131,24 +132,39 @@ const intentEnvelopeSchema = z
         message: "Archived job IDs must belong to superseded jobs",
       });
     }
-    if (intent.outcome === "undecided" && intent.phase !== "prepared") {
+    if (
+      intent.phase === "prepared" &&
+      (intent.outcome !== "undecided" ||
+        intent.committedAt !== null ||
+        intent.cleanedAt !== null ||
+        intent.archivedSupersededJobIds.length > 0)
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["outcome"],
-        message: "Only prepared activation intents may be undecided",
+        path: ["phase"],
+        message:
+          "Prepared intents cannot contain commit, cleanup, or archive evidence",
       });
     }
-    if (intent.outcome === "commit" && intent.phase === "prepared") {
+    if (
+      intent.phase === "writing" &&
+      (intent.outcome !== "commit" ||
+        intent.committedAt !== null ||
+        intent.cleanedAt !== null ||
+        intent.archivedSupersededJobIds.length > 0)
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["outcome"],
-        message: "Prepared activation intents cannot have a commit outcome",
+        path: ["phase"],
+        message:
+          "Writing intents cannot contain commit, cleanup, or archive evidence",
       });
     }
     if (intent.outcome === "rollback") {
       if (
         intent.phase !== "cleaned" ||
         intent.committedAt ||
+        !intent.cleanedAt ||
         intent.archivedSupersededJobIds.length > 0
       ) {
         context.addIssue({
@@ -161,6 +177,7 @@ const intentEnvelopeSchema = z
     if (intent.phase === "cleaned" && intent.outcome === "commit") {
       if (
         intent.committedAt === null ||
+        intent.cleanedAt === null ||
         intent.archivedSupersededJobIds.length !==
           intent.supersededJobIds.length
       ) {
@@ -173,7 +190,9 @@ const intentEnvelopeSchema = z
     }
     if (
       intent.phase === "committed" &&
-      (intent.outcome !== "commit" || intent.committedAt === null)
+      (intent.outcome !== "commit" ||
+        intent.committedAt === null ||
+        intent.cleanedAt !== null)
     ) {
       context.addIssue({
         code: "custom",
@@ -187,16 +206,31 @@ export function parseImportActivationIntent(
   value: unknown,
 ): ImportActivationIntent {
   const parsed = intentEnvelopeSchema.parse(value);
+  const importSession = parseImportSession(parsed.next.importSession);
+  const challengers = parseChallengerState(parsed.next.challengers);
+  const game = parseGameState(parsed.next.game);
+  if (importSession.id !== parsed.expectedOld.importSessionId) {
+    throw new Error(
+      "Expected import session must match the intended import session",
+    );
+  }
+  for (const receipt of importSession.servedReceipts) {
+    if (
+      receipt.kind === "activation-display" &&
+      receipt.activationIntentId !== parsed.id
+    ) {
+      throw new Error(
+        "Activation-display receipt must reference its activation intent",
+      );
+    }
+  }
   return {
     ...parsed,
     next: {
       ...parsed.next,
-      game: {
-        ...parsed.next.game,
-        state: parseGameState(parsed.next.game.state),
-      },
-      challenger: parseChallengerState(parsed.next.challenger),
-      importSession: parseImportSession(parsed.next.importSession),
+      game,
+      challengers,
+      importSession,
     },
   };
 }
@@ -229,6 +263,7 @@ export class JsonImportActivationIntentRepository implements ImportActivationInt
   private readonly staleLockMs: number;
   private readonly retryDelayMs: number;
   private readonly processLockKey: string;
+  private readonly renameFile: typeof rename;
 
   constructor(
     private readonly filePath: string,
@@ -237,6 +272,7 @@ export class JsonImportActivationIntentRepository implements ImportActivationInt
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
     this.staleLockMs = options.staleLockMs ?? 30_000;
     this.retryDelayMs = options.retryDelayMs ?? 10;
+    this.renameFile = options.renameFile ?? rename;
     this.processLockKey = resolve(filePath);
   }
 
@@ -261,7 +297,7 @@ export class JsonImportActivationIntentRepository implements ImportActivationInt
       await handle.sync();
       await handle.close();
       handle = undefined;
-      await rename(temporaryPath, this.filePath);
+      await this.renameFile(temporaryPath, this.filePath);
     } finally {
       await handle?.close();
       await rm(temporaryPath, { force: true });
@@ -291,8 +327,24 @@ export class JsonImportActivationIntentRepository implements ImportActivationInt
   }
 
   private async writeNull(): Promise<void> {
+    await this.writeAtomically("null\n");
+  }
+
+  private async writeAtomically(contents: string): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, "null\n", "utf8");
+    const temporaryPath = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    let handle;
+    try {
+      handle = await open(temporaryPath, "wx");
+      await handle.writeFile(contents, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await this.renameFile(temporaryPath, this.filePath);
+    } finally {
+      await handle?.close();
+      await rm(temporaryPath, { force: true });
+    }
   }
 
   private async acquireFilesystemLock(token: string): Promise<void> {

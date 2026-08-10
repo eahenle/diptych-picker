@@ -75,7 +75,20 @@ const bufferedCandidateSchema = z
     pinnedWinnerId: z.string().min(1).nullable(),
     enqueuedAt: z.string().min(1),
   })
-  .strict();
+  .strict()
+  .superRefine((candidate, context) => {
+    if (
+      (candidate.source === "imported" && candidate.importItemId === null) ||
+      (candidate.source !== "imported" && candidate.importItemId !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["importItemId"],
+        message:
+          "Buffered candidate import item provenance must match its source",
+      });
+    }
+  });
 
 const candidateRatingSchema = z
   .object({
@@ -90,7 +103,20 @@ const candidateRatingSchema = z
     lastServedAt: z.string().min(1).nullable(),
     favorite: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((rating, context) => {
+    if (
+      (rating.source === "imported" && rating.importItemId === null) ||
+      (rating.source !== "imported" && rating.importItemId !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["importItemId"],
+        message:
+          "Candidate rating import item provenance must match its source",
+      });
+    }
+  });
 
 const selectionHistorySchema = z.union([
   z
@@ -248,7 +274,7 @@ const refillGenerationJobSnapshotSchema = z
     path: ["pinnedWinnerId"],
   });
 
-const challengerStateSchema = z
+const challengerStateSchema: z.ZodType<ChallengerState> = z
   .object({
     version: z.literal(1),
     sessionId: z.string().min(1),
@@ -368,10 +394,21 @@ const challengerStateSchema = z
     consecutiveFallbackDraws: z.number().int().nonnegative(),
     nextFallbackAt: z.string().min(1).nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((state, context) => {
+    for (const [index, candidate] of state.importQueue.entries()) {
+      if (candidate.source !== "imported") {
+        context.addIssue({
+          code: "custom",
+          path: ["importQueue", index, "source"],
+          message: "Import queue may contain only imported candidates",
+        });
+      }
+    }
+  });
 
 export function parseChallengerState(value: unknown): ChallengerState {
-  return challengerStateSchema.parse(value) as ChallengerState;
+  return challengerStateSchema.parse(value);
 }
 
 const processLockTails = new Map<string, Promise<void>>();
@@ -403,6 +440,7 @@ function resetSession(
     ...state,
     sessionId,
     ready: [],
+    importQueue: [],
     refillJobs: [],
     leaderboardProfileJob: null,
     leaderboardVisualProfile: null,

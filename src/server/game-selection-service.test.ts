@@ -36,6 +36,7 @@ function rating(item: Candidate): CandidateRating {
     wins: 0,
     losses: 0,
     source: "curated",
+    importItemId: null,
     poolMember: true,
     lastServedAt: null,
   };
@@ -66,6 +67,7 @@ function challengers(
   const ready = readyIds.map((id) => ({
     candidate: candidate(id),
     source: "seed" as const,
+    importItemId: null,
     pinnedWinnerId: null,
     enqueuedAt: NOW,
   }));
@@ -73,6 +75,7 @@ function challengers(
     version: 1,
     sessionId: "session-1",
     ready,
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     pendingSelectionBaseline: null,

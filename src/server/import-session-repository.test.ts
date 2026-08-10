@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { session } from "@/domain/import-session.test";
+import { importSessionFixture } from "@/domain/import-session-fixture";
 import { JsonImportSessionRepository } from "./import-session-repository";
 
 describe("JsonImportSessionRepository", () => {
@@ -11,7 +11,7 @@ describe("JsonImportSessionRepository", () => {
     const repository = new JsonImportSessionRepository(
       join(directory, "import-session.json"),
     );
-    const value = session();
+    const value = importSessionFixture();
 
     await repository.save(value);
 
@@ -23,10 +23,28 @@ describe("JsonImportSessionRepository", () => {
     const repository = new JsonImportSessionRepository(
       join(directory, "import-session.json"),
     );
-    await repository.save(session());
+    await repository.save(importSessionFixture());
 
     await repository.clear();
 
+    await expect(repository.load()).resolves.toBeNull();
+  });
+
+  it("preserves the prior session when atomic clear is interrupted", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-import-session-"));
+    const file = join(directory, "import-session.json");
+    const repository = new JsonImportSessionRepository(file);
+    const value = importSessionFixture();
+    await repository.save(value);
+    const interrupted = new JsonImportSessionRepository(file, {
+      renameFile: async () => {
+        throw new Error("interrupted rename");
+      },
+    } as never);
+
+    await expect(interrupted.clear()).rejects.toThrow("interrupted rename");
+    await expect(repository.load()).resolves.toEqual(value);
+    await repository.clear();
     await expect(repository.load()).resolves.toBeNull();
   });
 

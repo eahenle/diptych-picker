@@ -24,6 +24,7 @@ interface RepositoryLockOptions {
   lockTimeoutMs?: number;
   staleLockMs?: number;
   retryDelayMs?: number;
+  renameFile?: typeof rename;
 }
 
 interface LockOwner {
@@ -60,6 +61,7 @@ export class JsonImportSessionRepository implements ImportSessionRepository {
   private readonly staleLockMs: number;
   private readonly retryDelayMs: number;
   private readonly processLockKey: string;
+  private readonly renameFile: typeof rename;
 
   constructor(
     private readonly filePath: string,
@@ -68,6 +70,7 @@ export class JsonImportSessionRepository implements ImportSessionRepository {
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
     this.staleLockMs = options.staleLockMs ?? 30_000;
     this.retryDelayMs = options.retryDelayMs ?? 10;
+    this.renameFile = options.renameFile ?? rename;
     this.processLockKey = resolve(filePath);
   }
 
@@ -92,7 +95,7 @@ export class JsonImportSessionRepository implements ImportSessionRepository {
       await handle.sync();
       await handle.close();
       handle = undefined;
-      await rename(temporaryPath, this.filePath);
+      await this.renameFile(temporaryPath, this.filePath);
     } finally {
       await handle?.close();
       await rm(temporaryPath, { force: true });
@@ -100,8 +103,7 @@ export class JsonImportSessionRepository implements ImportSessionRepository {
   }
 
   async clear(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, "null\n", "utf8");
+    await this.writeAtomically("null\n");
   }
 
   async withLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -155,6 +157,23 @@ export class JsonImportSessionRepository implements ImportSessionRepository {
       await new Promise((resolveDelay) =>
         setTimeout(resolveDelay, this.retryDelayMs),
       );
+    }
+  }
+
+  private async writeAtomically(contents: string): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const temporaryPath = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    let handle;
+    try {
+      handle = await open(temporaryPath, "wx");
+      await handle.writeFile(contents, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await this.renameFile(temporaryPath, this.filePath);
+    } finally {
+      await handle?.close();
+      await rm(temporaryPath, { force: true });
     }
   }
 

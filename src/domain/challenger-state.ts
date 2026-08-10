@@ -14,16 +14,15 @@ const DEFAULT_READY_TARGET = 5;
 const DEFAULT_TURNAROUND_ALPHA = 0.25;
 const MAX_CONSECUTIVE_FALLBACK_DRAWS = 10;
 const FALLBACK_DRAW_DELAY_MS = 3_000;
+export type ReusableCandidateSource = "curated" | "generated";
 
 export interface CandidateRating {
   candidate: Candidate;
   rating: number;
   wins: number;
   losses: number;
-  // Legacy consumers only understand curated/generated ratings. The durable
-  // challenger parser accepts imported ratings for the activation handoff.
-  source: "curated" | "generated";
-  importItemId?: string | null;
+  source: "curated" | "generated" | "imported";
+  importItemId: string | null;
   poolMember: boolean;
   poolEligible?: boolean;
   lastServedAt: string | null;
@@ -33,7 +32,7 @@ export interface CandidateRating {
 export interface BufferedCandidate {
   candidate: Candidate;
   source: "seed" | "generated" | "imported";
-  importItemId?: string | null;
+  importItemId: string | null;
   pinnedWinnerId: string | null;
   enqueuedAt: string;
 }
@@ -82,7 +81,7 @@ export interface LeaderboardProfileSourceSnapshot {
   wins: number;
   losses: number;
   favorite: boolean;
-  source: CandidateRating["source"];
+  source: ReusableCandidateSource;
   concept: string;
   style: string[];
   sourceImage: ProfileSourceImageSnapshot;
@@ -151,7 +150,7 @@ export interface ChallengerState {
   version: 1;
   sessionId: string;
   ready: BufferedCandidate[];
-  importQueue?: BufferedCandidate[];
+  importQueue: BufferedCandidate[];
   refillJobs: RefillJobRecord[];
   leaderboardProfileJob?: LeaderboardProfileJobRecord | null;
   leaderboardVisualProfile?: LeaderboardVisualProfile | null;
@@ -192,6 +191,12 @@ export interface PoolLeaderboardEntry {
   favorite: boolean;
 }
 
+export function isReusablePoolLeaderboardEntry(
+  entry: PoolLeaderboardEntry,
+): entry is PoolLeaderboardEntry & { source: ReusableCandidateSource } {
+  return entry.source !== "imported";
+}
+
 export interface FavoriteGalleryEntry {
   rank: number;
   candidate: PoolLeaderboardEntry["candidate"];
@@ -210,7 +215,7 @@ export interface PreferenceLeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
-  source: CandidateRating["source"];
+  source: ReusableCandidateSource;
   favorite: boolean;
 }
 
@@ -471,7 +476,9 @@ export function summarizeLeaderboardPreferenceEvidence(
   state: ChallengerState | null,
   limit = 12,
 ): LeaderboardPreferenceEvidence {
-  const leaderboard = summarizePoolLeaderboard(state);
+  const leaderboard = summarizePoolLeaderboard(state).filter(
+    isReusablePoolLeaderboardEntry,
+  );
   const boundedLimit = Math.max(1, Math.min(12, Math.floor(limit)));
   const topCount = Math.ceil(boundedLimit / 2);
   const bottomCount = boundedLimit - topCount;

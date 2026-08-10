@@ -57,6 +57,7 @@ function challengers(
   const ready = readyIds.map((id) => ({
     candidate: candidate(id),
     source: "generated" as const,
+    importItemId: null,
     pinnedWinnerId: current.round.leftCandidate.id,
     enqueuedAt: NOW,
   }));
@@ -64,6 +65,7 @@ function challengers(
     version: 1,
     sessionId: "session-1",
     ready,
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     pendingSelectionBaseline: null,
@@ -77,6 +79,7 @@ function challengers(
       wins: 0,
       losses: 0,
       source: "generated" as const,
+      importItemId: null,
       poolMember: true,
       lastServedAt: null,
     })),

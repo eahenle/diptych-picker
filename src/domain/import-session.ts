@@ -3,7 +3,8 @@ import type { Candidate } from "./game";
 import type { PendingComparisonReceipt } from "./challenger-state";
 import { z } from "zod";
 
-export type ImportSessionStatus = "editing" | "sealed" | "active" | "abandoned";
+export type ImportSessionStatus =
+  "editing" | "preparing" | "active" | "completed";
 export type ImportItemStatus =
   "annotating" | "ready" | "failed" | "removed" | "served";
 
@@ -27,26 +28,42 @@ export interface ImportedCandidateAnnotation {
 
 export interface ImportItem {
   id: string;
+  normalizedDigest: string;
   status: ImportItemStatus;
   asset: ImportedAssetMetadata;
+  annotationJob: ImportAnnotationJobRecord | null;
   annotation: ImportedCandidateAnnotation | null;
-  annotationJobId: string | null;
+  candidateId: string | null;
   failureMessage: string | null;
+  approvedAt: string;
+  servedAt: string | null;
 }
 
-export interface InitialFillJob {
+export interface ImportAnnotationJobRecord {
   id: string;
-  status: "pending" | "completed" | "failed";
   createdAt: string;
+  importSessionId: string;
+  importItemId: string;
+  asset: ImportedAssetMetadata;
+}
+
+export interface InitialFillJobRecord {
+  id: string;
+  attemptId: string;
+  status: "pending" | "ready" | "failed" | "superseded";
   candidate: Candidate | null;
+  source: "generated";
+  importItemId: null;
   failureMessage: string | null;
+  completedAt: string | null;
 }
 
 export interface InitialFillRetryReceipt {
   failedAttemptId: string;
   requestId: string;
+  replacementAttemptId: string;
   replacementJobIds: string[];
-  requestedAt: string;
+  createdAt: string;
 }
 
 export interface ActivationDisplayServedReceipt {
@@ -87,17 +104,22 @@ export interface ImportSession {
   sealedAt: string | null;
   activatedAt: string | null;
   items: ImportItem[];
-  initialFillJobs: InitialFillJob[];
+  initialFillJobs: InitialFillJobRecord[];
   initialFillRetry: InitialFillRetryReceipt | null;
   servedReceipts: ImportServedReceipt[];
 }
 
 export interface ImportSupplySnapshot {
   importSessionId: string | null;
-  pendingItemCount: number;
-  readyItemCount: number;
-  queuedItemCount: number;
-  failedInitialFillAttemptId: string | null;
+  annotating: number;
+  failed: number;
+  readyUnserved: number;
+  servedImportedItemCount: number;
+  activationDisplayReceiptCount: number;
+  dequeueReceiptCount: number;
+  initialFillPending: number;
+  initialFillFailed: number;
+  terminal: boolean;
 }
 
 const nonBlank = z.string().trim().min(1);
@@ -154,11 +176,24 @@ const annotationSchema = z
 const itemSchema = z
   .object({
     id: nonBlank,
+    normalizedDigest: digestSchema,
     status: z.enum(["annotating", "ready", "failed", "removed", "served"]),
     asset: assetSchema,
+    annotationJob: z
+      .object({
+        id: nonBlank,
+        createdAt: timestampSchema,
+        importSessionId: nonBlank,
+        importItemId: nonBlank,
+        asset: assetSchema,
+      })
+      .strict()
+      .nullable(),
     annotation: annotationSchema.nullable(),
-    annotationJobId: nonBlank.nullable(),
+    candidateId: nonBlank.nullable(),
     failureMessage: nonBlank.nullable(),
+    approvedAt: timestampSchema,
+    servedAt: timestampSchema.nullable(),
   })
   .strict()
   .superRefine((item, context) => {
@@ -171,10 +206,22 @@ const itemSchema = z
         message: "Ready and served import items require an annotation",
       });
     }
-    if (item.status === "annotating" && !item.annotationJobId) {
+    if (
+      item.normalizedDigest !== item.asset.digest ||
+      (item.annotationJob &&
+        (item.annotationJob.importItemId !== item.id ||
+          item.annotationJob.asset.digest !== item.normalizedDigest))
+    ) {
       context.addIssue({
         code: "custom",
-        path: ["annotationJobId"],
+        path: ["normalizedDigest"],
+        message: "Import item metadata must match its normalized asset",
+      });
+    }
+    if (item.status === "annotating" && !item.annotationJob) {
+      context.addIssue({
+        code: "custom",
+        path: ["annotationJob"],
         message: "Annotating import items require an annotation job",
       });
     }
@@ -183,6 +230,13 @@ const itemSchema = z
         code: "custom",
         path: ["failureMessage"],
         message: "Failed import items require a failure message",
+      });
+    }
+    if (item.status === "served" && (!item.candidateId || !item.servedAt)) {
+      context.addIssue({
+        code: "custom",
+        path: ["servedAt"],
+        message: "Served import items require candidate and served timestamps",
       });
     }
   });
@@ -311,10 +365,13 @@ const dequeueReceiptSchema = z
 const initialFillJobSchema = z
   .object({
     id: nonBlank,
-    status: z.enum(["pending", "completed", "failed"]),
-    createdAt: timestampSchema,
+    attemptId: nonBlank,
+    status: z.enum(["pending", "ready", "failed", "superseded"]),
     candidate: candidateSchema.nullable(),
+    source: z.literal("generated"),
+    importItemId: z.null(),
     failureMessage: nonBlank.nullable(),
+    completedAt: timestampSchema.nullable(),
   })
   .strict();
 
@@ -322,8 +379,9 @@ const initialFillRetrySchema = z
   .object({
     failedAttemptId: nonBlank,
     requestId: nonBlank,
+    replacementAttemptId: nonBlank,
     replacementJobIds: z.array(nonBlank).min(1),
-    requestedAt: timestampSchema,
+    createdAt: timestampSchema,
   })
   .strict()
   .superRefine((receipt, context) => {
@@ -339,11 +397,11 @@ const initialFillRetrySchema = z
     }
   });
 
-const importSessionSchema = z
+const importSessionSchema: z.ZodType<ImportSession> = z
   .object({
     version: z.literal(1),
     id: nonBlank,
-    status: z.enum(["editing", "sealed", "active", "abandoned"]),
+    status: z.enum(["editing", "preparing", "active", "completed"]),
     createdAt: timestampSchema,
     sealedAt: timestampSchema.nullable(),
     activatedAt: timestampSchema.nullable(),
@@ -416,8 +474,9 @@ const importSessionSchema = z
       if (
         !item ||
         item.status !== "served" ||
-        receipt.candidateId !== item.id ||
-        receipt.candidate.id !== item.id
+        receipt.candidateId !== item.candidateId ||
+        receipt.candidate.id !== item.candidateId ||
+        receipt.servedAt !== item.servedAt
       ) {
         context.addIssue({
           code: "custom",
@@ -429,6 +488,7 @@ const importSessionSchema = z
     }
 
     const jobIds = new Set<string>();
+    const attemptIds = new Set<string>();
     for (const [index, job] of session.initialFillJobs.entries()) {
       if (jobIds.has(job.id)) {
         context.addIssue({
@@ -438,6 +498,7 @@ const importSessionSchema = z
         });
       }
       jobIds.add(job.id);
+      attemptIds.add(job.attemptId);
     }
     if (
       session.initialFillRetry &&
@@ -450,10 +511,20 @@ const importSessionSchema = z
         message: "Initial fill retry request IDs must be unique",
       });
     }
+    if (
+      session.initialFillRetry &&
+      !attemptIds.has(session.initialFillRetry.replacementAttemptId)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["initialFillRetry", "replacementAttemptId"],
+        message: "Initial fill retry must reference its replacement attempt",
+      });
+    }
   });
 
 export function parseImportSession(value: unknown): ImportSession {
-  return importSessionSchema.parse(value) as ImportSession;
+  return importSessionSchema.parse(value);
 }
 
 function canonicalJson(value: unknown): string {
@@ -487,10 +558,14 @@ export function deriveDequeueOperationId(
   originalReceipt: PendingComparisonReceipt,
   replacementSlot: DequeueServedImportReceipt["replacementSlot"],
 ): string {
+  const canonicalReceipt =
+    originalReceipt.kind === undefined
+      ? { ...originalReceipt, kind: "selection" as const }
+      : originalReceipt;
   return `dequeue-${sha256(
     canonicalJson([
       importSessionId ?? `game:${challengerSessionId}`,
-      originalReceipt,
+      canonicalReceipt,
       replacementSlot,
     ]),
   )}`;

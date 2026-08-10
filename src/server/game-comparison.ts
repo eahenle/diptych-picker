@@ -39,6 +39,7 @@ export function createCandidateRating(
     wins: 0,
     losses: 0,
     source,
+    importItemId: null,
     poolMember,
     poolEligible: true,
     lastServedAt: null,
