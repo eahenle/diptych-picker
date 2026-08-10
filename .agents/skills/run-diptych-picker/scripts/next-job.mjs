@@ -86,9 +86,28 @@ async function findNextJob() {
     const unterminatedActive = recoverableEntries(activeJobs, true).sort(
       compareJobs,
     );
-    const activePriority = unterminatedActive.find(({ job }) => !isRefill(job));
+    const activePriority = unterminatedActive.find(({ job }) =>
+      isInteractiveSingle(job),
+    );
     if (activePriority) {
       const [prepared] = await prepareRecoverableEntries([activePriority], 1);
+      if (prepared) return presentForOwner(prepared);
+    }
+    const activeAnnotations = await prepareRecoverableEntries(
+      unterminatedActive.filter(({ job }) => isImportAnnotation(job)),
+      maxRefills,
+    );
+    if (activeAnnotations.length > 0) {
+      return presentImportAnnotationBatch(activeAnnotations);
+    }
+    const activeCachedAnalysis = unterminatedActive.find(({ job }) =>
+      isCachedAnalysis(job),
+    );
+    if (activeCachedAnalysis) {
+      const [prepared] = await prepareRecoverableEntries(
+        [activeCachedAnalysis],
+        1,
+      );
       if (prepared) return presentForOwner(prepared);
     }
     const activeRefills = await prepareRecoverableEntries(
@@ -111,9 +130,28 @@ async function findNextJob() {
     const expiredActive = recoverableEntries(activeJobs, false).sort(
       compareJobs,
     );
-    const expiredPriority = expiredActive.find(({ job }) => !isRefill(job));
+    const expiredPriority = expiredActive.find(({ job }) =>
+      isInteractiveSingle(job),
+    );
     if (expiredPriority) {
       const [prepared] = await prepareRecoverableEntries([expiredPriority], 1);
+      if (prepared) return presentForOwner(prepared);
+    }
+    const expiredAnnotations = await prepareRecoverableEntries(
+      expiredActive.filter(({ job }) => isImportAnnotation(job)),
+      maxRefills,
+    );
+    if (expiredAnnotations.length > 0) {
+      return presentImportAnnotationBatch(expiredAnnotations);
+    }
+    const expiredCachedAnalysis = expiredActive.find(({ job }) =>
+      isCachedAnalysis(job),
+    );
+    if (expiredCachedAnalysis) {
+      const [prepared] = await prepareRecoverableEntries(
+        [expiredCachedAnalysis],
+        1,
+      );
       if (prepared) return presentForOwner(prepared);
     }
     const expiredRefills = await prepareRecoverableEntries(
@@ -125,7 +163,9 @@ async function findNextJob() {
     }
   }
   const orderedPending = pendingJobs.sort(compareJobs);
-  for (const entry of orderedPending.filter(({ job }) => !isRefill(job))) {
+  for (const entry of orderedPending.filter(({ job }) =>
+    isInteractiveSingle(job),
+  )) {
     if (isInitial(entry.job)) {
       const ownership = await acquireBatchOwnership(entry.job.batchId);
       if (!ownership) continue;
@@ -136,7 +176,27 @@ async function findNextJob() {
     const claimed = await claim(entry);
     if (claimed) return present(claimed);
   }
+  const annotations = await claimImportAnnotationBatch(
+    orderedPending.filter(({ job }) => isImportAnnotation(job)),
+  );
+  if (annotations) return annotations;
+  for (const entry of orderedPending.filter(({ job }) =>
+    isCachedAnalysis(job),
+  )) {
+    const claimed = await claim(entry);
+    if (claimed) return present(claimed);
+  }
   return claimRefillBatch(orderedPending.filter(({ job }) => isRefill(job)));
+}
+
+async function claimImportAnnotationBatch(entries) {
+  const claimed = [];
+  for (const entry of entries) {
+    if (claimed.length === maxRefills) break;
+    const annotation = await claim(entry);
+    if (annotation) claimed.push(annotation);
+  }
+  return claimed.length > 0 ? presentImportAnnotationBatch(claimed) : null;
 }
 
 async function claimRefillBatch(entries) {
@@ -345,9 +405,22 @@ function priorityRank(job) {
   if (job.kind === "prompt-card-editor") return 3;
   if (job.kind === "prompt-card-blender") return 3;
   if (job.kind === "prompt-card-writer") return 3;
-  if (job.kind === "leaderboard-profile") return 4;
-  if (job.kind === "refill") return 5;
+  if (job.kind === "import-annotation") return 4;
+  if (job.kind === "leaderboard-profile") return 5;
+  if (job.kind === "refill") return 6;
   return 2;
+}
+
+function isInteractiveSingle(job) {
+  return !isImportAnnotation(job) && !isCachedAnalysis(job) && !isRefill(job);
+}
+
+function isImportAnnotation(job) {
+  return job.kind === "import-annotation";
+}
+
+function isCachedAnalysis(job) {
+  return job.kind === "leaderboard-profile";
 }
 
 function isInitialBatch(job, batch) {
@@ -372,6 +445,13 @@ function present(entry, batchOwnerToken, terminalStatus) {
 
 function presentRefillBatch(entries) {
   return { kind: "refill-batch", jobs: entries.map((entry) => present(entry)) };
+}
+
+function presentImportAnnotationBatch(entries) {
+  return {
+    kind: "import-annotation-batch",
+    jobs: entries.map((entry) => present(entry)),
+  };
 }
 
 async function presentForOwner(entry) {

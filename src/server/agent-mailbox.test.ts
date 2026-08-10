@@ -11,15 +11,40 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  parseImportedCandidateAnnotation,
+  parseImportSession,
+} from "@/domain/import-session";
+import { importSessionFixture } from "@/domain/import-session-fixture";
+import {
   FileGenerationMailbox,
   generationJobSchema,
   type GenerationJob,
   type GenerationResult,
+  type ImportAnnotationJob,
   type LeaderboardProfileJob,
   type PromptCardBlenderJob,
   type PromptCardEditorJob,
   type PromptCardWriterJob,
 } from "./agent-mailbox";
+
+const importAnnotationJob = (
+  id = "import-annotation-1",
+): ImportAnnotationJob => ({
+  id,
+  kind: "import-annotation",
+  createdAt: "2026-08-09T18:00:00.000Z",
+  importSessionId: "import-session-1",
+  importItemId: "import-item-1",
+  asset: {
+    digest: "c".repeat(64),
+    filename: `${"c".repeat(64)}.png`,
+    url: `/api/assets/${"c".repeat(64)}.png`,
+    contentType: "image/png",
+    width: 1024,
+    height: 1024,
+    byteLength: 2048,
+  },
+});
 
 const job = (id = "job-1"): GenerationJob => ({
   id,
@@ -293,6 +318,122 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("enqueues an annotation request parsed from durable import state", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const session = importSessionFixture();
+    const importItem = session.items[0];
+    const annotationJob = {
+      ...importAnnotationJob(),
+      importSessionId: session.id,
+      importItemId: importItem.id,
+      asset: importItem.asset,
+    };
+    const parsed = parseImportSession({
+      ...session,
+      status: "editing",
+      sealedAt: null,
+      activatedAt: null,
+      items: [
+        {
+          ...importItem,
+          status: "annotating",
+          annotationJob,
+          annotation: null,
+          candidateId: null,
+          failureMessage: null,
+          servedAt: null,
+        },
+      ],
+      initialFillJobs: [],
+      initialFillRetry: null,
+      servedReceipts: [],
+    });
+
+    await mailbox.enqueueImportAnnotation(parsed.items[0].annotationJob!);
+
+    await expect(
+      mailbox.readImportAnnotationWork(annotationJob.id),
+    ).resolves.toEqual(annotationJob);
+  });
+
+  it("rejects annotations beyond the domain contract and returns domain-reconcilable metadata", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const annotationJob = importAnnotationJob();
+    await mailbox.enqueueImportAnnotation(annotationJob);
+    const annotation = {
+      concept: "c".repeat(120),
+      prompt: "p".repeat(500),
+      style: ["cinematic landscape"],
+      reasoningSummary: "r".repeat(1_000),
+      source: "automated" as const,
+    };
+    await writeRawResult(root, "completed", annotationJob.id, {
+      jobId: annotationJob.id,
+      kind: "import-annotation",
+      status: "completed",
+      completedAt: "2026-08-09T18:01:00.000Z",
+      annotation,
+    });
+
+    const result = await mailbox.readImportAnnotationResult(annotationJob.id);
+    if (result?.status !== "completed") throw new Error("missing annotation");
+    expect(parseImportedCandidateAnnotation(result.annotation)).toEqual(
+      annotation,
+    );
+
+    await writeRawResult(root, "completed", "annotation-too-long", {
+      jobId: "annotation-too-long",
+      kind: "import-annotation",
+      status: "completed",
+      completedAt: "2026-08-09T18:01:00.000Z",
+      annotation: { ...annotation, prompt: "p".repeat(501) },
+    });
+    await expect(
+      mailbox.readImportAnnotationResult("annotation-too-long"),
+    ).rejects.toThrow(/500/i);
+  });
+
+  it("strictly persists import annotation work and its metadata-only result", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const annotationJob = importAnnotationJob();
+    await mailbox.enqueueImportAnnotation(annotationJob);
+
+    await expect(
+      mailbox.readImportAnnotationWork(annotationJob.id),
+    ).resolves.toEqual(annotationJob);
+
+    const result = {
+      jobId: annotationJob.id,
+      kind: "import-annotation" as const,
+      status: "completed" as const,
+      completedAt: "2026-08-09T18:01:00.000Z",
+      annotation: {
+        concept: "Copper observatory",
+        prompt: "A copper radio observatory under a dark coastal sky.",
+        style: ["cinematic landscape", "copper and blue"],
+        reasoningSummary:
+          "Describes visible subject, composition, and palette without identity claims.",
+        source: "automated" as const,
+      },
+    };
+    await writeRawResult(root, "completed", annotationJob.id, result);
+
+    await expect(
+      mailbox.readImportAnnotationResult(annotationJob.id),
+    ).resolves.toEqual(result);
+    await writeRawResult(root, "completed", "annotation-extra", {
+      ...result,
+      jobId: "annotation-extra",
+      imageBytes: "never accepted",
+    });
+    await expect(
+      mailbox.readImportAnnotationResult("annotation-extra"),
+    ).rejects.toThrow();
+  });
+
   it("strictly persists prompt-card writer work and its proposal", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);

@@ -47,6 +47,7 @@ function challengers(current: GameState): ChallengerState {
     version: 1,
     sessionId: "session-1",
     ready: [],
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     pendingSelectionBaseline: null,
@@ -57,6 +58,7 @@ function challengers(current: GameState): ChallengerState {
         wins: 0,
         losses: 0,
         source: "curated" as const,
+        importItemId: null,
         poolMember: true,
         lastServedAt: null,
       }),
@@ -193,6 +195,7 @@ describe("GameReconciler", () => {
       {
         candidate: nextCandidate,
         source: "generated",
+        importItemId: null,
         pinnedWinnerId: "left",
         enqueuedAt: NOW,
       },

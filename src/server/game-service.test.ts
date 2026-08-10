@@ -3,7 +3,10 @@ import type {
   CandidateRating,
   ChallengerState,
 } from "@/domain/challenger-state";
-import { summarizePoolLeaderboard } from "@/domain/challenger-state";
+import {
+  isReusablePoolLeaderboardEntry,
+  summarizePoolLeaderboard,
+} from "@/domain/challenger-state";
 import {
   preferenceProfileFromSeed,
   type Candidate,
@@ -51,16 +54,20 @@ const candidate = (id: string): Candidate => ({
 const rating = (
   item: Candidate,
   overrides: Partial<CandidateRating> = {},
-): CandidateRating => ({
-  candidate: item,
-  rating: 1000,
-  wins: 0,
-  losses: 0,
-  source: "curated",
-  poolMember: true,
-  lastServedAt: null,
-  ...overrides,
-});
+): CandidateRating => {
+  const { importItemId = null, ...rest } = overrides;
+  return {
+    candidate: item,
+    rating: 1000,
+    wins: 0,
+    losses: 0,
+    source: "curated",
+    importItemId,
+    poolMember: true,
+    lastServedAt: null,
+    ...rest,
+  };
+};
 
 const gameState = (overrides: Partial<GameState> = {}): GameState => ({
   round: {
@@ -91,9 +98,11 @@ function challengerState(
   game: GameState,
   overrides: Partial<ChallengerState> = {},
 ): ChallengerState {
+  const { importQueue = [], ...rest } = overrides;
   const ready = Array.from({ length: 5 }, (_, index) => ({
     candidate: candidate(`buffer-${index + 1}`),
     source: "seed" as const,
+    importItemId: null,
     pinnedWinnerId: null,
     enqueuedAt: "2026-07-16T00:00:00.000Z",
   }));
@@ -111,7 +120,8 @@ function challengerState(
     generationTurnaroundEmaMs: 100_000,
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,
-    ...overrides,
+    ...rest,
+    importQueue,
   };
 }
 
@@ -161,7 +171,9 @@ function leaderboardProfiles() {
   const results = new Map<string, LeaderboardProfileResult>();
   const fingerprint = "b".repeat(64);
   const desired = vi.fn<LeaderboardProfileCoordinator["desired"]>((state) => {
-    const entries = summarizePoolLeaderboard(state).slice(0, 4);
+    const entries = summarizePoolLeaderboard(state)
+      .filter(isReusablePoolLeaderboardEntry)
+      .slice(0, 4);
     return entries.length >= 2 ? { fingerprint, entries } : null;
   });
   const prepare = vi.fn<LeaderboardProfileCoordinator["prepare"]>(
@@ -1771,6 +1783,7 @@ describe("GameService challenger buffer", () => {
         {
           candidate: queued,
           source: "seed",
+          importItemId: null,
           pinnedWinnerId: null,
           enqueuedAt: NOW,
         },
@@ -1899,12 +1912,14 @@ describe("GameService challenger buffer", () => {
       {
         candidate: candidate("stale-head"),
         source: "generated" as const,
+        importItemId: null,
         pinnedWinnerId: "old-winner",
         enqueuedAt: "2026-07-15T23:00:00.000Z",
       },
       {
         candidate: candidate("stale-tail"),
         source: "generated" as const,
+        importItemId: null,
         pinnedWinnerId: "old-winner",
         enqueuedAt: "2026-07-15T23:01:00.000Z",
       },

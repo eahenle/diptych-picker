@@ -1,10 +1,37 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FileGenerationMailbox, type GenerationJob } from "./agent-mailbox";
+import {
+  FileGenerationMailbox,
+  type GenerationJob,
+  type ImportAnnotationJob,
+} from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
-import { MockAgentWorker, MockGenerationMailbox } from "./mock-agent";
+import {
+  MockAgentWorker,
+  MockGenerationMailbox,
+  MockImportAnnotationMailbox,
+} from "./mock-agent";
+
+const importAnnotationJob = (
+  id = "import-annotation-1",
+): ImportAnnotationJob => ({
+  id,
+  kind: "import-annotation",
+  createdAt: "2026-08-09T18:00:00.000Z",
+  importSessionId: "import-session-1",
+  importItemId: "import-item-1",
+  asset: {
+    digest: "c".repeat(64),
+    filename: `${"c".repeat(64)}.png`,
+    url: `/api/assets/${"c".repeat(64)}.png`,
+    contentType: "image/png",
+    width: 1024,
+    height: 1024,
+    byteLength: 2048,
+  },
+});
 
 const roots: string[] = [];
 
@@ -68,6 +95,66 @@ afterEach(async () => {
 });
 
 describe("deterministic mock mailbox worker", () => {
+  it("derives stable distinct annotation metadata per job without creating assets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-annotation-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-08-09T18:01:00.000Z",
+    });
+    const mailbox = new MockImportAnnotationMailbox(fileMailbox, worker);
+    const firstJob = importAnnotationJob("import-annotation-32932");
+    const secondJob = importAnnotationJob("import-annotation-104572");
+
+    await mailbox.enqueueImportAnnotation(firstJob);
+    await mailbox.enqueueImportAnnotation(secondJob);
+
+    await vi.waitFor(async () => {
+      expect(
+        await fileMailbox.readImportAnnotationResult(firstJob.id),
+      ).toMatchObject({
+        jobId: firstJob.id,
+        annotation: { source: "automated" },
+      });
+      expect(
+        await fileMailbox.readImportAnnotationResult(secondJob.id),
+      ).toMatchObject({
+        jobId: secondJob.id,
+        annotation: { source: "automated" },
+      });
+    });
+    const first = await fileMailbox.readImportAnnotationResult(firstJob.id);
+    const second = await fileMailbox.readImportAnnotationResult(secondJob.id);
+    if (first?.status !== "completed" || second?.status !== "completed") {
+      throw new Error("missing annotation result");
+    }
+    expect(first.annotation).not.toEqual(second.annotation);
+
+    const replayWorker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-08-09T18:01:00.000Z",
+    });
+    replayWorker.schedule(firstJob);
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readImportAnnotationResult(firstJob.id)).toEqual(
+        first,
+      );
+    });
+    const assetNames = await readdir(join(root, "assets")).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    });
+    expect(assetNames).toEqual([]);
+    replayWorker.dispose();
+    worker.dispose();
+  });
+
   it("schedules refill jobs through deterministic local providers", async () => {
     const root = await mkdtemp(join(tmpdir(), "diptych-mock-refill-"));
     roots.push(root);

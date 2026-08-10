@@ -2,8 +2,12 @@ import { createHash } from "node:crypto";
 import type {
   ChallengerState,
   PoolLeaderboardEntry,
+  ReusableCandidateSource,
 } from "@/domain/challenger-state";
-import { summarizePoolLeaderboard } from "@/domain/challenger-state";
+import {
+  isReusablePoolLeaderboardEntry,
+  summarizePoolLeaderboard,
+} from "@/domain/challenger-state";
 import type {
   LeaderboardProfileJob,
   LeaderboardProfileMailbox,
@@ -15,7 +19,7 @@ const LEADERBOARD_VISUAL_SOURCE_LIMIT = 4;
 
 export interface LeaderboardProfileRequest {
   fingerprint: string;
-  entries: PoolLeaderboardEntry[];
+  entries: Array<PoolLeaderboardEntry & { source: ReusableCandidateSource }>;
 }
 
 export interface LeaderboardProfileCoordinator {
@@ -43,10 +47,9 @@ export class LeaderboardProfileService implements LeaderboardProfileCoordinator 
   constructor(private readonly options: LeaderboardProfileServiceOptions) {}
 
   desired(state: ChallengerState): LeaderboardProfileRequest | null {
-    const entries = summarizePoolLeaderboard(state).slice(
-      0,
-      LEADERBOARD_VISUAL_SOURCE_LIMIT,
-    );
+    const entries = summarizePoolLeaderboard(state)
+      .filter(isReusablePoolLeaderboardEntry)
+      .slice(0, LEADERBOARD_VISUAL_SOURCE_LIMIT);
     if (entries.length < 2) return null;
     const fingerprint = createHash("sha256")
       .update(

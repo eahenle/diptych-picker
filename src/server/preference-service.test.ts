@@ -56,6 +56,7 @@ function challengers(current: GameState): ChallengerState {
   const ready = ["ready-1", "ready-2"].map((id) => ({
     candidate: candidate(id),
     source: "generated" as const,
+    importItemId: null,
     pinnedWinnerId: "left",
     enqueuedAt: NOW,
   }));
@@ -63,6 +64,7 @@ function challengers(current: GameState): ChallengerState {
     version: 1,
     sessionId: "session-1",
     ready,
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     pendingSelectionBaseline: null,
@@ -77,6 +79,7 @@ function challengers(current: GameState): ChallengerState {
       wins: 0,
       losses: 0,
       source: "generated" as const,
+      importItemId: null,
       poolMember: true,
       lastServedAt: null,
     })),

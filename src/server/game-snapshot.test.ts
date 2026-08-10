@@ -87,10 +87,12 @@ function challengerState(): ChallengerState {
       {
         candidate: candidates[2],
         source: "generated",
+        importItemId: null,
         pinnedWinnerId: "left",
         enqueuedAt: NOW,
       },
     ],
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     ratings: candidates.map((item, index) => ({
@@ -99,6 +101,7 @@ function challengerState(): ChallengerState {
       wins: index === 0 ? 3 : 0,
       losses: index === 1 ? 1 : 0,
       source: "generated" as const,
+      importItemId: null,
       poolMember: true,
       lastServedAt: null,
       favorite: index === 0,
@@ -301,7 +304,7 @@ function service(options: {
   challengers?: ChallengerState | null;
   verifyCandidateAsset?: (
     candidate: Candidate,
-    source: "generated" | "curated",
+    source: "generated" | "curated" | "imported",
   ) => Promise<void>;
   createId?: () => string;
 }) {

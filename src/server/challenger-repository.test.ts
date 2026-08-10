@@ -70,7 +70,17 @@ const populatedState: ChallengerState = {
     {
       candidate: candidate("ready-1"),
       source: "generated",
+      importItemId: null,
       pinnedWinnerId: "winner-1",
+      enqueuedAt: "2026-07-16T20:01:00.000Z",
+    },
+  ],
+  importQueue: [
+    {
+      candidate: candidate("imported-queue-item"),
+      source: "imported",
+      importItemId: "import-item-queue-1",
+      pinnedWinnerId: null,
       enqueuedAt: "2026-07-16T20:01:00.000Z",
     },
   ],
@@ -94,6 +104,7 @@ const populatedState: ChallengerState = {
       wins: 1,
       losses: 0,
       source: "curated",
+      importItemId: null,
       poolMember: true,
       favorite: true,
       lastServedAt: "2026-07-16T20:03:00.000Z",
@@ -114,6 +125,7 @@ async function expectSessionReset(
     ...populatedState,
     sessionId: "next-session",
     ready: [],
+    importQueue: [],
     refillJobs: [],
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,
@@ -121,6 +133,72 @@ async function expectSessionReset(
 }
 
 describe("JsonChallengerRepository", () => {
+  it("defaults legacy import fields and enforces imported provenance", () => {
+    const legacy = structuredClone(populatedState) as unknown as Record<
+      string,
+      unknown
+    >;
+    delete legacy.importQueue;
+    for (const collection of ["ready", "ratings"] as const) {
+      for (const entry of legacy[collection] as Array<
+        Record<string, unknown>
+      >) {
+        delete entry.importItemId;
+      }
+    }
+
+    expect(parseChallengerState(legacy)).toMatchObject({
+      importQueue: [],
+      ready: [expect.objectContaining({ importItemId: null })],
+      ratings: [expect.objectContaining({ importItemId: null })],
+    });
+
+    const imported = structuredClone(populatedState) as unknown as Record<
+      string,
+      unknown
+    >;
+    imported.importQueue = [
+      {
+        ...populatedState.ready[0],
+        source: "imported",
+        importItemId: "item-1",
+      },
+    ];
+    expect(parseChallengerState(imported).importQueue).toHaveLength(1);
+
+    const missingImportedItem = structuredClone(imported) as Record<
+      string,
+      unknown
+    >;
+    (
+      missingImportedItem.importQueue as Array<Record<string, unknown>>
+    )[0].importItemId = null;
+    expect(() => parseChallengerState(missingImportedItem)).toThrow(
+      /import.*item/i,
+    );
+
+    const generatedWithImportedId = structuredClone(imported) as Record<
+      string,
+      unknown
+    >;
+    (
+      generatedWithImportedId.ready as Array<Record<string, unknown>>
+    )[0].importItemId = "item-1";
+    expect(() => parseChallengerState(generatedWithImportedId)).toThrow(
+      /import.*item/i,
+    );
+
+    const generatedInImportQueue = structuredClone(imported) as Record<
+      string,
+      unknown
+    >;
+    (
+      generatedInImportQueue.importQueue as Array<Record<string, unknown>>
+    )[0].source = "generated";
+    expect(() => parseChallengerState(generatedInImportQueue)).toThrow(
+      /import.*queue/i,
+    );
+  });
   it("migrates transitional profile metadata inside durable refill intent", () => {
     const transitional = structuredClone(populatedState) as unknown as {
       refillJobs: Array<{

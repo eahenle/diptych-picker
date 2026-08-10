@@ -223,6 +223,7 @@ export class RefillResultReconciler {
           {
             candidate: generated,
             source: "generated",
+            importItemId: null,
             pinnedWinnerId: record.pinnedWinnerId,
             enqueuedAt: result.completedAt,
           },

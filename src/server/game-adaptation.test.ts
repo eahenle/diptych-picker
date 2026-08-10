@@ -50,6 +50,7 @@ function rating(
     wins: 0,
     losses: 0,
     source,
+    importItemId: null,
     poolMember: true,
     lastServedAt: null,
   };
@@ -65,9 +66,11 @@ function challengers(
     ready: ready.map((item) => ({
       candidate: item,
       source: "generated",
+      importItemId: null,
       pinnedWinnerId: null,
       enqueuedAt: NOW,
     })),
+    importQueue: [],
     refillJobs: [],
     pendingComparison: null,
     ratings,
