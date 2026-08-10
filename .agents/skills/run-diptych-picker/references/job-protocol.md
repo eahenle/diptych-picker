@@ -401,7 +401,7 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 `pinnedWinnerId` must equal `retainedWinner.id`. `comparisonOutcome` is optional and appears as `tie` or `both-lose`; ordinary refill jobs omit it. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
 
-At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
+At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the shared number of immediately available fresh worker subagent slots for image generation and analysis, from one through three, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request, cached analysis, an import-annotation batch, or a bounded refill batch when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
 `npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, interactive source-profile, or prompt-card request. It then atomically renames up to the requested number of oldest import annotations from `pending` to `active`, followed by cached leaderboard-profile analysis, then up to the requested number of oldest refill requests. The `--max-refills` coordinator limit applies to either returned batch, must be from 1 through 3, and must not exceed immediately available worker slots. The helper never mixes kinds into a batch and emits strict JSON:
 
@@ -520,7 +520,7 @@ For an import annotation, write this strict metadata-only object to `<data-root>
 }
 ```
 
-The helper requires the matching active import-annotation job, validates trimmed nonempty strings and one through eight unique style tags, forces `source` to `automated`, reserves the completed outcome, and idempotently publishes only the terminal metadata. It never accepts image bytes. An annotation must not identify a person, infer sensitive traits, expose private readable text, or request identity, likeness, exact copying, or reproduction.
+The helper requires the matching active import-annotation job, validates trimmed nonempty strings with the domain's exact limits (concept: 120 characters, prompt: 500, reasoning summary: 1000), and one through eight unique style tags. It forces `source` to `automated`, reserves the completed outcome, and idempotently publishes only terminal metadata. Its only flags are `--job`, `--annotation-file`, and optional `--lease-token`; it rejects `--image` and every other unknown flag before outcome reservation. An annotation must not identify a person, infer sensitive traits, expose private readable text, or request identity, likeness, exact copying, or reproduction.
 
 ```json
 {

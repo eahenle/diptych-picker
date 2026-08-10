@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { link, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { preferenceProfileFromSeed } from "@/domain/game";
@@ -326,16 +327,16 @@ export class MockAgentWorker {
   private async completeImportAnnotation(
     job: ImportAnnotationJob,
   ): Promise<void> {
+    const token = createHash("sha256").update(job.id).digest("hex").slice(0, 8);
     const result: ImportAnnotationResult = {
       jobId: job.id,
       kind: "import-annotation",
       status: "completed",
       completedAt: this.now(),
       annotation: {
-        concept: "Imported image annotation",
-        prompt:
-          "A normalized imported image prepared for an independent comparison.",
-        style: ["imported image", "normalized composition"],
+        concept: `Imported image study ${token}`,
+        prompt: `A normalized imported image prepared for independent comparison, catalog token ${token}.`,
+        style: ["imported image", `catalog ${token.slice(0, 4)}`],
         reasoningSummary:
           "Provides stable display-safe metadata without identifying a person or reproducing the source.",
         source: "automated",

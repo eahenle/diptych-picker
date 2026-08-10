@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parseImportedCandidateAnnotation } from "@/domain/import-session";
 import {
   FileGenerationMailbox,
   generationJobSchema,
@@ -313,6 +314,44 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("rejects annotations beyond the domain contract and returns domain-reconcilable metadata", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const annotationJob = importAnnotationJob();
+    await mailbox.enqueueImportAnnotation(annotationJob);
+    const annotation = {
+      concept: "c".repeat(120),
+      prompt: "p".repeat(500),
+      style: ["cinematic landscape"],
+      reasoningSummary: "r".repeat(1_000),
+      source: "automated" as const,
+    };
+    await writeRawResult(root, "completed", annotationJob.id, {
+      jobId: annotationJob.id,
+      kind: "import-annotation",
+      status: "completed",
+      completedAt: "2026-08-09T18:01:00.000Z",
+      annotation,
+    });
+
+    const result = await mailbox.readImportAnnotationResult(annotationJob.id);
+    if (result?.status !== "completed") throw new Error("missing annotation");
+    expect(parseImportedCandidateAnnotation(result.annotation)).toEqual(
+      annotation,
+    );
+
+    await writeRawResult(root, "completed", "annotation-too-long", {
+      jobId: "annotation-too-long",
+      kind: "import-annotation",
+      status: "completed",
+      completedAt: "2026-08-09T18:01:00.000Z",
+      annotation: { ...annotation, prompt: "p".repeat(501) },
+    });
+    await expect(
+      mailbox.readImportAnnotationResult("annotation-too-long"),
+    ).rejects.toThrow(/500/i);
+  });
+
   it("strictly persists import annotation work and its metadata-only result", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);

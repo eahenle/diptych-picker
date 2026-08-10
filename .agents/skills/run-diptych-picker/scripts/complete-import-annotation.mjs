@@ -17,8 +17,8 @@ import {
 const nonBlankStringSchema = z.string().trim().min(1);
 const annotationSchema = z
   .object({
-    concept: nonBlankStringSchema.max(240),
-    prompt: nonBlankStringSchema.max(1_000),
+    concept: nonBlankStringSchema.max(120),
+    prompt: nonBlankStringSchema.max(500),
     style: z
       .array(nonBlankStringSchema.max(80))
       .min(1)
@@ -31,12 +31,17 @@ const annotationSchema = z
           });
         }
       }),
-    reasoningSummary: nonBlankStringSchema.max(2_000),
+    reasoningSummary: nonBlankStringSchema.max(1_000),
     source: z.enum(["automated", "manual"]),
   })
   .strict();
 
 const args = parseArgs(process.argv.slice(2));
+for (const name of Object.keys(args)) {
+  if (name !== "job" && name !== "annotation-file" && name !== "lease-token") {
+    throw new Error(`Unsupported argument --${name}`);
+  }
+}
 const jobId = required(args, "job");
 if (!JOB_ID.test(jobId)) throw new Error("Invalid import-annotation job ID");
 const leaseToken = args["lease-token"];

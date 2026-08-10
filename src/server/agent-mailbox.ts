@@ -14,6 +14,7 @@ import type {
   ImportedAssetMetadata,
   ImportedCandidateAnnotation,
 } from "@/domain/import-session";
+import { importedCandidateAnnotationSchema } from "@/domain/import-session";
 import { z } from "zod";
 import {
   preferenceProfileSchema,
@@ -568,26 +569,10 @@ const completedPromptCardWriterResultSchema = z
   })
   .strict();
 
-const importedCandidateAnnotationSchema = z
-  .object({
-    concept: nonBlankStringSchema.max(240),
-    prompt: nonBlankStringSchema.max(1_000),
-    style: z
-      .array(nonBlankStringSchema.max(80))
-      .min(1)
-      .max(8)
-      .superRefine((style, context) => {
-        if (new Set(style).size !== style.length) {
-          context.addIssue({
-            code: "custom",
-            message: "Imported annotation style tags must be unique",
-          });
-        }
-      }),
-    reasoningSummary: nonBlankStringSchema.max(2_000),
+const automatedImportedCandidateAnnotationSchema =
+  importedCandidateAnnotationSchema.safeExtend({
     source: z.literal("automated"),
-  })
-  .strict();
+  });
 
 const completedImportAnnotationResultSchema = z
   .object({
@@ -595,7 +580,7 @@ const completedImportAnnotationResultSchema = z
     kind: z.literal("import-annotation"),
     status: z.literal("completed"),
     completedAt: timestampSchema,
-    annotation: importedCandidateAnnotationSchema,
+    annotation: automatedImportedCandidateAnnotationSchema,
   })
   .strict();
 

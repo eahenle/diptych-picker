@@ -7,6 +7,7 @@ import {
 import {
   deriveActivationDisplayReceiptId,
   deriveDequeueOperationId,
+  parseImportedCandidateAnnotation,
   parseImportSession,
 } from "./import-session";
 
@@ -53,6 +54,36 @@ const dequeueReceipt = {
 const session = importSessionFixture;
 
 describe("import session schema", () => {
+  it("parses imported annotations at the 120, 500, and 1000 character boundaries", () => {
+    const annotation = {
+      concept: "c".repeat(120),
+      prompt: "p".repeat(500),
+      style: ["cinematic landscape"],
+      reasoningSummary: "r".repeat(1_000),
+      source: "automated" as const,
+    };
+
+    expect(parseImportedCandidateAnnotation(annotation)).toEqual(annotation);
+    expect(() =>
+      parseImportedCandidateAnnotation({
+        ...annotation,
+        concept: "c".repeat(121),
+      }),
+    ).toThrow(/120/i);
+    expect(() =>
+      parseImportedCandidateAnnotation({
+        ...annotation,
+        prompt: "p".repeat(501),
+      }),
+    ).toThrow(/500/i);
+    expect(() =>
+      parseImportedCandidateAnnotation({
+        ...annotation,
+        reasoningSummary: "r".repeat(1_001),
+      }),
+    ).toThrow(/1000/i);
+  });
+
   it("round-trips durable annotations, retry evidence, and both served receipt kinds", () => {
     expect(parseImportSession(session())).toEqual(session());
   });

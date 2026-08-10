@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,8 +14,10 @@ import {
   MockImportAnnotationMailbox,
 } from "./mock-agent";
 
-const importAnnotationJob = (): ImportAnnotationJob => ({
-  id: "import-annotation-1",
+const importAnnotationJob = (
+  id = "import-annotation-1",
+): ImportAnnotationJob => ({
+  id,
   kind: "import-annotation",
   createdAt: "2026-08-09T18:00:00.000Z",
   importSessionId: "import-session-1",
@@ -93,7 +95,7 @@ afterEach(async () => {
 });
 
 describe("deterministic mock mailbox worker", () => {
-  it("completes imported image annotation with deterministic metadata only", async () => {
+  it("derives stable distinct annotation metadata per job without creating assets", async () => {
     const root = await mkdtemp(join(tmpdir(), "diptych-mock-annotation-"));
     roots.push(root);
     const mailboxDirectory = join(root, "agent-mailbox");
@@ -105,30 +107,51 @@ describe("deterministic mock mailbox worker", () => {
       now: () => "2026-08-09T18:01:00.000Z",
     });
     const mailbox = new MockImportAnnotationMailbox(fileMailbox, worker);
-    const annotationJob = importAnnotationJob();
+    const firstJob = importAnnotationJob("import-annotation-1");
+    const secondJob = importAnnotationJob("import-annotation-2");
 
-    await mailbox.enqueueImportAnnotation(annotationJob);
+    await mailbox.enqueueImportAnnotation(firstJob);
+    await mailbox.enqueueImportAnnotation(secondJob);
 
     await vi.waitFor(async () => {
       expect(
-        await fileMailbox.readImportAnnotationResult(annotationJob.id),
-      ).toEqual({
-        jobId: annotationJob.id,
-        kind: "import-annotation",
-        status: "completed",
-        completedAt: "2026-08-09T18:01:00.000Z",
-        annotation: {
-          concept: "Imported image annotation",
-          prompt:
-            "A normalized imported image prepared for an independent comparison.",
-          style: ["imported image", "normalized composition"],
-          reasoningSummary:
-            "Provides stable display-safe metadata without identifying a person or reproducing the source.",
-          source: "automated",
-        },
+        await fileMailbox.readImportAnnotationResult(firstJob.id),
+      ).toMatchObject({
+        jobId: firstJob.id,
+        annotation: { source: "automated" },
+      });
+      expect(
+        await fileMailbox.readImportAnnotationResult(secondJob.id),
+      ).toMatchObject({
+        jobId: secondJob.id,
+        annotation: { source: "automated" },
       });
     });
-    expect(await readFile(join(root, "assets")).catch(() => null)).toBeNull();
+    const first = await fileMailbox.readImportAnnotationResult(firstJob.id);
+    const second = await fileMailbox.readImportAnnotationResult(secondJob.id);
+    if (first?.status !== "completed" || second?.status !== "completed") {
+      throw new Error("missing annotation result");
+    }
+    expect(first.annotation).not.toEqual(second.annotation);
+
+    const replayWorker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-08-09T18:01:00.000Z",
+    });
+    replayWorker.schedule(firstJob);
+    await vi.waitFor(async () => {
+      expect(await fileMailbox.readImportAnnotationResult(firstJob.id)).toEqual(
+        first,
+      );
+    });
+    const assetNames = await readdir(join(root, "assets")).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    });
+    expect(assetNames).toEqual([]);
+    replayWorker.dispose();
     worker.dispose();
   });
 

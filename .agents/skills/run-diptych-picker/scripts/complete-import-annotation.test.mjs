@@ -45,12 +45,19 @@ async function setup() {
   return root;
 }
 
-async function run(root, value) {
+async function run(root, value, extraArgs = []) {
   const annotationPath = join(root, "annotation.json");
   await writeFile(annotationPath, `${JSON.stringify(value)}\n`);
   return execFileAsync(
     process.execPath,
-    [script, "--job", job.id, "--annotation-file", annotationPath],
+    [
+      script,
+      "--job",
+      job.id,
+      "--annotation-file",
+      annotationPath,
+      ...extraArgs,
+    ],
     { cwd: process.cwd(), env: { ...process.env, LOCAL_DATA_DIR: root } },
   );
 }
@@ -79,4 +86,53 @@ test("forces automated source and safely repeats the same completion", async () 
   assert.equal(result.annotation.source, "automated");
   assert.equal(result.asset, undefined);
   assert.equal(result.imageBytes, undefined);
+});
+
+test("uses the domain's exact 120, 500, and 1000 annotation boundaries", async () => {
+  const root = await setup();
+  const bounded = {
+    concept: "c".repeat(120),
+    prompt: "p".repeat(500),
+    style: ["cinematic landscape"],
+    reasoningSummary: "r".repeat(1_000),
+    source: "manual",
+  };
+
+  await run(root, bounded);
+  const result = JSON.parse(
+    await readFile(
+      join(root, "agent-mailbox", "completed", `${job.id}.json`),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(result.annotation, { ...bounded, source: "automated" });
+
+  for (const [field, value] of [
+    ["concept", "c".repeat(121)],
+    ["prompt", "p".repeat(501)],
+    ["reasoningSummary", "r".repeat(1_001)],
+  ]) {
+    const invalidRoot = await setup();
+    await assert.rejects(() =>
+      run(invalidRoot, { ...bounded, [field]: value }),
+    );
+    await assert.rejects(() =>
+      readFile(
+        join(invalidRoot, "agent-mailbox", "outcomes", `${job.id}.json`),
+      ),
+    );
+  }
+});
+
+test("rejects unknown flags and explicit image input before outcome reservation", async () => {
+  for (const extraArgs of [
+    ["--unexpected", "value"],
+    ["--image", "candidate.png"],
+  ]) {
+    const root = await setup();
+    await assert.rejects(() => run(root, annotation, extraArgs));
+    await assert.rejects(() =>
+      readFile(join(root, "agent-mailbox", "outcomes", `${job.id}.json`)),
+    );
+  }
 });

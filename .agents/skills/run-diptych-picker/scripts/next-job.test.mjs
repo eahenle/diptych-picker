@@ -505,6 +505,29 @@ test("resume returns a bounded batch of unfinished active refills", async () => 
   );
 });
 
+test("startup recovery returns oldest unfinished import annotations as a shared worker batch", async () => {
+  const root = await dataRoot();
+  await Promise.all([
+    put(
+      root,
+      "active",
+      importAnnotation("annotation-2", "2026-08-09T18:00:02.000Z"),
+    ),
+    put(
+      root,
+      "active",
+      importAnnotation("annotation-1", "2026-08-09T18:00:01.000Z"),
+    ),
+  ]);
+
+  const { stdout } = await run(root, ["--resume", "--max-refills", "3"]);
+
+  assert.deepEqual(
+    JSON.parse(stdout).jobs.map(({ id }) => id),
+    ["annotation-1", "annotation-2"],
+  );
+});
+
 test("rejects refill limits outside the coordinator concurrency bound", async () => {
   const root = await dataRoot();
   await assert.rejects(run(root, ["--max-refills", "4"]), /max-refills/i);

@@ -154,7 +154,7 @@ const assetSchema = z
     }
   });
 
-const annotationSchema = z
+export const importedCandidateAnnotationSchema = z
   .object({
     concept: nonBlank.max(120),
     prompt: nonBlank.max(500),
@@ -189,7 +189,7 @@ const itemSchema = z
       })
       .strict()
       .nullable(),
-    annotation: annotationSchema.nullable(),
+    annotation: importedCandidateAnnotationSchema.nullable(),
     candidateId: nonBlank.nullable(),
     failureMessage: nonBlank.nullable(),
     approvedAt: timestampSchema,
@@ -625,6 +625,12 @@ const importSessionSchema: z.ZodType<ImportSession> = z
 
 export function parseImportSession(value: unknown): ImportSession {
   return importSessionSchema.parse(value);
+}
+
+export function parseImportedCandidateAnnotation(
+  value: unknown,
+): ImportedCandidateAnnotation {
+  return importedCandidateAnnotationSchema.parse(value);
 }
 
 function canonicalJson(value: unknown): string {
