@@ -93,6 +93,26 @@ export function validateJobKind(job) {
     }
     return;
   }
+  if (kind === "import-annotation") {
+    if (
+      !isExactObject(job, [
+        "id",
+        "kind",
+        "createdAt",
+        "importSessionId",
+        "importItemId",
+        "asset",
+      ]) ||
+      !JOB_ID.test(job.importSessionId ?? "") ||
+      !JOB_ID.test(job.importItemId ?? "") ||
+      !validImportedAsset(job.asset)
+    ) {
+      throw new Error(
+        `Import-annotation job ${job.id} has invalid normalized image metadata`,
+      );
+    }
+    return;
+  }
   if (kind === "leaderboard-profile") {
     const sources = job.sources;
     if (
@@ -213,6 +233,38 @@ function validProfileSource(sourceImage) {
     sourceImage.height <= 4096 &&
     Number.isInteger(sourceImage.byteLength) &&
     sourceImage.byteLength > 0,
+  );
+}
+
+function validImportedAsset(asset) {
+  return Boolean(
+    asset &&
+    isExactObject(asset, [
+      "digest",
+      "filename",
+      "url",
+      "contentType",
+      "width",
+      "height",
+      "byteLength",
+    ]) &&
+    /^[a-f0-9]{64}$/.test(asset.digest ?? "") &&
+    asset.filename === `${asset.digest}.png` &&
+    asset.url === `/api/assets/${asset.filename}` &&
+    asset.contentType === "image/png" &&
+    asset.width === 1024 &&
+    asset.height === 1024 &&
+    Number.isInteger(asset.byteLength) &&
+    asset.byteLength > 0,
+  );
+}
+
+function isExactObject(value, keys) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
   );
 }
 

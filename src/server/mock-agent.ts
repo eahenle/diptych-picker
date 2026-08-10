@@ -7,6 +7,9 @@ import type {
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
+  ImportAnnotationJob,
+  ImportAnnotationMailbox,
+  ImportAnnotationResult,
   LeaderboardProfileJob,
   LeaderboardProfileMailbox,
   LeaderboardProfileResult,
@@ -100,6 +103,10 @@ export class MockAgentWorker {
     }
     if (job.kind === "prompt-card-writer") {
       await this.completePromptCardWriter(job);
+      return;
+    }
+    if (job.kind === "import-annotation") {
+      await this.completeImportAnnotation(job);
       return;
     }
 
@@ -311,6 +318,27 @@ export class MockAgentWorker {
         tags,
         reasoningSummary:
           "Extracts shared aesthetic qualities from the selected immutable generated favorites while preserving them as read-only sources.",
+      },
+    };
+    await this.publish("completed", job.id, result);
+  }
+
+  private async completeImportAnnotation(
+    job: ImportAnnotationJob,
+  ): Promise<void> {
+    const result: ImportAnnotationResult = {
+      jobId: job.id,
+      kind: "import-annotation",
+      status: "completed",
+      completedAt: this.now(),
+      annotation: {
+        concept: "Imported image annotation",
+        prompt:
+          "A normalized imported image prepared for an independent comparison.",
+        style: ["imported image", "normalized composition"],
+        reasoningSummary:
+          "Provides stable display-safe metadata without identifying a person or reproducing the source.",
+        source: "automated",
       },
     };
     await this.publish("completed", job.id, result);
@@ -550,5 +578,33 @@ export class MockPromptCardWriterMailbox implements PromptCardWriterMailbox {
     if (job && !(await this.mailbox.readPromptCardWriterResult(job.id))) {
       this.worker.schedule(job);
     }
+  }
+}
+
+export class MockImportAnnotationMailbox implements ImportAnnotationMailbox {
+  constructor(
+    private readonly mailbox: ImportAnnotationMailbox,
+    private readonly worker: MockAgentWorker,
+  ) {}
+
+  async enqueueImportAnnotation(job: ImportAnnotationJob): Promise<void> {
+    await this.mailbox.enqueueImportAnnotation(job);
+    this.worker.schedule(job);
+  }
+
+  async readImportAnnotationWork(jobId: string) {
+    const job = await this.mailbox.readImportAnnotationWork(jobId);
+    if (job && !(await this.mailbox.readImportAnnotationResult(job.id))) {
+      this.worker.schedule(job);
+    }
+    return job;
+  }
+
+  readImportAnnotationResult(jobId: string) {
+    return this.mailbox.readImportAnnotationResult(jobId);
+  }
+
+  archiveImportAnnotation(jobId: string) {
+    return this.mailbox.archiveImportAnnotation(jobId);
   }
 }

@@ -69,6 +69,25 @@ function sourceProfile(id, createdAt) {
   };
 }
 
+function importAnnotation(id, createdAt) {
+  return {
+    id,
+    kind: "import-annotation",
+    createdAt,
+    importSessionId: "import-session-1",
+    importItemId: `item-${id}`,
+    asset: {
+      digest: "c".repeat(64),
+      filename: `${"c".repeat(64)}.png`,
+      url: `/api/assets/${"c".repeat(64)}.png`,
+      contentType: "image/png",
+      width: 1024,
+      height: 1024,
+      byteLength: 2048,
+    },
+  };
+}
+
 function leaderboardProfile(id, createdAt) {
   return {
     id,
@@ -252,6 +271,47 @@ test("returns one ordinary challenger before any refill batch", async () => {
       "utf8",
     ),
   );
+});
+
+test("claims the three oldest import annotations as one interactive batch before cached analysis and refills", async () => {
+  const root = await dataRoot();
+  await Promise.all([
+    put(root, "pending", refill("older-refill", "2026-08-09T18:00:00.000Z")),
+    put(
+      root,
+      "pending",
+      leaderboardProfile("leaderboard-1", "2026-08-09T18:00:01.000Z"),
+    ),
+    put(
+      root,
+      "pending",
+      importAnnotation("annotation-3", "2026-08-09T18:00:04.000Z"),
+    ),
+    put(
+      root,
+      "pending",
+      importAnnotation("annotation-1", "2026-08-09T18:00:02.000Z"),
+    ),
+    put(
+      root,
+      "pending",
+      importAnnotation("annotation-2", "2026-08-09T18:00:03.000Z"),
+    ),
+  ]);
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+  const claim = JSON.parse(stdout);
+
+  assert.equal(claim.kind, "import-annotation-batch");
+  assert.deepEqual(
+    claim.jobs.map(({ id }) => id),
+    ["annotation-1", "annotation-2", "annotation-3"],
+  );
+  assert.deepEqual(await readdir(join(root, "agent-mailbox", "active")), [
+    "annotation-1.json",
+    "annotation-2.json",
+    "annotation-3.json",
+  ]);
 });
 
 test("prioritizes an interactive source-profile analysis before refills", async () => {

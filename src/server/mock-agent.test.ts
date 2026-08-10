@@ -2,9 +2,34 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FileGenerationMailbox, type GenerationJob } from "./agent-mailbox";
+import {
+  FileGenerationMailbox,
+  type GenerationJob,
+  type ImportAnnotationJob,
+} from "./agent-mailbox";
 import { LocalAssetStore } from "./asset-store";
-import { MockAgentWorker, MockGenerationMailbox } from "./mock-agent";
+import {
+  MockAgentWorker,
+  MockGenerationMailbox,
+  MockImportAnnotationMailbox,
+} from "./mock-agent";
+
+const importAnnotationJob = (): ImportAnnotationJob => ({
+  id: "import-annotation-1",
+  kind: "import-annotation",
+  createdAt: "2026-08-09T18:00:00.000Z",
+  importSessionId: "import-session-1",
+  importItemId: "import-item-1",
+  asset: {
+    digest: "c".repeat(64),
+    filename: `${"c".repeat(64)}.png`,
+    url: `/api/assets/${"c".repeat(64)}.png`,
+    contentType: "image/png",
+    width: 1024,
+    height: 1024,
+    byteLength: 2048,
+  },
+});
 
 const roots: string[] = [];
 
@@ -68,6 +93,45 @@ afterEach(async () => {
 });
 
 describe("deterministic mock mailbox worker", () => {
+  it("completes imported image annotation with deterministic metadata only", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-mock-annotation-"));
+    roots.push(root);
+    const mailboxDirectory = join(root, "agent-mailbox");
+    const fileMailbox = new FileGenerationMailbox(mailboxDirectory);
+    const worker = new MockAgentWorker({
+      mailboxDirectory,
+      assetStore: new LocalAssetStore(join(root, "assets")),
+      delayMs: 0,
+      now: () => "2026-08-09T18:01:00.000Z",
+    });
+    const mailbox = new MockImportAnnotationMailbox(fileMailbox, worker);
+    const annotationJob = importAnnotationJob();
+
+    await mailbox.enqueueImportAnnotation(annotationJob);
+
+    await vi.waitFor(async () => {
+      expect(
+        await fileMailbox.readImportAnnotationResult(annotationJob.id),
+      ).toEqual({
+        jobId: annotationJob.id,
+        kind: "import-annotation",
+        status: "completed",
+        completedAt: "2026-08-09T18:01:00.000Z",
+        annotation: {
+          concept: "Imported image annotation",
+          prompt:
+            "A normalized imported image prepared for an independent comparison.",
+          style: ["imported image", "normalized composition"],
+          reasoningSummary:
+            "Provides stable display-safe metadata without identifying a person or reproducing the source.",
+          source: "automated",
+        },
+      });
+    });
+    expect(await readFile(join(root, "assets")).catch(() => null)).toBeNull();
+    worker.dispose();
+  });
+
   it("schedules refill jobs through deterministic local providers", async () => {
     const root = await mkdtemp(join(tmpdir(), "diptych-mock-refill-"));
     roots.push(root);

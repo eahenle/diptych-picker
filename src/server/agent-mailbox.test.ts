@@ -15,11 +15,31 @@ import {
   generationJobSchema,
   type GenerationJob,
   type GenerationResult,
+  type ImportAnnotationJob,
   type LeaderboardProfileJob,
   type PromptCardBlenderJob,
   type PromptCardEditorJob,
   type PromptCardWriterJob,
 } from "./agent-mailbox";
+
+const importAnnotationJob = (
+  id = "import-annotation-1",
+): ImportAnnotationJob => ({
+  id,
+  kind: "import-annotation",
+  createdAt: "2026-08-09T18:00:00.000Z",
+  importSessionId: "import-session-1",
+  importItemId: "import-item-1",
+  asset: {
+    digest: "c".repeat(64),
+    filename: `${"c".repeat(64)}.png`,
+    url: `/api/assets/${"c".repeat(64)}.png`,
+    contentType: "image/png",
+    width: 1024,
+    height: 1024,
+    byteLength: 2048,
+  },
+});
 
 const job = (id = "job-1"): GenerationJob => ({
   id,
@@ -293,6 +313,45 @@ async function writeRawResult(
 }
 
 describe("FileGenerationMailbox", () => {
+  it("strictly persists import annotation work and its metadata-only result", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const annotationJob = importAnnotationJob();
+    await mailbox.enqueueImportAnnotation(annotationJob);
+
+    await expect(
+      mailbox.readImportAnnotationWork(annotationJob.id),
+    ).resolves.toEqual(annotationJob);
+
+    const result = {
+      jobId: annotationJob.id,
+      kind: "import-annotation" as const,
+      status: "completed" as const,
+      completedAt: "2026-08-09T18:01:00.000Z",
+      annotation: {
+        concept: "Copper observatory",
+        prompt: "A copper radio observatory under a dark coastal sky.",
+        style: ["cinematic landscape", "copper and blue"],
+        reasoningSummary:
+          "Describes visible subject, composition, and palette without identity claims.",
+        source: "automated" as const,
+      },
+    };
+    await writeRawResult(root, "completed", annotationJob.id, result);
+
+    await expect(
+      mailbox.readImportAnnotationResult(annotationJob.id),
+    ).resolves.toEqual(result);
+    await writeRawResult(root, "completed", "annotation-extra", {
+      ...result,
+      jobId: "annotation-extra",
+      imageBytes: "never accepted",
+    });
+    await expect(
+      mailbox.readImportAnnotationResult("annotation-extra"),
+    ).rejects.toThrow();
+  });
+
   it("strictly persists prompt-card writer work and its proposal", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);

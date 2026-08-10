@@ -25,6 +25,7 @@ The data root is `LOCAL_DATA_DIR` when set and `.local-data` otherwise.
 - `agent-work/<jobId>/failure.txt`: failure reason passed by file
 - `agent-work/<jobId>/image.png`: worker-generated standalone image
 - `agent-work/<jobId>/profile.json`: source-profile or leaderboard-profile analysis passed by file
+- `agent-work/<jobId>/annotation.json`: import-annotation metadata passed by file
 - `agent-work/<jobId>/suggestions.json`: two prompt-card editor proposals passed by file
 - `agent-work/<jobId>/suggestion.json`: one prompt-card blender or writer proposal passed by file
 - `profile-sources/<sha256-of-normalized-png-bytes>.png`: private, metadata-stripped source upload
@@ -165,7 +166,7 @@ co-proc terminal frames.
 }
 ```
 
-`kind` is `challenger`, `initial`, `refill`, `source-profile`, `leaderboard-profile`, `prompt-card-editor`, `prompt-card-blender`, or `prompt-card-writer`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+`kind` is `challenger`, `initial`, `refill`, `source-profile`, `leaderboard-profile`, `prompt-card-editor`, `prompt-card-blender`, `prompt-card-writer`, or `import-annotation`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
 
 ```json
 {
@@ -177,6 +178,29 @@ co-proc terminal frames.
 ```
 
 The remaining request fields carry the same preference context. A missing `kind` is tolerated as a legacy challenger.
+
+An import annotation contains only metadata for one immutable normalized asset. It never contains source bytes, image bytes, original filenames, or generation instructions:
+
+```json
+{
+  "id": "import-annotation-job-1",
+  "kind": "import-annotation",
+  "createdAt": "ISO-8601 timestamp",
+  "importSessionId": "import-session-1",
+  "importItemId": "import-item-1",
+  "asset": {
+    "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "filename": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+    "url": "/api/assets/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png",
+    "contentType": "image/png",
+    "width": 1024,
+    "height": 1024,
+    "byteLength": 123456
+  }
+}
+```
+
+The monitor treats annotations as analysis-only interactive work. After any interactive singleton, it may atomically claim up to `workerLimit` oldest annotations, capped at three, and emit one strict batch. Each entry receives exactly one fresh worker and is completed independently.
 
 An interactive source-image analysis has no comparison or preference context. The server fully decodes the PNG, JPEG, or WebP upload, strips metadata by normalizing it to PNG, stores it privately under the data root, and enqueues:
 
@@ -379,7 +403,14 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the number of immediately available fresh image-worker subagent slots, capped at 3, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request or a bounded batch of unterminated active refills when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
-`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, or interactive source-profile request, then prompt-card editor, blender, or writer work, then cached leaderboard-profile analysis. When none is claimable, it atomically renames up to the requested number of oldest refill requests from `pending` to `active`. The refill limit must be from 1 through 3 and must not exceed immediately available worker slots. The helper never mixes priority work into a refill batch and emits strict JSON:
+`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, interactive source-profile, or prompt-card request. It then atomically renames up to the requested number of oldest import annotations from `pending` to `active`, followed by cached leaderboard-profile analysis, then up to the requested number of oldest refill requests. The `--max-refills` coordinator limit applies to either returned batch, must be from 1 through 3, and must not exceed immediately available worker slots. The helper never mixes kinds into a batch and emits strict JSON:
+
+```json
+{
+  "kind": "import-annotation-batch",
+  "jobs": [{ "id": "import-annotation-job-1", "kind": "import-annotation" }]
+}
+```
 
 ```json
 {
@@ -476,6 +507,20 @@ For a source-profile job, write this strict object to `<data-root>/agent-work/<j
 ```
 
 `npm run agent:complete-profile -- --job <id> --profile-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/profile.json"` requires the matching active profile-analysis job and verifies every referenced normalized source before reserving the outcome. For a source-profile job it publishes the editable draft without saving it to the game:
+
+For an import annotation, write this strict metadata-only object to `<data-root>/agent-work/<jobId>/annotation.json` and run `npm run agent:complete-import-annotation -- --job <id> --annotation-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/annotation.json"`:
+
+```json
+{
+  "concept": "Copper observatory",
+  "prompt": "A copper radio observatory under a dark coastal sky.",
+  "style": ["cinematic landscape", "copper and blue"],
+  "reasoningSummary": "Describes visible subject, composition, and palette without identity claims.",
+  "source": "automated"
+}
+```
+
+The helper requires the matching active import-annotation job, validates trimmed nonempty strings and one through eight unique style tags, forces `source` to `automated`, reserves the completed outcome, and idempotently publishes only the terminal metadata. It never accepts image bytes. An annotation must not identify a person, infer sensitive traits, expose private readable text, or request identity, likeness, exact copying, or reproduction.
 
 ```json
 {

@@ -41,6 +41,7 @@
     "agent:renew-lease": "node .agents/skills/run-diptych-picker/scripts/renew-lease.mjs",
     "agent:complete": "node .agents/skills/run-diptych-picker/scripts/complete-job.mjs",
     "agent:complete-profile": "node .agents/skills/run-diptych-picker/scripts/complete-source-profile.mjs",
+    "agent:complete-import-annotation": "node .agents/skills/run-diptych-picker/scripts/complete-import-annotation.mjs",
     "agent:complete-card-editor": "node .agents/skills/run-diptych-picker/scripts/complete-prompt-card-editor.mjs",
     "agent:complete-card-blender": "node .agents/skills/run-diptych-picker/scripts/complete-prompt-card-blender.mjs",
     "agent:complete-card-writer": "node .agents/skills/run-diptych-picker/scripts/complete-prompt-card-writer.mjs",
