@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { normalizeImportedCandidate } from "./import-asset-service";
+import {
+  inspectStaticPng,
+  normalizeImportedCandidate,
+} from "./import-asset-service";
 
 const canonicalLimit = 20 * 1024 * 1024;
 
@@ -120,6 +123,40 @@ async function staticPng(): Promise<Buffer> {
   })
     .png()
     .toBuffer();
+}
+
+async function pngWithChunks({
+  beforeIdat = [],
+  betweenIdats = [],
+  afterIdat = [],
+  idatParts = 1,
+}: {
+  beforeIdat?: Buffer[];
+  betweenIdats?: Buffer[];
+  afterIdat?: Buffer[];
+  idatParts?: number;
+} = {}): Promise<Buffer> {
+  const source = await staticPng();
+  const chunks = pngChunks(source);
+  const header = chunks.find((chunk) => chunk.type === "IHDR")!;
+  const idat = Buffer.concat(
+    chunks.filter((chunk) => chunk.type === "IDAT").map((chunk) => chunk.data),
+  );
+  const idatChunks = Array.from({ length: idatParts }, (_, index) => {
+    const start = Math.floor((idat.length * index) / idatParts);
+    const end = Math.floor((idat.length * (index + 1)) / idatParts);
+    return pngChunk("IDAT", idat.subarray(start, end));
+  });
+  return Buffer.concat([
+    source.subarray(0, 8),
+    pngChunk("IHDR", header.data),
+    ...beforeIdat,
+    ...idatChunks.flatMap((chunk, index) =>
+      index === 0 ? [chunk, ...betweenIdats] : [chunk],
+    ),
+    ...afterIdat,
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 describe("normalizeImportedCandidate", () => {
@@ -251,5 +288,167 @@ describe("normalizeImportedCandidate", () => {
 
     await expect(access(assets)).rejects.toThrow();
     await expect(access(exports)).rejects.toThrow();
+  });
+
+  it.each([
+    [
+      "a lowercase reserved type byte",
+      async () =>
+        pngWithChunks({ beforeIdat: [pngChunk("abcD", Buffer.alloc(0))] }),
+    ],
+    [
+      "a duplicate gAMA chunk",
+      async () =>
+        pngWithChunks({
+          beforeIdat: [
+            pngChunk("gAMA", Buffer.alloc(4)),
+            pngChunk("gAMA", Buffer.alloc(4)),
+          ],
+        }),
+    ],
+    [
+      "an unknown critical chunk",
+      async () =>
+        pngWithChunks({ beforeIdat: [pngChunk("ABCD", Buffer.alloc(0))] }),
+    ],
+    [
+      "a gAMA chunk after PLTE",
+      async () =>
+        pngWithChunks({
+          beforeIdat: [
+            pngChunk("PLTE", Buffer.from([0, 0, 0])),
+            pngChunk("gAMA", Buffer.alloc(4)),
+          ],
+        }),
+    ],
+    [
+      "a duplicate PLTE chunk",
+      async () =>
+        pngWithChunks({
+          beforeIdat: [
+            pngChunk("PLTE", Buffer.from([0, 0, 0])),
+            pngChunk("PLTE", Buffer.from([0, 0, 0])),
+          ],
+        }),
+    ],
+    [
+      "a PLTE chunk after IDAT",
+      async () =>
+        pngWithChunks({
+          afterIdat: [pngChunk("PLTE", Buffer.from([0, 0, 0]))],
+        }),
+    ],
+    ["no IDAT chunks", async () => pngWithChunks({ idatParts: 0 })],
+    [
+      "nonconsecutive IDAT chunks",
+      async () =>
+        pngWithChunks({
+          idatParts: 2,
+          betweenIdats: [pngChunk("tEXt", Buffer.from("note\0split"))],
+        }),
+    ],
+    [
+      "a duplicate tIME chunk",
+      async () =>
+        pngWithChunks({
+          afterIdat: [
+            pngChunk("tIME", Buffer.alloc(7)),
+            pngChunk("tIME", Buffer.alloc(7)),
+          ],
+        }),
+    ],
+    [
+      "a pHYs chunk after IDAT",
+      async () =>
+        pngWithChunks({ afterIdat: [pngChunk("pHYs", Buffer.alloc(9))] }),
+    ],
+    [
+      "an hIST chunk without PLTE",
+      async () =>
+        pngWithChunks({ beforeIdat: [pngChunk("hIST", Buffer.alloc(2))] }),
+    ],
+    [
+      "a PLTE chunk after bKGD",
+      async () =>
+        pngWithChunks({
+          beforeIdat: [
+            pngChunk("bKGD", Buffer.alloc(6)),
+            pngChunk("PLTE", Buffer.from([0, 0, 0])),
+          ],
+        }),
+    ],
+    [
+      "an fcTL chunk without acTL",
+      async () =>
+        pngWithChunks({ beforeIdat: [pngChunk("fcTL", Buffer.alloc(26))] }),
+    ],
+    [
+      "an fdAT chunk without acTL",
+      async () =>
+        pngWithChunks({ afterIdat: [pngChunk("fdAT", Buffer.alloc(4))] }),
+    ],
+  ])("rejects %s before publishing any artifact", async (_name, input) => {
+    const { assets, exports } = await artifactDirectories();
+
+    await expect(
+      normalizeImportedCandidate(await input(), assets, exports),
+    ).rejects.toThrow();
+
+    await expect(access(assets)).rejects.toThrow();
+    await expect(access(exports)).rejects.toThrow();
+  });
+});
+
+describe("inspectStaticPng", () => {
+  it.each([
+    [
+      "multiple consecutive IDAT chunks",
+      async () => pngWithChunks({ idatParts: 2 }),
+    ],
+    [
+      "repeatable tEXt and sPLT chunks in their allowed positions",
+      async () =>
+        pngWithChunks({
+          beforeIdat: [
+            pngChunk(
+              "sPLT",
+              Buffer.concat([
+                Buffer.from("first\0"),
+                Buffer.from([8, 1, 2, 3, 4, 0, 1]),
+              ]),
+            ),
+            pngChunk(
+              "sPLT",
+              Buffer.concat([
+                Buffer.from("second\0"),
+                Buffer.from([8, 5, 6, 7, 8, 0, 2]),
+              ]),
+            ),
+          ],
+          afterIdat: [
+            pngChunk("tEXt", Buffer.from("author\0first")),
+            pngChunk("tEXt", Buffer.from("note\0second")),
+          ],
+        }),
+    ],
+    [
+      "an unknown ancillary chunk with an uppercase reserved byte",
+      async () =>
+        pngWithChunks({ afterIdat: [pngChunk("vpAg", Buffer.alloc(0))] }),
+    ],
+    [
+      "bKGD and tRNS without PLTE before IDAT",
+      async () =>
+        pngWithChunks({
+          beforeIdat: [
+            pngChunk("bKGD", Buffer.alloc(6)),
+            pngChunk("tRNS", Buffer.alloc(6)),
+          ],
+        }),
+    ],
+  ])("accepts %s", async (_name, input) => {
+    const contents = await input();
+
+    expect(() => inspectStaticPng(contents)).not.toThrow();
   });
 });

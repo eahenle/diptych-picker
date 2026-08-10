@@ -12,6 +12,37 @@ export const canonicalImportedAssetPixels = 1024 * 1024;
 
 const pngSignature = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const maximumPngChunks = 4096;
+const apngChunks = new Set(["acTL", "fcTL", "fdAT"]);
+const singletonBeforePlte = new Set([
+  "cHRM",
+  "cICP",
+  "gAMA",
+  "iCCP",
+  "mDCV",
+  "cLLI",
+  "sBIT",
+  "sRGB",
+]);
+const singletonAfterPlteBeforeIdat = new Set(["hIST"]);
+const singletonBeforeIdat = new Set(["eXIf", "pHYs"]);
+const singletonBeforeIdatWithOptionalPlte = new Set(["bKGD", "tRNS"]);
+const singletonWithoutOrdering = new Set(["tIME"]);
+const repeatableBeforeIdat = new Set(["sPLT"]);
+const repeatableWithoutOrdering = new Set(["iTXt", "tEXt", "zTXt"]);
+const knownPngChunks = new Set([
+  "IHDR",
+  "PLTE",
+  "IDAT",
+  "IEND",
+  ...apngChunks,
+  ...singletonBeforePlte,
+  ...singletonAfterPlteBeforeIdat,
+  ...singletonBeforeIdat,
+  ...singletonBeforeIdatWithOptionalPlte,
+  ...singletonWithoutOrdering,
+  ...repeatableBeforeIdat,
+  ...repeatableWithoutOrdering,
+]);
 
 export async function normalizeImportedCandidate(
   contents: Uint8Array,
@@ -96,6 +127,11 @@ export function inspectStaticPng(contents: Uint8Array): void {
   );
   let offset = pngSignature.length;
   let chunkCount = 0;
+  let sawPlte = false;
+  let sawIdat = false;
+  let idatRunEnded = false;
+  let sawChunkThatRequiresNoLaterPlte = false;
+  const seenSingletonChunks = new Set<string>();
   while (offset + 12 <= contents.length) {
     if (chunkCount >= maximumPngChunks) {
       throw new Error(
@@ -124,18 +160,71 @@ export function inspectStaticPng(contents: Uint8Array): void {
     if (type === "IHDR" && (chunkCount !== 0 || length !== 13)) {
       throw new Error("Imported PNG must contain one 13-byte IHDR chunk");
     }
-    if (type === "acTL") {
+    if (contents[typeStart + 2] & 0x20) {
+      throw new Error("Imported PNG has a lowercase reserved chunk-type byte");
+    }
+    if (apngChunks.has(type)) {
       throw new Error("Imported PNG must not be animated");
+    }
+    if (!knownPngChunks.has(type) && !(contents[typeStart] & 0x20)) {
+      throw new Error("Imported PNG has an unknown critical chunk");
     }
     if (type === "IEND") {
       if (length !== 0) {
         throw new Error("Imported PNG must have a zero-length IEND chunk");
+      }
+      if (!sawIdat) {
+        throw new Error("Imported PNG must contain IDAT data");
       }
       if (nextOffset !== contents.length) {
         throw new Error("Imported PNG must not contain trailing bytes");
       }
       return;
     }
+
+    if (type === "IDAT") {
+      if (idatRunEnded) {
+        throw new Error("Imported PNG IDAT chunks must be consecutive");
+      }
+      sawIdat = true;
+    } else if (sawIdat) {
+      idatRunEnded = true;
+    }
+
+    if (type === "PLTE") {
+      if (sawPlte || sawIdat || sawChunkThatRequiresNoLaterPlte) {
+        throw new Error("Imported PNG may contain one PLTE before IDAT");
+      }
+      sawPlte = true;
+    } else if (singletonBeforePlte.has(type)) {
+      assertSingletonChunk(type, seenSingletonChunks);
+      if (sawPlte || sawIdat) {
+        throw new Error(`Imported PNG ${type} must precede PLTE and IDAT`);
+      }
+    } else if (singletonAfterPlteBeforeIdat.has(type)) {
+      assertSingletonChunk(type, seenSingletonChunks);
+      if (!sawPlte || sawIdat) {
+        throw new Error(
+          `Imported PNG ${type} must follow PLTE and precede IDAT`,
+        );
+      }
+    } else if (singletonBeforeIdat.has(type)) {
+      assertSingletonChunk(type, seenSingletonChunks);
+      if (sawIdat) {
+        throw new Error(`Imported PNG ${type} must precede IDAT`);
+      }
+    } else if (singletonBeforeIdatWithOptionalPlte.has(type)) {
+      assertSingletonChunk(type, seenSingletonChunks);
+      if (sawIdat) {
+        throw new Error(`Imported PNG ${type} must precede IDAT`);
+      }
+      if (!sawPlte) sawChunkThatRequiresNoLaterPlte = true;
+    } else if (singletonWithoutOrdering.has(type)) {
+      assertSingletonChunk(type, seenSingletonChunks);
+    } else if (repeatableBeforeIdat.has(type) && sawIdat) {
+      throw new Error(`Imported PNG ${type} must precede IDAT`);
+    }
+
     offset = nextOffset;
     chunkCount += 1;
   }
@@ -144,6 +233,13 @@ export function inspectStaticPng(contents: Uint8Array): void {
 
 function isPngChunkTypeByte(byte: number): boolean {
   return (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+}
+
+function assertSingletonChunk(type: string, seen: Set<string>): void {
+  if (seen.has(type)) {
+    throw new Error(`Imported PNG may contain one ${type} chunk`);
+  }
+  seen.add(type);
 }
 
 function crc32(data: Uint8Array): number {
