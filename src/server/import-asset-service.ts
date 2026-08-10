@@ -10,6 +10,9 @@ import {
 export const canonicalImportedAssetByteLimit = 20 * 1024 * 1024;
 export const canonicalImportedAssetPixels = 1024 * 1024;
 
+const pngSignature = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const maximumPngChunks = 4096;
+
 export async function normalizeImportedCandidate(
   contents: Uint8Array,
   assetDirectory: string,
@@ -20,6 +23,8 @@ export async function normalizeImportedCandidate(
       `Imported asset exceeds the ${canonicalImportedAssetByteLimit} byte limit`,
     );
   }
+
+  inspectStaticPng(contents);
 
   const source = sharp(contents, {
     animated: false,
@@ -32,9 +37,6 @@ export async function normalizeImportedCandidate(
   }
   if ((metadata.pages ?? 1) > 1) {
     throw new Error("Imported asset must contain one PNG page");
-  }
-  if (containsPngAnimationControl(contents)) {
-    throw new Error("Imported asset must not be animated");
   }
   if (metadata.width !== 1024 || metadata.height !== 1024) {
     throw new Error("Imported asset must be exactly 1024x1024");
@@ -78,34 +80,79 @@ export async function normalizeImportedCandidate(
   };
 }
 
-function containsPngAnimationControl(contents: Uint8Array): boolean {
+export function inspectStaticPng(contents: Uint8Array): void {
   if (
-    contents.length < 8 ||
+    contents.length < pngSignature.length ||
     !contents
-      .subarray(0, 8)
-      .every((byte, index) => byte === [137, 80, 78, 71, 13, 10, 26, 10][index])
+      .subarray(0, pngSignature.length)
+      .every((byte, index) => byte === pngSignature[index])
   ) {
-    return false;
+    throw new Error("Imported asset must have an exact PNG signature");
   }
   const view = new DataView(
     contents.buffer,
     contents.byteOffset,
     contents.byteLength,
   );
-  let offset = 8;
+  let offset = pngSignature.length;
+  let chunkCount = 0;
   while (offset + 12 <= contents.length) {
+    if (chunkCount >= maximumPngChunks) {
+      throw new Error(
+        `Imported PNG exceeds the ${maximumPngChunks} chunk limit`,
+      );
+    }
     const length = view.getUint32(offset);
     const nextOffset = offset + 12 + length;
-    if (nextOffset > contents.length) return false;
-    if (
-      contents[offset + 4] === 97 &&
-      contents[offset + 5] === 99 &&
-      contents[offset + 6] === 84 &&
-      contents[offset + 7] === 76
-    ) {
-      return true;
+    if (nextOffset > contents.length) {
+      throw new Error("Imported PNG has truncated chunk framing");
+    }
+    const typeStart = offset + 4;
+    const typeEnd = typeStart + 4;
+    if (!contents.subarray(typeStart, typeEnd).every(isPngChunkTypeByte)) {
+      throw new Error("Imported PNG has an invalid chunk type");
+    }
+    const expectedCrc = view.getUint32(nextOffset - 4);
+    const actualCrc = crc32(contents.subarray(typeStart, nextOffset - 4));
+    if (expectedCrc !== actualCrc) {
+      throw new Error("Imported PNG has an invalid chunk CRC");
+    }
+    const type = String.fromCharCode(...contents.subarray(typeStart, typeEnd));
+    if (chunkCount === 0 && type !== "IHDR") {
+      throw new Error("Imported PNG must begin with IHDR");
+    }
+    if (type === "IHDR" && (chunkCount !== 0 || length !== 13)) {
+      throw new Error("Imported PNG must contain one 13-byte IHDR chunk");
+    }
+    if (type === "acTL") {
+      throw new Error("Imported PNG must not be animated");
+    }
+    if (type === "IEND") {
+      if (length !== 0) {
+        throw new Error("Imported PNG must have a zero-length IEND chunk");
+      }
+      if (nextOffset !== contents.length) {
+        throw new Error("Imported PNG must not contain trailing bytes");
+      }
+      return;
     }
     offset = nextOffset;
+    chunkCount += 1;
   }
-  return false;
+  throw new Error("Imported PNG must end with IEND");
+}
+
+function isPngChunkTypeByte(byte: number): boolean {
+  return (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+}
+
+function crc32(data: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }

@@ -13,6 +13,7 @@ import {
   publishExportArtifact,
   publishImmutableFile,
 } from "./artifact-store";
+import { inspectStaticPng } from "./import-asset-service";
 
 export class LocalAssetStore implements AssetStore {
   constructor(
@@ -120,6 +121,7 @@ export class LocalAssetStore implements AssetStore {
     if (contentDigest(bytes) !== asset.digest) {
       throw new Error("Imported asset digest does not match its bytes");
     }
+    inspectStaticPng(bytes);
 
     const image = sharp(bytes, {
       animated: false,

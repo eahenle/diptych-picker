@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,14 +66,16 @@ async function animatedPng(): Promise<Buffer> {
   return output;
 }
 
-function pngChunks(contents: Buffer): Array<{ type: string; data: Buffer }> {
-  const chunks: Array<{ type: string; data: Buffer }> = [];
+function pngChunks(
+  contents: Buffer,
+): Array<{ offset: number; type: string; data: Buffer }> {
+  const chunks: Array<{ offset: number; type: string; data: Buffer }> = [];
   let offset = 8;
   while (offset < contents.length) {
     const length = contents.readUInt32BE(offset);
     const type = contents.subarray(offset + 4, offset + 8).toString("ascii");
     const data = contents.subarray(offset + 8, offset + 8 + length);
-    chunks.push({ type, data });
+    chunks.push({ offset, type, data });
     offset += 12 + length;
   }
   return chunks;
@@ -106,6 +109,19 @@ async function artifactDirectories() {
   return { assets: join(root, "assets"), exports: join(root, "exports") };
 }
 
+async function staticPng(): Promise<Buffer> {
+  return sharp({
+    create: {
+      width: 1024,
+      height: 1024,
+      channels: 4,
+      background: "#46145a",
+    },
+  })
+    .png()
+    .toBuffer();
+}
+
 describe("normalizeImportedCandidate", () => {
   it("canonicalizes a square PNG deterministically without source metadata", async () => {
     const { assets, exports } = await artifactDirectories();
@@ -128,6 +144,9 @@ describe("normalizeImportedCandidate", () => {
     });
     expect(first.filename).toBe(`${first.digest}.png`);
     expect(first.url).toBe(`/api/assets/${first.filename}`);
+    expect(first.digest).toBe(
+      createHash("sha256").update(canonicalBytes).digest("hex"),
+    );
     expect(metadata.space).toBe("srgb");
     expect(metadata.exif).toBeUndefined();
     expect(await readFile(join(exports, first.filename))).toEqual(
@@ -152,6 +171,72 @@ describe("normalizeImportedCandidate", () => {
     ],
     ["animated PNG", animatedPng],
     ["corrupt bytes", async () => Buffer.from("not a PNG")],
+    [
+      "a PNG with trailing bytes",
+      async () =>
+        Buffer.concat([await staticPng(), Buffer.from("trailing bytes")]),
+    ],
+    [
+      "a PNG without IEND",
+      async () => {
+        const contents = await staticPng();
+        return contents.subarray(0, contents.length - 12);
+      },
+    ],
+    [
+      "a PNG with an invalid IEND CRC",
+      async () => {
+        const contents = Buffer.from(await staticPng());
+        contents[contents.length - 1] ^= 1;
+        return contents;
+      },
+    ],
+    [
+      "a PNG with an invalid IDAT CRC",
+      async () => {
+        const contents = Buffer.from(await staticPng());
+        const idat = pngChunks(contents).find(
+          (chunk) => chunk.type === "IDAT",
+        )!;
+        contents[idat.offset + 8 + idat.data.length] ^= 1;
+        return contents;
+      },
+    ],
+    [
+      "a PNG with truncated chunk framing",
+      async () => {
+        const contents = await staticPng();
+        return contents.subarray(0, contents.length - 1);
+      },
+    ],
+    [
+      "a valid decodable WebP",
+      async () =>
+        sharp({
+          create: {
+            width: 1024,
+            height: 1024,
+            channels: 4,
+            background: "#46145a",
+          },
+        })
+          .webp()
+          .toBuffer(),
+    ],
+    [
+      "a valid decodable JPEG",
+      async () =>
+        sharp({
+          create: {
+            width: 1024,
+            height: 1024,
+            channels: 3,
+            background: "#46145a",
+          },
+        })
+          .jpeg()
+          .toBuffer(),
+    ],
     [
       "request above the canonical byte limit",
       async () => Buffer.alloc(canonicalLimit + 1),

@@ -31,6 +31,81 @@ async function squarePng(): Promise<Buffer> {
     .toBuffer();
 }
 
+async function animatedPng(): Promise<Buffer> {
+  const still = await sharp({
+    create: {
+      width: 1024,
+      height: 1024,
+      channels: 4,
+      background: "#46145a",
+    },
+  })
+    .png()
+    .toBuffer();
+  const chunks = pngChunks(still);
+  const header = chunks.find((chunk) => chunk.type === "IHDR")!;
+  const frame = Buffer.concat(
+    chunks.filter((chunk) => chunk.type === "IDAT").map((chunk) => chunk.data),
+  );
+  const frameControl = (sequence: number) => {
+    const data = Buffer.alloc(26);
+    data.writeUInt32BE(sequence, 0);
+    data.writeUInt32BE(1024, 4);
+    data.writeUInt32BE(1024, 8);
+    data.writeUInt16BE(1, 20);
+    data.writeUInt16BE(10, 22);
+    return pngChunk("fcTL", data);
+  };
+  const animationControl = Buffer.alloc(8);
+  animationControl.writeUInt32BE(2, 0);
+  return Buffer.concat([
+    still.subarray(0, 8),
+    pngChunk("IHDR", header.data),
+    pngChunk("acTL", animationControl),
+    frameControl(0),
+    pngChunk("IDAT", frame),
+    frameControl(1),
+    pngChunk("fdAT", Buffer.concat([Buffer.from([0, 0, 0, 2]), frame])),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function pngChunks(contents: Buffer): Array<{ type: string; data: Buffer }> {
+  const chunks: Array<{ type: string; data: Buffer }> = [];
+  let offset = 8;
+  while (offset < contents.length) {
+    const length = contents.readUInt32BE(offset);
+    const type = contents.subarray(offset + 4, offset + 8).toString("ascii");
+    const data = contents.subarray(offset + 8, offset + 8 + length);
+    chunks.push({ type, data });
+    offset += 12 + length;
+  }
+  return chunks;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write(type, 4, 4, "ascii");
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(
+    crc32(chunk.subarray(4, 8 + data.length)),
+    8 + data.length,
+  );
+  return chunk;
+}
+
+function crc32(data: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 describe("LocalAssetStore.verify", () => {
   it("rejects a missing immutable asset", async () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-assets-"));
@@ -252,6 +327,25 @@ describe("LocalAssetStore.verifyImportedAsset", () => {
         url: `/api/assets/${corruptDigest}.png`,
         byteLength: corrupt.length,
       }),
-    ).rejects.toThrow(/unsupported|format/i);
+    ).rejects.toThrow();
+  });
+
+  it("rejects an APNG with self-consistent imported metadata", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-assets-"));
+    const store = new LocalAssetStore(directory);
+    const bytes = await animatedPng();
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const asset: ImportedAssetMetadata = {
+      digest,
+      filename: `${digest}.png`,
+      url: `/api/assets/${digest}.png`,
+      contentType: "image/png",
+      width: 1024,
+      height: 1024,
+      byteLength: bytes.length,
+    };
+    await writeFile(join(directory, asset.filename), bytes);
+
+    await expect(store.verifyImportedAsset(asset)).rejects.toThrow(/animated/i);
   });
 });
