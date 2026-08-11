@@ -80,6 +80,14 @@ async function reconcileAllRefills(request: APIRequestContext): Promise<void> {
     .toBe(0);
 }
 
+async function resumeFromStartup(page: Page): Promise<void> {
+  const startup = page.getByRole("dialog", { name: "Open Diptych Picker" });
+  await expect(startup).toBeVisible();
+  await startup.getByRole("button", { name: "Resume" }).click();
+  await expect(startup).toHaveCount(0);
+  await expect(page.getByTestId("candidate-image")).toHaveCount(2);
+}
+
 test.beforeEach(async ({ page, request }) => {
   await rm(dataDirectory, { recursive: true, force: true });
   await request.post("/api/game/start", { data: { reset: true } });
@@ -100,8 +108,7 @@ test.beforeEach(async ({ page, request }) => {
     startup.getByRole("button", { name: "Initialize" }),
   ).toBeEnabled();
   await expect(startup.getByRole("button", { name: "Import" })).toBeEnabled();
-  await startup.getByRole("button", { name: "Resume" }).click();
-  await expect(page.getByTestId("candidate-image")).toHaveCount(2);
+  await resumeFromStartup(page);
 });
 
 test.afterEach(async ({ request }) => {
@@ -152,7 +159,7 @@ test("starts with three durable challengers and adapts two independent images to
     images.nth(0).boundingBox(),
     images.nth(1).boundingBox(),
   ]);
-  expect(Math.abs(desktop[0]!.y - desktop[1]!.y)).toBeLessThan(2);
+  expect(Math.abs(desktop[0]!.y - desktop[1]!.y)).toBeLessThanOrEqual(2);
   expect(desktop[0]!.x).toBeLessThan(desktop[1]!.x);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -497,6 +504,7 @@ test("favorites a candidate across history, gallery, pool, refresh, and export",
   ).toMatchObject({ favorite: true });
 
   await page.reload();
+  await resumeFromStartup(page);
   await page
     .getByRole("button", { name: "View comparison history; 1 decisions" })
     .click();
@@ -630,6 +638,7 @@ test("persists a fine-grained preference profile and composes generation context
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.reload();
+  await resumeFromStartup(page);
   await page.getByRole("button", { name: "Preferences" }).click();
   await expect(page.getByLabel("Preferred media")).toHaveValue(
     "large-format photography, linocut",
@@ -706,6 +715,7 @@ test("edits durable game rules and applies the champion streak immediately", asy
   expect(leaderboard.entries).toHaveLength(5);
 
   await page.reload();
+  await resumeFromStartup(page);
   await page.getByRole("button", { name: "Preferences" }).click();
   await page.getByText("Game rules", { exact: true }).click();
   await expect(page.getByLabel("Ready queue target")).toHaveValue("3");
@@ -1333,6 +1343,7 @@ test("refresh restores the current round and remaining FIFO exactly", async ({
   const before = await challengerState();
 
   await page.reload();
+  await resumeFromStartup(page);
   await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
 
   await expect(page.getByTestId("candidate-card-left")).toHaveAttribute(

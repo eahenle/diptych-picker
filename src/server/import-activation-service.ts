@@ -150,7 +150,13 @@ export class ImportActivationService {
         await this.options.archiveSupersededJob(jobId);
         intent = await this.options.intentRepository.withLock(async () => {
           const current = await this.options.intentRepository.load();
-          if (!current || current.id !== intent.id) {
+          if (!current) {
+            return {
+              ...intent,
+              archivedSupersededJobIds: [...intent.supersededJobIds],
+            };
+          }
+          if (current.id !== intent.id) {
             throw new Error("Activation intent changed during mailbox cleanup");
           }
           if (current.archivedSupersededJobIds.includes(jobId)) return current;
@@ -169,7 +175,11 @@ export class ImportActivationService {
 
     await this.options.coordinator.withStateLocks(allLocks, async () => {
       const current = await this.options.intentRepository.load();
-      if (!current || current.id !== intent.id) {
+      if (!current) {
+        await this.verifyCommittedTargetsLocked(intent);
+        return;
+      }
+      if (current.id !== intent.id) {
         throw new Error("Activation intent disappeared before cleanup");
       }
       await this.verifyCommittedTargetsLocked(current);

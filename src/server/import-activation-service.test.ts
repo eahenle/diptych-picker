@@ -320,6 +320,59 @@ describe("ImportActivationService", () => {
     });
   });
 
+  it("treats cleanup by a concurrent reconciler as an idempotent success", async () => {
+    const items = Array.from({ length: 5 }, (_, index) =>
+      readyItem(index + 1, `2026-08-10T20:0${index + 1}:00.000Z`),
+    );
+    const context = fixture(importSession(items), [
+      "activation-intent-concurrent",
+      "new-game-revision-concurrent",
+      "new-challenger-session-concurrent",
+    ]);
+    const game = oldGame();
+    game.round.status = "generating";
+    game.round.replacingSide = "right";
+    game.pendingSelection = {
+      kind: "generation",
+      winnerSide: "left",
+      selectedAt: baseTime,
+      generationJobId: "11111111-1111-4111-8111-111111111111",
+    };
+    await context.gameRepository.saveEnvelope({
+      version: 1,
+      revisionId: "old-game-revision",
+      state: game,
+    });
+
+    let releaseSecondArchive!: () => void;
+    let markSecondArchiveStarted!: () => void;
+    const secondArchiveStarted = new Promise<void>((resolve) => {
+      markSecondArchiveStarted = resolve;
+    });
+    const secondArchiveReleased = new Promise<void>((resolve) => {
+      releaseSecondArchive = resolve;
+    });
+    context.archiveSupersededJob
+      .mockImplementationOnce(async () => undefined)
+      .mockImplementationOnce(async () => {
+        markSecondArchiveStarted();
+        await secondArchiveReleased;
+      });
+
+    const first = context.service.reconcile();
+    const second = context.service.reconcile();
+    await secondArchiveStarted;
+    await first;
+    await context.service.reconcile();
+    expect(await context.intentRepository.load()).toBeNull();
+
+    releaseSecondArchive();
+    await expect(second).resolves.toMatchObject({
+      status: "ready",
+      game: { round: { roundNumber: 1 } },
+    });
+  });
+
   it("leaves the old game untouched before the sealed session has five ready candidates", async () => {
     const context = fixture(
       importSession([
