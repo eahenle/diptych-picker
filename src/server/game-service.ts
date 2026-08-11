@@ -110,6 +110,7 @@ export class GameService {
       challengerRepository: this.challengerRepository,
       importSessionRepository,
       initialRating: this.config.initialRating,
+      fallbackDelayMs: this.config.fallbackDelayMs,
       random: this.random,
       now: this.now,
     });

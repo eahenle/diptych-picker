@@ -32,6 +32,7 @@ export interface CandidateDequeueRequest {
   invocation: "live" | "prepared-recovery" | "restart-recovery";
   roundNumber: number;
   excludedCandidateIds: string[];
+  fallbackMaximumConsecutive: number;
 }
 
 export interface CandidateDequeueResult {
@@ -47,6 +48,7 @@ interface CandidateDequeueServiceOptions {
   challengerRepository: ChallengerRepository;
   importSessionRepository: ImportSessionRepository;
   initialRating: number;
+  fallbackDelayMs: number;
   random?: () => number;
   now?: () => string;
 }
@@ -61,10 +63,12 @@ const requiredLocks = [
 export class CandidateDequeueService {
   private readonly random: () => number;
   private readonly now: () => string;
+  private readonly fallbackDelayMs: number;
 
   constructor(private readonly options: CandidateDequeueServiceOptions) {
     this.random = options.random ?? Math.random;
     this.now = options.now ?? (() => new Date().toISOString());
+    this.fallbackDelayMs = options.fallbackDelayMs;
   }
 
   async dequeueLocked(
@@ -282,6 +286,8 @@ export class CandidateDequeueService {
         currentCandidateIds: request.excludedCandidateIds,
         recentCandidateIds: [],
         random: this.random,
+        delayMs: this.fallbackDelayMs,
+        maximumConsecutiveDraws: request.fallbackMaximumConsecutive,
       },
     );
     importSession = importSession

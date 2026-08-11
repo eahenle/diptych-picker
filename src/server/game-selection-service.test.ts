@@ -117,6 +117,7 @@ function fixture(
     challengerRepository,
     importSessionRepository,
     initialRating: 1000,
+    fallbackDelayMs: 3_000,
     now: () => NOW,
     random: () => 0,
   });

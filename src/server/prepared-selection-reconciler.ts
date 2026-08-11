@@ -406,6 +406,8 @@ export class PreparedSelectionReconciler {
         game.round.rightCandidate.id,
         ...extraExcludedCandidateIds,
       ],
+      fallbackMaximumConsecutive:
+        this.options.rulesFor(game).fallbackMaximumConsecutive,
     };
     return this.options.candidateDequeueService!.dequeueLocked(context, {
       ...request,

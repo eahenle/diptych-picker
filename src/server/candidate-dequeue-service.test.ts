@@ -150,6 +150,7 @@ function request(
     invocation: "live",
     roundNumber: originalReceipt.roundNumber + 1,
     excludedCandidateIds: ["winner", "loser"],
+    fallbackMaximumConsecutive: 10,
   };
 }
 
@@ -164,6 +165,7 @@ function activationIntentLock() {
 function harness(
   challengers: ChallengerRepository,
   imports: MemoryImportSessionRepository,
+  options: { now?: () => string; fallbackDelayMs?: number } = {},
 ) {
   const coordinator = new StateLockCoordinator({
     activationIntent: activationIntentLock(),
@@ -176,8 +178,9 @@ function harness(
     challengerRepository: challengers,
     importSessionRepository: imports,
     initialRating: 1000,
+    fallbackDelayMs: options.fallbackDelayMs ?? 3_000,
     random: () => 0,
-    now: () => timestamp,
+    now: options.now ?? (() => timestamp),
   });
   const dequeue = (value: CandidateDequeueRequest) =>
     coordinator.withStateLocks(
@@ -321,6 +324,58 @@ describe("CandidateDequeueService", () => {
     expect(replay.candidate?.id).toBe("generated-ready");
     expect(replay.challengers.ready[0]?.candidate.id).toBe("generated-second");
     expect(replay.challengers.preparedDequeues).toHaveLength(1);
+  });
+
+  it("honors the configured pool fallback delay and per-game draw cap", async () => {
+    const fallback = candidate("pool-fallback", "5");
+    const imports = new MemoryImportSessionRepository(null);
+    const challengers = new MemoryChallengerRepository(
+      challengerState({
+        ratings: [
+          {
+            candidate: fallback,
+            rating: 1000,
+            wins: 0,
+            losses: 0,
+            source: "curated",
+            importItemId: null,
+            poolMember: true,
+            poolEligible: true,
+            lastServedAt: null,
+          },
+        ],
+      }),
+    );
+    let now = timestamp;
+    const { dequeue } = harness(challengers, imports, {
+      fallbackDelayMs: 250,
+      now: () => now,
+    });
+    const operation = {
+      ...request(receipt(), null),
+      fallbackMaximumConsecutive: 1,
+    };
+
+    const armed = await dequeue(operation);
+    expect(armed.candidate).toBeNull();
+    expect(armed.challengers.nextFallbackAt).toBe("2026-08-10T20:00:00.250Z");
+
+    now = "2026-08-10T20:00:00.249Z";
+    expect((await dequeue(operation)).candidate).toBeNull();
+
+    now = "2026-08-10T20:00:00.250Z";
+    const drawn = await dequeue(operation);
+    expect(drawn).toMatchObject({
+      candidate: { id: "pool-fallback" },
+      provenance: "pool-fallback",
+    });
+    expect(drawn.challengers.consecutiveFallbackDraws).toBe(1);
+
+    const capped = await dequeue({
+      ...request(receipt(2), null),
+      fallbackMaximumConsecutive: 1,
+    });
+    expect(capped.candidate).toBeNull();
   });
 
   it("rejects a dequeue operation ID derived from different evidence", async () => {

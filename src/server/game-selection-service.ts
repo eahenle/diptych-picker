@@ -164,6 +164,7 @@ export class GameSelectionService {
             current.round.leftCandidate.id,
             current.round.rightCandidate.id,
           ],
+          fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
         });
         nextChallengers = leftDraw.challengers;
         importSupply = leftDraw.importSupply;
@@ -181,6 +182,7 @@ export class GameSelectionService {
                 current.round.rightCandidate.id,
                 leftDraw.candidate.id,
               ],
+              fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
             })
           : null;
         if (rightDraw) {
@@ -207,6 +209,7 @@ export class GameSelectionService {
             current.round.leftCandidate.id,
             current.round.rightCandidate.id,
           ],
+          fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
         });
         nextChallengers = draw.challengers;
         importSupply = draw.importSupply;
@@ -281,6 +284,7 @@ export class GameSelectionService {
             : "The round changed before this dual rejection arrived",
         );
       }
+      const rules = this.options.rulesFor(current);
 
       const challengerState = await this.options.challengerRepository.load();
       if (!challengerState) {
@@ -360,6 +364,7 @@ export class GameSelectionService {
         invocation: "live",
         roundNumber: current.round.roundNumber + 1,
         excludedCandidateIds: [left.id, right.id],
+        fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
       });
       nextChallengers = leftDraw.challengers;
       importSupply = leftDraw.importSupply;
@@ -373,6 +378,7 @@ export class GameSelectionService {
             invocation: "live",
             roundNumber: current.round.roundNumber + 1,
             excludedCandidateIds: [left.id, right.id, leftDraw.candidate.id],
+            fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
           })
         : null;
       if (rightDraw) {

@@ -256,7 +256,9 @@ test("rejects both active candidates and removes them from the pool", async ({
 
 test("loads a distinct pair from the pool after tying with an empty queue", async ({
   page,
+  request,
 }) => {
+  await reconcileAllRefills(request);
   const originalIds = await Promise.all([
     page.getByTestId("candidate-card-left").getAttribute("data-candidate-id"),
     page.getByTestId("candidate-card-right").getAttribute("data-candidate-id"),
