@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ChallengerState } from "@/domain/challenger-state";
-import type { Candidate, GameState } from "@/domain/game";
+import { popReady, type ChallengerState } from "@/domain/challenger-state";
+import {
+  completeSelection,
+  type Candidate,
+  type GameState,
+} from "@/domain/game";
 import { MemoryChallengerRepository } from "./challenger-repository";
 import { GameReconciler } from "./game-reconciler";
+import { MemoryImportActivationIntentRepository } from "./import-activation-intent-repository";
+import { MemoryImportSessionRepository } from "./import-session-repository";
+import { MemoryInitialBootstrapRepository } from "./initial-bootstrap";
 import { MemoryGameRepository } from "./repository";
+import { StateLockCoordinator } from "./state-lock-coordinator";
 
 const NOW = "2026-07-26T08:00:00.000Z";
 
@@ -75,6 +83,14 @@ function fixture(
 ) {
   const gameRepository = new MemoryGameRepository(current);
   const challengerRepository = new MemoryChallengerRepository(state);
+  const importSessionRepository = new MemoryImportSessionRepository();
+  const stateLockCoordinator = new StateLockCoordinator({
+    activationIntent: new MemoryImportActivationIntentRepository(),
+    importSession: importSessionRepository,
+    game: gameRepository,
+    challenger: challengerRepository,
+    initialBootstrap: new MemoryInitialBootstrapRepository(),
+  });
   const cleanup = vi.fn(async (value: GameState) => value);
   const reconcileGeneration = vi.fn(async (value: GameState) => value);
   const reconcilePromptCards = vi.fn(async (value: GameState) => value);
@@ -85,10 +101,27 @@ function fixture(
     async (_game: GameState, value: ChallengerState) => value,
   );
   const complete = vi.fn(
-    async (value: GameState, challengerState: ChallengerState) => ({
-      game: value,
-      challengers: challengerState,
-    }),
+    async (value: GameState, challengerState: ChallengerState) => {
+      if (
+        value.round.status === "generating" &&
+        value.pendingSelection?.kind === "buffer"
+      ) {
+        const draw = popReady(challengerState);
+        if (draw.candidate) {
+          const completed = {
+            game: completeSelection(value, draw.candidate),
+            challengers: {
+              ...draw.state,
+              pendingComparison: null,
+              pendingSelectionBaseline: null,
+            },
+          };
+          await challengerRepository.save(completed.challengers);
+          return completed;
+        }
+      }
+      return { game: value, challengers: challengerState };
+    },
   );
   const removeDisplayedCandidatesFromReady = vi.fn(
     async (_game: GameState, value: ChallengerState) => value,
@@ -104,13 +137,11 @@ function fixture(
     jobs: [],
   }));
   const ensureAll = vi.fn(async () => {});
-  const drawFallback = vi.fn((value: ChallengerState) => ({
-    state: value,
-    candidate: null,
-  }));
   const reconciler = new GameReconciler({
     gameRepository,
     challengerRepository,
+    importSessionRepository,
+    stateLockCoordinator,
     generationSelectionReconciler: {
       cleanup,
       reconcile: reconcileGeneration,
@@ -126,7 +157,6 @@ function fixture(
     refillCapacityService: { plan },
     generationJobPublisher: { ensureAll },
     rulesFor: (value) => value.gameRules!,
-    drawFallback,
   });
 
   return {
@@ -143,7 +173,6 @@ function fixture(
     reconcileRefills,
     plan,
     ensureAll,
-    drawFallback,
   };
 }
 
@@ -217,7 +246,6 @@ describe("GameReconciler", () => {
       rightCandidate: { id: "ready-1" },
       roundNumber: 9,
     });
-    expect(context.drawFallback).not.toHaveBeenCalled();
     expect(context.plan).toHaveBeenCalledOnce();
     expect(context.plan.mock.invocationCallOrder[0]).toBeGreaterThan(
       context.reconcileRefills.mock.invocationCallOrder[0]!,

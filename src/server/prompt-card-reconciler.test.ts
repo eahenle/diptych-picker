@@ -145,8 +145,8 @@ function fixture() {
     },
     writerJob: {
       jobId: writerJob.id,
-      sourceCandidateIds: writerJob.sources.map(
-        ({ candidateId }) => candidateId,
+      sourceCandidateIds: writerJob.sources.flatMap(({ candidateId }) =>
+        candidateId ? [candidateId] : [],
       ),
       enqueuedAt: NOW,
       expectedJob: writerJob,
@@ -184,6 +184,9 @@ function mailboxes(options: {
   const archiveWriter = vi.fn(async () => undefined);
   const writer: PromptCardWriterCoordinator = {
     prepare: vi.fn(async () => {
+      throw new Error("Writer preparation is outside reconciliation");
+    }),
+    prepareCustom: vi.fn(async () => {
       throw new Error("Writer preparation is outside reconciliation");
     }),
     enqueue: enqueueWriter,
@@ -309,6 +312,75 @@ describe("PromptCardReconciler", () => {
     expect(queues.archiveEditor).toHaveBeenCalledWith(editorJob.id);
     expect(queues.archiveBlender).toHaveBeenCalledWith(blenderJob.id);
     expect(queues.archiveWriter).toHaveBeenCalledWith(writerJob.id);
+  });
+
+  it("reconciles text-only writer output with exact digest lineage", async () => {
+    const sourceTextDigest =
+      "754548edd47f62ef35b5aece43e6394f34ec4cba060743b9f37d80abe0f78ed5";
+    const writerJob: PromptCardWriterJob = {
+      id: "text-writer",
+      kind: "prompt-card-writer",
+      createdAt: NOW,
+      sources: [],
+      guidance: "A quiet ultraviolet architectural nocturne.",
+      sourceTextDigest,
+    };
+    const game = gameState({
+      enabled: false,
+      cards: [],
+      verdicts: [],
+      writerJob: {
+        jobId: writerJob.id,
+        sourceCandidateIds: [],
+        sourceImageDigests: [],
+        sourceTextDigest,
+        enqueuedAt: NOW,
+        expectedJob: writerJob,
+      },
+      suggestions: [],
+    });
+    const queues = mailboxes({
+      writerWork: writerJob,
+      writerResult: {
+        jobId: writerJob.id,
+        kind: "prompt-card-writer",
+        status: "completed",
+        completedAt: NOW,
+        sourceCandidateIds: [],
+        sourceImageDigests: [],
+        sourceTextDigest,
+        proposal: {
+          title: "Guided nocturne",
+          prompt:
+            "A quiet ultraviolet architectural nocturne with negative space.",
+          negativePrompt: "readable text",
+          tags: ["ultraviolet"],
+          reasoningSummary: "Translates the exact supplied guidance.",
+        },
+      },
+    });
+    const repository = new MemoryGameRepository(game);
+    const reconciler = new PromptCardReconciler({
+      repository,
+      writer: queues.writer,
+      createId: () => "text-suggestion",
+      now: () => NOW,
+    });
+
+    const result = await reconciler.reconcile(game);
+
+    expect(result.promptDeck?.writerJob).toBeNull();
+    expect(result.promptDeck?.suggestions?.[0]).toMatchObject({
+      id: "text-suggestion",
+      sourceTextDigest,
+      title: "Guided nocturne",
+    });
+    expect(result.promptDeck?.suggestions?.[0]).not.toHaveProperty(
+      "sourceCandidateIds",
+    );
+    expect(result.promptDeck?.suggestions?.[0]).not.toHaveProperty(
+      "sourceImageDigests",
+    );
   });
 
   it("re-enqueues every missing durable job without rewriting game state", async () => {

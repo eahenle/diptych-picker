@@ -3,10 +3,15 @@ import { SelectionConflictError } from "@/server/game-service";
 import {
   getBufferHealth,
   getDisplayedEloRatings,
+  getGameStartupStatus,
   resetGame,
 } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
+
+export async function GET() {
+  return NextResponse.json(await getGameStartupStatus());
+}
 
 export async function POST() {
   try {

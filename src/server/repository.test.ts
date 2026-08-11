@@ -42,6 +42,44 @@ const state: GameState = {
 };
 
 describe("JsonGameRepository", () => {
+  it("round-trips text-only prompt-card writer lineage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "diptych-writer-state-"));
+    const file = join(directory, "game.json");
+    const sourceTextDigest =
+      "754548edd47f62ef35b5aece43e6394f34ec4cba060743b9f37d80abe0f78ed5";
+    const withWriter: GameState = {
+      ...state,
+      promptDeck: {
+        enabled: false,
+        cards: [],
+        verdicts: [],
+        writerJob: {
+          jobId: "writer-1",
+          sourceCandidateIds: [],
+          sourceImageDigests: [],
+          sourceTextDigest,
+          enqueuedAt: "2026-08-11T01:00:00.000Z",
+          expectedJob: {
+            id: "writer-1",
+            kind: "prompt-card-writer",
+            createdAt: "2026-08-11T01:00:00.000Z",
+            sources: [],
+            guidance: "A quiet ultraviolet architectural nocturne.",
+            sourceTextDigest,
+          },
+        },
+        suggestions: [],
+      },
+    };
+
+    const repository = new JsonGameRepository(file);
+    await repository.save(withWriter);
+
+    await expect(repository.load()).resolves.toMatchObject({
+      promptDeck: { writerJob: withWriter.promptDeck?.writerJob },
+    });
+  });
+
   it("restores the current round from disk", async () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-picker-"));
     const file = join(directory, "game.json");
@@ -54,7 +92,17 @@ describe("JsonGameRepository", () => {
       ...state,
       preferenceProfile: preferenceProfileFromSeed(state.preferenceSeed),
     });
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual(state);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      version: 1,
+      revisionId: expect.stringMatching(/^game-revision-/),
+      state: {
+        ...state,
+        preferenceProfile: preferenceProfileFromSeed(state.preferenceSeed),
+      },
+    });
+    expect((await first.loadEnvelope())?.revisionId).toBe(
+      (await new JsonGameRepository(file).loadEnvelope())?.revisionId,
+    );
   });
 
   it("migrates persisted rounds that predate round-level streak fields", async () => {

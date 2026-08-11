@@ -32,10 +32,9 @@ describe("dev-and-play launcher", () => {
   it("prints a capacity and nesting override with the skill prompt", async () => {
     const { stdout } = await execFileAsync(launcher, ["--print-command", "12"]);
 
-    expect(stdout).toMatch(/^codex /);
+    expect(stdout).toMatch(/^multi-cli codex\/personal /);
     expect(stdout).toContain("agents.max_concurrent_threads_per_session=11");
-    expect(stdout).not.toContain("multi-cli");
-    expect(stdout).not.toContain("codex/personal");
+    expect(stdout).not.toMatch(/^codex /);
     expect(stdout).toContain(`--cd ${process.cwd()}`);
     expect(stdout).toContain("\\$run-diptych-picker");
     expect(stdout).toContain("workerLimit=3");

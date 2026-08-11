@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Candidate, GameState, SelectionHistory } from "./game";
 import {
+  admitEligibleCandidates,
   admitGeneratedCandidate,
   backfillGeneratedPool,
   drawFallback,
@@ -272,6 +273,30 @@ describe("challenger state", () => {
     expect(
       next.ratings.find((item) => item.candidate.id === "loser"),
     ).toMatchObject({ wins: 0, losses: 1, poolMember: true });
+  });
+
+  it("admits an eligible imported candidate after comparison without losing provenance", () => {
+    const imported = rating("imported", 1016, {
+      source: "imported",
+      importItemId: "import-item-1",
+      poolMember: false,
+      poolEligible: true,
+      wins: 1,
+    });
+
+    const next = admitEligibleCandidates(
+      state({ ratings: [rating("incumbent", 1000), imported] }),
+      ["imported"],
+      2,
+    );
+
+    expect(
+      next.ratings.find((item) => item.candidate.id === "imported"),
+    ).toMatchObject({
+      source: "imported",
+      importItemId: "import-item-1",
+      poolMember: true,
+    });
   });
 
   it("eventually evicts a weak zero-win member for a better candidate", () => {

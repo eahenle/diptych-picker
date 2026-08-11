@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const getOrCreateGame = vi.fn();
 const getBufferHealth = vi.fn();
 const getDisplayedEloRatings = vi.fn();
+const getGameStartupStatus = vi.fn();
+const getImportProgress = vi.fn();
 const refreshBufferHealth = vi.fn();
 const resetGame = vi.fn();
 const exportGameSnapshot = vi.fn();
@@ -11,6 +13,18 @@ const publishGameExport = vi.fn();
 const select = vi.fn();
 const tie = vi.fn();
 const bothLose = vi.fn();
+const selectGameRound = vi.fn(
+  (selection: {
+    winnerSide?: "left" | "right";
+    outcome?: "tie" | "both-lose";
+    roundNumber: number;
+  }) =>
+    selection.outcome === "tie"
+      ? tie(selection.roundNumber)
+      : selection.outcome === "both-lose"
+        ? bothLose(selection.roundNumber)
+        : select(selection.winnerSide, selection.roundNumber),
+);
 const updatePreferenceSeed = vi.fn();
 const savePreferencePreset = vi.fn();
 const deletePreferencePreset = vi.fn();
@@ -18,6 +32,7 @@ const createPromptCard = vi.fn();
 const updatePromptDeck = vi.fn();
 const requestPromptCardBlend = vi.fn();
 const requestPromptCardWriter = vi.fn();
+const requestCustomPromptCardWriter = vi.fn();
 const dismissGenerationNotice = vi.fn();
 const requestSourceProfile = vi.fn();
 const getSourceProfileStatus = vi.fn();
@@ -29,6 +44,8 @@ vi.mock("@/server/runtime", () => ({
   generationProvider: "mock",
   getBufferHealth,
   getDisplayedEloRatings,
+  getGameStartupStatus,
+  getImportProgress,
   getOrCreateGame,
   refreshBufferHealth,
   resetGame,
@@ -36,6 +53,7 @@ vi.mock("@/server/runtime", () => ({
   importGameSnapshot,
   publishGameExport,
   gameService: { select, tie, bothLose },
+  selectGameRound,
   updatePreferenceSeed,
   savePreferencePreset,
   deletePreferencePreset,
@@ -43,6 +61,7 @@ vi.mock("@/server/runtime", () => ({
   updatePromptDeck,
   requestPromptCardBlend,
   requestPromptCardWriter,
+  requestCustomPromptCardWriter,
   dismissGenerationNotice,
   requestSourceProfile,
   getSourceProfileStatus,
@@ -54,6 +73,8 @@ vi.mock("@/server/runtime", () => ({
 beforeEach(() => {
   getDisplayedEloRatings.mockReset();
   getDisplayedEloRatings.mockResolvedValue({ left: 1016, right: 984 });
+  getImportProgress.mockReset();
+  getImportProgress.mockResolvedValue(null);
 });
 
 describe("GET /api/game", () => {
@@ -209,6 +230,27 @@ describe("POST /api/game/start", () => {
       bufferHealth: { ready: 5, pool: 7 },
       eloRatings: { left: 1016, right: 984 },
     });
+  });
+});
+
+describe("GET /api/game/start", () => {
+  it("reports resumable and unfinished-import state without opening a game", async () => {
+    getOrCreateGame.mockClear();
+    getGameStartupStatus.mockReset();
+    getGameStartupStatus.mockResolvedValue({
+      canResume: true,
+      importInProgress: true,
+    });
+    const { GET } = await import("./start/route");
+
+    const response = await GET();
+
+    expect(getGameStartupStatus).toHaveBeenCalledOnce();
+    expect(await response.json()).toEqual({
+      canResume: true,
+      importInProgress: true,
+    });
+    expect(getOrCreateGame).not.toHaveBeenCalled();
   });
 });
 
@@ -460,10 +502,14 @@ describe("prompt deck", () => {
     updatePromptDeck.mockReset();
     requestPromptCardBlend.mockReset();
     requestPromptCardWriter.mockReset();
+    requestCustomPromptCardWriter.mockReset();
     createPromptCard.mockResolvedValue({ promptDeck: { cards: [] } });
     updatePromptDeck.mockResolvedValue({ promptDeck: { cards: [] } });
     requestPromptCardBlend.mockResolvedValue({ promptDeck: { cards: [] } });
     requestPromptCardWriter.mockResolvedValue({ promptDeck: { cards: [] } });
+    requestCustomPromptCardWriter.mockResolvedValue({
+      promptDeck: { cards: [] },
+    });
   });
 
   it("creates a validated prompt card", async () => {
@@ -514,6 +560,36 @@ describe("prompt deck", () => {
 
     expect(response.status).toBe(200);
     expect(requestPromptCardWriter).toHaveBeenCalledWith(candidateIds);
+  });
+
+  it("requests a prompt card from private seed images and text", async () => {
+    const { POST } = await import("./preferences/deck/write/custom/route");
+    const form = new FormData();
+    form.set("guidance", "Preserve the monumental negative space.");
+    form.append(
+      "images",
+      new File([new Uint8Array([1, 2, 3])], "seed.png", {
+        type: "image/png",
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost/api/game/preferences/deck/write/custom", {
+        method: "POST",
+        body: form,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(requestCustomPromptCardWriter).toHaveBeenCalledWith({
+      guidance: "Preserve the monumental negative space.",
+      images: [
+        expect.objectContaining({
+          filename: "seed.png",
+          contentType: "image/png",
+          contents: new Uint8Array([1, 2, 3]),
+        }),
+      ],
+    });
   });
 
   it("updates deck and card controls", async () => {

@@ -501,6 +501,41 @@
   border-color: var(--accent);
 }
 
+.importFailureNotice {
+  width: min(680px, 100%);
+  margin: 18px auto 0;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(183, 77, 66, 0.55);
+  background: rgba(183, 77, 66, 0.1);
+  color: #dfbbb4;
+  font-size: 12px;
+}
+
+.importFailureNotice span {
+  display: grid;
+  gap: 3px;
+}
+
+.importFailureNotice strong {
+  color: #f0d2cc;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.importFailureNotice button {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  color: #f0c7c2;
+  background: transparent;
+  border: 1px solid var(--danger);
+  cursor: pointer;
+}
+
 .exportNotice {
   margin: 18px auto 0;
   color: #9fae9b;
@@ -561,6 +596,10 @@
   }
   .generationNotice > div {
     justify-content: flex-end;
+  }
+  .importFailureNotice {
+    align-items: stretch;
+    flex-direction: column;
   }
   .conceptLabel {
     font-size: 9px;

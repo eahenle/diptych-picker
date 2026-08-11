@@ -378,9 +378,62 @@ const challengerStateSchema: z.ZodType<ChallengerState> = z
       ])
       .nullable()
       .default(null),
+    preparedDequeues: z
+      .array(
+        z
+          .object({
+            dequeueOperationId: z.string().min(1),
+            importSessionId: z.string().min(1).nullable(),
+            originalReceipt: z.union([
+              z
+                .object({
+                  kind: z.literal("selection").optional(),
+                  selectedAt: z.string().min(1),
+                  roundNumber: z.number().int().positive(),
+                  winnerSide: z.enum(["left", "right"]),
+                  winnerId: z.string().min(1),
+                  loserId: z.string().min(1),
+                })
+                .strict(),
+              z
+                .object({
+                  kind: z.enum(["tie", "both-lose"]),
+                  selectedAt: z.string().min(1),
+                  roundNumber: z.number().int().positive(),
+                  leftId: z.string().min(1),
+                  rightId: z.string().min(1),
+                })
+                .strict(),
+            ]),
+            replacementSlot: z.enum(["single", "pair-left", "pair-right"]),
+            reason: z.enum(["selection", "retirement", "tie", "both-lose"]),
+            roundNumber: z.number().int().positive(),
+            excludedCandidateIds: z.array(z.string().min(1)),
+            candidate: candidateSchema,
+            provenance: z.enum(["imported", "ready", "pool-fallback"]),
+            importItemId: z.string().min(1).nullable(),
+            importSupply: z
+              .object({
+                importSessionId: z.string().min(1).nullable(),
+                annotating: z.number().int().nonnegative(),
+                failed: z.number().int().nonnegative(),
+                readyUnserved: z.number().int().nonnegative(),
+                servedImportedItemCount: z.number().int().nonnegative(),
+                activationDisplayReceiptCount: z.number().int().nonnegative(),
+                dequeueReceiptCount: z.number().int().nonnegative(),
+                initialFillPending: z.number().int().nonnegative(),
+                initialFillFailed: z.number().int().nonnegative(),
+                terminal: z.boolean(),
+              })
+              .strict(),
+          })
+          .strict(),
+      )
+      .default([]),
     pendingSelectionBaseline: z
       .object({
         ready: z.array(bufferedCandidateSchema),
+        importQueue: z.array(bufferedCandidateSchema).optional(),
         ratings: z.array(candidateRatingSchema),
         generationTurnaroundEmaMs: z.number().finite().nonnegative(),
         consecutiveFallbackDraws: z.number().int().nonnegative(),
@@ -446,6 +499,7 @@ function resetSession(
     leaderboardVisualProfile: null,
     leaderboardProfileAttemptedFingerprint: null,
     pendingComparison: null,
+    preparedDequeues: [],
     pendingSelectionBaseline: null,
     consecutiveFallbackDraws: 0,
     nextFallbackAt: null,

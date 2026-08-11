@@ -14,6 +14,7 @@ interface GameTransferModalProps {
   onClose: () => void;
   onExport: () => void;
   onImport: (file: File) => Promise<void>;
+  onImportImages?: () => void;
   onStartFresh: () => void;
 }
 
@@ -24,6 +25,7 @@ export function GameTransferModal({
   onClose,
   onExport,
   onImport,
+  onImportImages,
   onStartFresh,
 }: GameTransferModalProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -132,6 +134,25 @@ export function GameTransferModal({
           <p className={modalStyles.alert} role="alert">
             {error}
           </p>
+        ) : null}
+        {!loadMode && onImportImages ? (
+          <div className={`${styles.option} ${styles.importImagesSection}`}>
+            <span>
+              <strong>Start from your own images</strong>
+              <small>
+                Review and normalize a pool of still images, then fill any
+                starter shortfall with fresh challengers.
+              </small>
+            </span>
+            <button
+              type="button"
+              className={`${modalStyles.actionButton} ${styles.primaryAction}`}
+              disabled={busy}
+              onClick={onImportImages}
+            >
+              Import images
+            </button>
+          </div>
         ) : null}
         {!loadMode ? (
           <div className={`${styles.option} ${styles.freshSection}`}>

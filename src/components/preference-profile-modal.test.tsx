@@ -67,6 +67,7 @@ function renderPreferences(
     onCreatePromptCard: vi.fn(async () => true),
     onUpdatePromptDeck: vi.fn(async () => undefined),
     onBlendPromptCards: vi.fn(async () => true),
+    onWriteCustomPromptCard: vi.fn(async () => true),
     onUpdateGameRules: vi.fn(async () => true),
     onFieldChange: vi.fn(),
     onFreedomChange: vi.fn(),

@@ -330,6 +330,9 @@ function promptCardWriter() {
   });
   const coordinator: PromptCardWriterCoordinator = {
     prepare,
+    prepareCustom: vi.fn(async () => {
+      throw new Error("Custom writer preparation is outside this fixture");
+    }),
     enqueue,
     readWork: async (jobId) => work.get(jobId) ?? null,
     readResult: async (jobId) => results.get(jobId) ?? null,
@@ -619,6 +622,7 @@ describe("GameService challenger buffer", () => {
     expect(requested.promptDeck?.writerJob).toMatchObject({
       jobId: "writer-1",
       sourceCandidateIds: ["favorite-1", "favorite-2", "favorite-3"],
+      sourceImageDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
       expectedJob: { kind: "prompt-card-writer" },
     });
 
@@ -628,6 +632,7 @@ describe("GameService challenger buffer", () => {
       status: "completed",
       completedAt: NOW,
       sourceCandidateIds: ["favorite-1", "favorite-2", "favorite-3"],
+      sourceImageDigests: ["1".repeat(64), "2".repeat(64), "3".repeat(64)],
       proposal: {
         title: "Favorite synthesis",
         prompt:
@@ -2092,7 +2097,10 @@ describe("GameService challenger buffer", () => {
       pendingSelection: { kind: "buffer", winnerSide: "left" },
     });
     const prepared = await context.challengerRepository.load();
-    expect(prepared?.ready[0].candidate.id).toBe("buffer-1");
+    expect(prepared?.ready[0].candidate.id).toBe("buffer-2");
+    expect(prepared?.preparedDequeues).toMatchObject([
+      { candidate: { id: "buffer-1" }, replacementSlot: "single" },
+    ]);
     expect(prepared?.refillJobs).toMatchObject([{ jobId: "refill-1" }]);
 
     const recovered = await context.service.reconcile();
@@ -2141,10 +2149,12 @@ describe("GameService challenger buffer", () => {
       round: { status: "generating", roundNumber: 3 },
       pendingSelection: { kind: "retirement", winnerSide: "left" },
     });
+    const prepared = await context.challengerRepository.load();
     expect(
-      (await context.challengerRepository.load())?.ready
-        .slice(0, 2)
-        .map(({ candidate: item }) => item.id),
+      prepared?.ready.slice(0, 2).map(({ candidate: item }) => item.id),
+    ).toEqual(["buffer-3", "buffer-4"]);
+    expect(
+      prepared?.preparedDequeues?.map(({ candidate: item }) => item.id),
     ).toEqual(["buffer-1", "buffer-2"]);
 
     const recovered = await context.service.reconcile();
@@ -2760,7 +2770,13 @@ describe("GameService challenger buffer", () => {
       pendingSelection: { kind: "buffer" },
     });
     await expect(context.challengerRepository.load()).resolves.toMatchObject({
-      ready: [{ candidate: { id: "challenger-refill-1" } }],
+      ready: [],
+      preparedDequeues: [
+        {
+          candidate: { id: "challenger-refill-1" },
+          replacementSlot: "single",
+        },
+      ],
       refillJobs: [{ jobId: "refill-1" }],
     });
 

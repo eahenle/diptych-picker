@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import type { PromptCard, PromptDeck } from "@/domain/game";
 import styles from "./prompt-deck-editor.module.css";
 
@@ -26,6 +26,10 @@ interface PromptDeckEditorProps {
         },
   ) => Promise<void>;
   onBlend: (cardIds: [string, string]) => Promise<boolean>;
+  onWrite: (input: {
+    guidance: string;
+    images: readonly File[];
+  }) => Promise<boolean>;
 }
 
 export function PromptDeckEditor({
@@ -35,12 +39,16 @@ export function PromptDeckEditor({
   onCreate,
   onUpdate,
   onBlend,
+  onWrite,
 }: PromptDeckEditorProps) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [tags, setTags] = useState("");
   const [blendSelection, setBlendSelection] = useState<string[]>([]);
+  const [writerGuidance, setWriterGuidance] = useState("");
+  const [writerImages, setWriterImages] = useState<File[]>([]);
+  const writerImageInputRef = useRef<HTMLInputElement | null>(null);
   const cards = deck?.cards ?? [];
   const activeCards = cards.filter((card) => card.active);
   const availableBlendIds = new Set(activeCards.map(({ id }) => id));
@@ -84,6 +92,15 @@ export function PromptDeckEditor({
       setPrompt("");
       setNegativePrompt("");
       setTags("");
+    }
+  };
+
+  const submitWriter = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (await onWrite({ guidance: writerGuidance, images: writerImages })) {
+      setWriterGuidance("");
+      setWriterImages([]);
+      if (writerImageInputRef.current) writerImageInputRef.current.value = "";
     }
   };
 
@@ -159,6 +176,59 @@ export function PromptDeckEditor({
           </div>
         ) : null}
 
+        <form
+          className={`${styles.form} ${styles.writerForm}`}
+          onSubmit={(event) => void submitWriter(event)}
+        >
+          <strong>Draft a card from sources</strong>
+          <small>
+            Supply text, up to five private seed images, or both. The writer
+            returns one reviewable prompt-deck card and never generates or
+            alters an image.
+          </small>
+          <label>
+            Text guidance
+            <textarea
+              value={writerGuidance}
+              maxLength={2_000}
+              rows={3}
+              disabled={busy || Boolean(deck?.writerJob)}
+              onChange={(event) => setWriterGuidance(event.target.value)}
+              placeholder="Describe the transferable subject, composition, mood, medium, palette, or constraints to capture"
+            />
+          </label>
+          <label>
+            Seed images
+            <input
+              ref={writerImageInputRef}
+              type="file"
+              aria-label="Seed images"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              disabled={busy || Boolean(deck?.writerJob)}
+              onChange={(event) =>
+                setWriterImages(Array.from(event.currentTarget.files ?? []))
+              }
+            />
+            <small>
+              {writerImages.length > 0
+                ? `${writerImages.length} of 5 selected`
+                : "PNG, JPEG, or WebP; 20 MB and 4096 px maximum per image."}
+            </small>
+          </label>
+          <button
+            type="submit"
+            disabled={
+              busy ||
+              Boolean(deck?.writerJob) ||
+              writerImages.length > 5 ||
+              (writerImages.length === 0 && writerGuidance.trim().length === 0)
+            }
+          >
+            {deck?.writerJob ? "Writer working…" : "Draft reviewable card"}
+          </button>
+        </form>
+
         {deck?.editorJob ? (
           <p className={styles.editorStatus} role="status">
             Editor is drafting two alternatives for{" "}
@@ -190,7 +260,12 @@ export function PromptDeckEditor({
           <p className={styles.editorStatus} role="status">
             Writer is synthesizing a reviewable card from{" "}
             <strong>
-              {deck.writerJob.sourceCandidateIds.length} favorites
+              {writerSourceLabel(
+                deck.writerJob.sourceImageDigests?.length ??
+                  deck.writerJob.expectedJob.sources.length,
+                Boolean(deck.writerJob.sourceTextDigest),
+                deck.writerJob.sourceCandidateIds.length,
+              )}
             </strong>
             …
           </p>
@@ -221,10 +296,20 @@ export function PromptDeckEditor({
                         )
                         .join(" + ")}
                     </small>
-                  ) : suggestion.sourceCandidateIds ? (
+                  ) : suggestion.sourceCandidateIds ||
+                    suggestion.sourceImageDigests ||
+                    suggestion.sourceTextDigest ? (
                     <small>
-                      Written from {suggestion.sourceCandidateIds.length} saved
-                      generated images
+                      Written from{" "}
+                      {!suggestion.sourceTextDigest &&
+                      suggestion.sourceCandidateIds?.length
+                        ? `${suggestion.sourceCandidateIds.length} saved generated images`
+                        : writerSourceLabel(
+                            suggestion.sourceImageDigests?.length ??
+                              suggestion.sourceCandidateIds?.length ??
+                              0,
+                            Boolean(suggestion.sourceTextDigest),
+                          )}
                     </small>
                   ) : null}
                   <p>{suggestion.prompt}</p>
@@ -323,6 +408,23 @@ export function PromptDeckEditor({
       </div>
     </details>
   );
+}
+
+function writerSourceLabel(
+  imageCount: number,
+  hasText: boolean,
+  candidateCount = 0,
+): string {
+  if (!hasText && candidateCount > 0) {
+    return `${candidateCount} ${candidateCount === 1 ? "favorite" : "favorites"}`;
+  }
+  const images =
+    imageCount > 0
+      ? `${imageCount} ${imageCount === 1 ? "image" : "images"}`
+      : "";
+  if (images && hasText) return `${images} + text guidance`;
+  if (images) return images;
+  return "text guidance";
 }
 
 function PromptCardRow({

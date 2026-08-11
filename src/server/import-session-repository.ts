@@ -226,3 +226,38 @@ export class JsonImportSessionRepository implements ImportSessionRepository {
     }
   }
 }
+
+export class MemoryImportSessionRepository implements ImportSessionRepository {
+  private lockTail: Promise<void> = Promise.resolve();
+  private session: ImportSession | null;
+
+  constructor(session: ImportSession | null = null) {
+    this.session = session ? parseImportSession(session) : null;
+  }
+
+  async load(): Promise<ImportSession | null> {
+    return this.session ? parseImportSession(this.session) : null;
+  }
+
+  async save(session: ImportSession): Promise<void> {
+    this.session = parseImportSession(session);
+  }
+
+  async clear(): Promise<void> {
+    this.session = null;
+  }
+
+  async withLock<T>(operation: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.lockTail;
+    this.lockTail = new Promise<void>((resolveLock) => {
+      release = resolveLock;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}

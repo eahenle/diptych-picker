@@ -166,7 +166,7 @@ co-proc terminal frames.
 }
 ```
 
-`kind` is `challenger`, `initial`, `refill`, `source-profile`, `leaderboard-profile`, `prompt-card-editor`, `prompt-card-blender`, `prompt-card-writer`, or `import-annotation`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
+`kind` is `challenger`, `initial`, `initial-import-fill`, `refill`, `source-profile`, `leaderboard-profile`, `prompt-card-editor`, `prompt-card-blender`, `prompt-card-writer`, or `import-annotation`. Initial jobs also require the same `batchId` on both jobs and a distinct `initialSide` of `left` or `right`:
 
 ```json
 {
@@ -178,6 +178,21 @@ co-proc terminal frames.
 ```
 
 The remaining request fields carry the same preference context. A missing `kind` is tolerated as a legacy challenger.
+
+An initial import fill is an independent clean-session starter request. It has no retained winner, rejected candidate, comparison history, preference revision, or refill ownership:
+
+```json
+{
+  "id": "initial-import-fill-job-1",
+  "kind": "initial-import-fill",
+  "createdAt": "ISO-8601 timestamp",
+  "importSessionId": "import-session-1",
+  "attemptId": "initial-fill-attempt-1",
+  "preferenceSeed": "clean-session default image preferences"
+}
+```
+
+The server durably records every request before publishing exactly the shortfall to five candidates. The monitor handles the returned batch with one fresh native-image worker per entry, all available slots up to three, and publishes each result independently. Workers use only the preference seed and must omit `preferenceRevision`.
 
 An import annotation contains only metadata for one immutable normalized asset. It never contains source bytes, image bytes, original filenames, or generation instructions:
 
@@ -354,14 +369,20 @@ An explicit two-card blend enqueues both immutable card snapshots and the reques
 
 The ratio ranges from 0.1 through 0.9 and assigns that share of influence to the first card. One fresh blender worker returns exactly one coherent child proposal; it never mutates either parent or generates an image. The proposal remains approval-gated until accepted or discarded.
 
-An explicit write-from-set request contains three through five unique generated
-favorites with display-safe metadata and immutable normalized source images:
+An explicit prompt-card writer request contains zero through five normalized
+source images plus optional text guidance. Uploaded seed inputs are
+content-distinct; generated favorites may share bytes but have unique candidate
+IDs. At least one image or
+non-empty guidance is required. Generated favorites carry `candidateId`;
+private uploaded seed images omit it:
 
 ```json
 {
   "id": "prompt-card-writer-job-1",
   "kind": "prompt-card-writer",
   "createdAt": "ISO-8601 timestamp",
+  "guidance": "Preserve the monumental negative space and make the palette colder.",
+  "sourceTextDigest": "75a940049c7c409a5ec7e721d73778f0095bb627fd45aa300b89b9ee463ab77d",
   "sources": [
     {
       "candidateId": "generated-favorite-1",
@@ -380,11 +401,14 @@ favorites with display-safe metadata and immutable normalized source images:
 }
 ```
 
-The actual request has three through five source objects. One fresh writer
-worker inspects every exact image together and returns one coherent proposal
-grounded only in shared transferable qualities. It never identifies a person,
-copies a source, or generates an image. The proposal remains approval-gated;
-acceptance creates a new immutable card with every source candidate ID.
+The request may instead be text-only (`sources: []`) or image-only (omit both
+text fields). `sourceTextDigest` is the SHA-256 digest of the trimmed guidance.
+One fresh writer worker inspects every exact image together, follows the exact
+guidance, and returns one coherent proposal grounded only in transferable
+qualities. It never identifies a person, copies a source, alters a source, or
+generates an image. The proposal remains approval-gated; acceptance creates a
+new immutable card with the available candidate IDs, image SHA-256 digests,
+and optional text digest as provenance.
 
 The preference seed is the authoritative creative brief for every worker. Explicit subject, subject-count, medium, style, palette, content-level, and avoidance guidance outranks retained-winner metadata, rejected candidates, selection history, and recent concepts. Those secondary fields may guide novelty only within the seed's constraints; they must never redirect the image proposal to an unrelated subject or metaphor. The monitor must reject or fail a proposal and image that contradict an explicit seed constraint rather than publish it.
 
@@ -410,9 +434,9 @@ Refill jobs carry the same preference context plus durable session and pinned-wi
 
 `pinnedWinnerId` must equal `retainedWinner.id`. `comparisonOutcome` is optional and appears as `tie` or `both-lose`; ordinary refill jobs omit it. Each refill is an independent candidate-generation job and has its own proposal, image, and terminal outcome.
 
-At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the shared number of immediately available fresh worker subagent slots for image generation and analysis, from one through three, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request, cached analysis, an import-annotation batch, or a bounded refill batch when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
+At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 --max-refills <workerLimit>` until it prints no JSON. `workerLimit` is the shared number of immediately available fresh worker subagent slots for image generation and analysis, from one through three, that the root supervisor passed to the monitor. The helper prints one unterminated active challenger/initial request, cached analysis, an import-annotation batch, an initial-import-fill batch, or a bounded refill batch when recovery is needed, and claims pending work when none is active. Initial requests include the recovered durable `batchOwnerToken`. Do not use `--resume` in the ordinary polling loop.
 
-`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, interactive source-profile, or prompt-card request. It then atomically renames up to the requested number of oldest import annotations from `pending` to `active`, followed by cached leaderboard-profile analysis, then up to the requested number of oldest refill requests. The `--max-refills` coordinator limit applies to either returned batch, must be from 1 through 3, and must not exceed immediately available worker slots. The helper never mixes kinds into a batch and emits strict JSON:
+`npm run agent:next -- --wait-ms 30000 --max-refills <workerLimit>` prioritizes one pending challenger, initial, interactive source-profile, or prompt-card request. It then atomically renames up to the requested number of oldest import annotations from `pending` to `active`, followed by up to the requested number of oldest initial-import-fill requests, cached leaderboard-profile analysis, then up to the requested number of oldest refill requests. The `--max-refills` coordinator limit applies to every returned batch, must be from 1 through 3, and must not exceed immediately available worker slots. The helper never mixes kinds into a batch and emits strict JSON:
 
 ```json
 {
@@ -425,6 +449,13 @@ At monitor startup or restart, run `npm run agent:next -- --resume --wait-ms 0 -
 {
   "kind": "refill-batch",
   "jobs": [{ "id": "refill-job-1", "kind": "refill" }]
+}
+```
+
+```json
+{
+  "kind": "initial-import-fill-batch",
+  "jobs": [{ "id": "initial-import-fill-job-1", "kind": "initial-import-fill" }]
 }
 ```
 
@@ -460,7 +491,7 @@ Write this strict JSON object to `<data-root>/agent-work/<jobId>/proposal.json`:
 }
 ```
 
-The four base proposal fields are always required. `preferenceRevision` must be omitted for Frozen jobs and is required for Guided and Unfettered jobs; it must contain every preference field except adaptation metadata and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed, responds to aggregate numeric and visual leaderboard evidence at the selected freedom level, and stays distinct from recent work. Invalid proposals fail before any outcome, result, or asset is published.
+The four base proposal fields are always required. `preferenceRevision` must be omitted for Frozen and initial-import-fill jobs and is required for Guided and Unfettered jobs; it must contain every preference field except adaptation metadata and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed and stays distinct from recent work; ordinary adaptive generation also explains its response to aggregate numeric and visual leaderboard evidence at the selected freedom level. Invalid proposals fail before any outcome, result, or asset is published.
 
 ## Completed result
 
@@ -635,6 +666,10 @@ The helper preserves the request's exact source lineage and publishes:
     "generated-favorite-2",
     "generated-favorite-3"
   ],
+  "sourceImageDigests": [
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  ],
+  "sourceTextDigest": "75a940049c7c409a5ec7e721d73778f0095bb627fd45aa300b89b9ee463ab77d",
   "proposal": {
     "title": "Copper ecology",
     "prompt": "A tactile editorial ecology with copper edge light, generous negative space, and monumental organic forms.",

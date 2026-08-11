@@ -1,0 +1,70 @@
+.dialog {
+  width: min(680px, 100%);
+}
+
+.options {
+  display: grid;
+  gap: 10px;
+}
+
+.option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid #383337;
+  background: #090b0d;
+}
+
+.option > span {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.option strong {
+  color: #e4ddd5;
+  font-size: 13px;
+}
+
+.option small {
+  color: #8f8984;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.fileInput {
+  display: none;
+}
+
+.primaryAction {
+  color: var(--copper-bright);
+  border-color: rgba(180, 104, 73, 0.8);
+}
+
+.statusError {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #e0b4ae;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .option {
+    grid-template-columns: 1fr;
+  }
+
+  .option button,
+  .statusError button {
+    width: 100%;
+  }
+
+  .statusError {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

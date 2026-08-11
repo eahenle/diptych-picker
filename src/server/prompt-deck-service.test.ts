@@ -107,6 +107,32 @@ function fixture(
   );
   const writer: PromptCardWriterCoordinator = {
     prepare,
+    prepareCustom: vi.fn<PromptCardWriterCoordinator["prepareCustom"]>(
+      async (id, createdAt, input) => ({
+        id,
+        kind: "prompt-card-writer",
+        createdAt,
+        sources: input.images.map((image, index) => ({
+          concept: image.filename,
+          style: [],
+          sourceImage: {
+            filename: `${String(index + 1).repeat(64)}.png`,
+            path: `profile-sources/${String(index + 1).repeat(64)}.png`,
+            contentType: "image/png" as const,
+            width: 100,
+            height: 100,
+            byteLength: 1024,
+          },
+        })),
+        ...(input.guidance
+          ? {
+              guidance: input.guidance,
+              sourceTextDigest:
+                "8e87b32abebf1a42076ff3b4b5506ca377a643ee76c950a7fceb35fed6210c00",
+            }
+          : {}),
+      }),
+    ),
     enqueue: async () => {},
     readWork: async () => null,
     readResult: async () => null,
@@ -239,6 +265,36 @@ describe("PromptDeckService", () => {
       jobId: "created-1",
       sourceCandidateIds: favoriteIds,
       expectedJob: { kind: "prompt-card-writer" },
+    });
+    expect(context.ensureWriterEnqueued).toHaveBeenCalledWith(
+      updated.promptDeck?.writerJob?.expectedJob,
+    );
+  });
+
+  it("prepares a writer job from uploaded seeds and text guidance", async () => {
+    const current = game();
+    const context = fixture(current, challengers(current));
+
+    const updated = await context.service.requestCustomWriter({
+      guidance: " Preserve cold monumental negative space. ",
+      images: [
+        {
+          filename: "seed.png",
+          contentType: "image/png",
+          contents: new Uint8Array([1, 2, 3]),
+        },
+      ],
+    });
+
+    expect(updated.promptDeck?.writerJob).toMatchObject({
+      jobId: "created-1",
+      sourceCandidateIds: [],
+      sourceImageDigests: ["1".repeat(64)],
+      sourceTextDigest:
+        "8e87b32abebf1a42076ff3b4b5506ca377a643ee76c950a7fceb35fed6210c00",
+      expectedJob: {
+        guidance: "Preserve cold monumental negative space.",
+      },
     });
     expect(context.ensureWriterEnqueued).toHaveBeenCalledWith(
       updated.promptDeck?.writerJob?.expectedJob,

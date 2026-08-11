@@ -21,22 +21,25 @@ npm run demo
 Open <http://127.0.0.1:3000>. Use `PORT=3001 npm run demo` if port 3000 is
 already occupied. Demo state is isolated under `.local-data/demo`.
 
-## Run with Codex
+## Run with multi-cli
 
-Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), authenticate,
-and launch the repository's interactive generation workflow:
+Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli) and
+[multi-cli](https://github.com/Spielewoy/multi-codex), create the personal
+profile if it does not exist yet, authenticate through that profile, and launch
+the repository's interactive generation workflow:
 
 ```bash
 npm install --global @openai/codex
-codex login
+multi-cli new codex/personal
+multi-cli codex/personal login
 npm run codex:play
 ```
 
-The launcher uses the stock `codex` command, changes into this repository, and
+The launcher uses `multi-cli codex/personal`, changes into this repository, and
 sends the `$run-diptych-picker` startup prompt. It requests eight total threads:
 one root supervisor, one persistent mailbox monitor, and up to three concurrent
 fresh image workers, with spare capacity for bounded supporting work. It does
-not require a named profile or modify global Codex configuration.
+not modify global Codex configuration.
 
 Pass a different total thread count after `--`, or set
 `DIPTYCH_CODEX_THREADS`. Five is the minimum that can fit the root, monitor, and
@@ -63,7 +66,7 @@ To inspect commands without launching anything, run
 `./dev-and-play --print-command [thread-count]`,
 `./demo-only --print-command`, or `./run-only --print-command`.
 
-The web server never launches `codex`, calls an OpenAI API, or receives an API key. Model choice, authentication, permissions, and subagent execution belong to the interactive CLI session.
+The web server never launches a CLI or model process, calls an OpenAI API, or receives an API key. Model choice, authentication, permissions, and subagent execution belong to the interactive `multi-cli` session.
 
 ## Release status
 
@@ -193,6 +196,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Read each established candidate's rounded Elo score from its lower-left overlay. `✦` marks a first appearance; `⊖` warns that losing the current comparison would remove that candidate from the reusable pool.
 - Select the **Round** metric to review up to fifty recent decisions, newest first, with winner and rejected-candidate thumbnails and no generation prompts. Select an available thumbnail to inspect the immutable image at full size. Favorite exceptional candidates from history or the pool; favorites persist independently of Elo and pool membership. The header's **Favorites** control opens every saved candidate in deterministic Elo order, including images that have left the reusable pool, with inspection, removal, and variation-exploration actions.
 - In **Favorites**, select three to five generated images to draft a prompt card from their shared transferable qualities. Curated seeds and private uploads are ineligible. The writer preserves every source image and returns a review-only proposal; accepting it in Preferences creates an immutable card with all source candidate IDs recorded.
+- In **Preferences → Prompt deck**, draft a card from text guidance, one to five private PNG/JPEG/WebP seed images, or both. Inputs are normalized for read-only analysis and never become playable assets; the writer returns one review-only proposal, and acceptance records source-image and text digests on the immutable card.
 - Every expanded image offers **Explore variations**. The app privately runs that candidate through the same source-analysis path, opens the resulting profile as an editable draft, and saves no change until you confirm it. Generated descendants retain the canonical parent plus a fingerprint of the exact preference profile used.
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
@@ -203,6 +207,7 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Preferences keeps a bounded revision timeline for confirmed manual saves, variation branches, and model-authored rewrites. Expand it to review when each revision occurred and which fields changed, then restore any entry as an editable or Frozen draft without changing the game until Save is confirmed. Named presets capture the current draft for later reuse; applying one is also draft-only, and same-name saves replace the prior preset.
 - The quiet **Queue** readout shows ready challengers and total in-flight refill work. Select it to distinguish jobs actively generating from jobs waiting for a worker and to see whether old-profile work is draining. Ready plus in-flight refill jobs stays within the configured queue target. Select **Pool** to open the reusable-image leaderboard, ranked by Elo with each candidate's thumbnail, concept, style, win–loss record, and curated/generated provenance; prompts and mailbox details remain private.
 - Background moderation blocks are classified separately from operational failures. The app keeps replacing blocked refill work, while a persistent notice explains what happened and offers **Adjust preferences** or **Dismiss** instead of failing silently.
+- Every page load first offers **Resume**, **Load**, **Initialize**, or **Import**. The availability probe is read-only, Resume is disabled when no durable game exists, and unfinished image-pool work is identified before the user chooses a path.
 - **New game** opens a save/restore dialog. Export the exact current game, load a prior JSON save, or start fresh; starting fresh clears the round, history, and preference profile while retaining learned pool ratings and immutable images.
 
 ## Verification
@@ -236,8 +241,8 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/preference-service.ts`: manual preference saves, stale-editor protection, variation lineage, and replacement-capacity refresh.
 - `src/server/generation-job-publisher.ts`: idempotent durable mailbox publication with lost-acknowledgement recovery.
 - `src/server/refill-capacity-service.ts`: locked refill-deficit planning, intent persistence, and job publication.
-- `src/server/prompt-deck-service.ts`: card creation, weighted-deck edits, suggestion decisions, blend requests, and favorite-set writer requests.
-- `src/server/prompt-card-reconciler.ts`: durable editor, blender, and favorite-set writer recovery, terminal reconciliation, and suggestion creation.
+- `src/server/prompt-deck-service.ts`: card creation, weighted-deck edits, suggestion decisions, blend requests, and favorite/source-driven writer requests.
+- `src/server/prompt-card-reconciler.ts`: durable editor, blender, and source-driven writer recovery, terminal reconciliation, and suggestion creation.
 - `src/server/leaderboard-profile-reconciler.ts`: adaptive leaderboard analysis scheduling, durable result recovery, and current-cohort cache selection.
 - `src/server/game-comparison.ts` and `game-refill.ts`: comparison rating/receipt rules and deterministic refill context, planning, and work validation.
 - `src/server/game-snapshot.ts`: versioned save validation, asset verification, fresh-session restore, and stale-job exclusion.

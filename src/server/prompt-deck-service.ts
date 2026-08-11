@@ -12,7 +12,11 @@ import type {
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
 import { MissingGameError, PromptDeckError } from "./game-service-errors";
-import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
+import type {
+  PromptCardWriterCoordinator,
+  PromptCardWriterCustomInput,
+} from "./prompt-card-writer-service";
+import { PromptCardWriterInputError } from "./prompt-card-writer-service";
 import type { GameRepository } from "./repository";
 
 type PromptDeckUpdate =
@@ -189,18 +193,89 @@ export class PromptDeckService {
       }
       const jobId = this.options.createId();
       const createdAt = this.options.now();
-      const job = await writer.prepare(
-        jobId,
-        createdAt,
-        candidates as NonNullable<(typeof candidates)[number]>[],
-      );
+      let job: PromptCardWriterJob;
+      try {
+        job = await writer.prepare(
+          jobId,
+          createdAt,
+          candidates as NonNullable<(typeof candidates)[number]>[],
+        );
+      } catch (error) {
+        if (error instanceof PromptCardWriterInputError) {
+          throw new PromptDeckError(error.message);
+        }
+        throw error;
+      }
       const updated: GameState = {
         ...current,
         promptDeck: {
           ...promptDeck,
           writerJob: {
             jobId,
+            ...writerLineage(job),
             sourceCandidateIds: [...candidateIds],
+            enqueuedAt: createdAt,
+            expectedJob: job,
+          },
+        },
+      };
+      await this.options.gameRepository.save(updated);
+      await this.options.jobPublisher.ensureWriterEnqueued(job);
+      return updated;
+    });
+  }
+
+  async requestCustomWriter(
+    input: PromptCardWriterCustomInput,
+  ): Promise<GameState> {
+    return this.options.gameRepository.withLock(async () => {
+      const current = await this.options.gameRepository.load();
+      if (!current) {
+        throw new MissingGameError(
+          "Start a game before drafting a prompt card",
+        );
+      }
+      const writer = this.options.writer;
+      if (!writer) {
+        throw new PromptDeckError("Prompt-card writing is unavailable.");
+      }
+      const guidance = input.guidance.trim();
+      if (
+        input.images.length > 5 ||
+        guidance.length > 2_000 ||
+        (input.images.length === 0 && guidance.length === 0)
+      ) {
+        throw new PromptDeckError(
+          "Add text guidance, one to five seed images, or both.",
+        );
+      }
+      const promptDeck = current.promptDeck ?? emptyPromptDeck();
+      if (promptDeck.writerJob) {
+        throw new PromptDeckError(
+          "Wait for the current prompt-card draft before starting another.",
+        );
+      }
+      const jobId = this.options.createId();
+      const createdAt = this.options.now();
+      let job: PromptCardWriterJob;
+      try {
+        job = await writer.prepareCustom(jobId, createdAt, {
+          guidance,
+          images: input.images,
+        });
+      } catch (error) {
+        if (error instanceof PromptCardWriterInputError) {
+          throw new PromptDeckError(error.message);
+        }
+        throw error;
+      }
+      const updated: GameState = {
+        ...current,
+        promptDeck: {
+          ...promptDeck,
+          writerJob: {
+            jobId,
+            ...writerLineage(job),
             enqueuedAt: createdAt,
             expectedJob: job,
           },
@@ -254,6 +329,8 @@ export class PromptDeckService {
                             : []),
                         ],
                         sourceCandidateIds: suggestion.sourceCandidateIds,
+                        sourceImageDigests: suggestion.sourceImageDigests,
+                        sourceTextDigest: suggestion.sourceTextDigest,
                       },
                       this.options.createId(),
                       this.options.now(),
@@ -317,4 +394,22 @@ export class PromptDeckService {
       this.options.challengerRepository.withLock(operation),
     );
   }
+}
+
+function writerLineage(job: PromptCardWriterJob): {
+  sourceCandidateIds: string[];
+  sourceImageDigests: string[];
+  sourceTextDigest?: string;
+} {
+  return {
+    sourceCandidateIds: job.sources.flatMap(({ candidateId }) =>
+      candidateId ? [candidateId] : [],
+    ),
+    sourceImageDigests: [
+      ...new Set(
+        job.sources.map(({ sourceImage }) => sourceImage.filename.slice(0, -4)),
+      ),
+    ],
+    ...(job.sourceTextDigest ? { sourceTextDigest: job.sourceTextDigest } : {}),
+  };
 }

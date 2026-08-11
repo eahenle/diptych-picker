@@ -9,7 +9,7 @@ new challengers.
 - macOS or Linux
 - Node.js 24 or newer
 - npm 11 or newer
-- Codex CLI only for generated-image mode
+- Codex CLI and `multi-cli` only for generated-image mode
 
 The application binds to `127.0.0.1` and is designed for one user on one
 machine. Read [Security](../SECURITY.md) before changing that boundary.
@@ -47,11 +47,13 @@ preferences, prompt cards, saves, and the rest of the interface.
 
 ## Run with generated challengers
 
-Install and authenticate the Codex CLI:
+Install the Codex CLI and `multi-cli`, create the personal profile if it does
+not exist yet, and authenticate through that profile:
 
 ```bash
 npm install --global @openai/codex
-codex login
+multi-cli new codex/personal
+multi-cli codex/personal login
 npm run codex:play
 ```
 
@@ -72,7 +74,7 @@ The web application never receives an API key and never launches a model
 process. Authentication and generation remain in the interactive CLI session.
 See [Agent mode](AGENT_MODE.md) for the process and recovery model.
 
-## Run the app without launching Codex
+## Run the app without launching multi-cli
 
 If a compatible mailbox worker is already running:
 

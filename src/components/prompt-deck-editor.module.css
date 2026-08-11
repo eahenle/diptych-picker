@@ -51,6 +51,19 @@
   font-size: 11px;
 }
 
+.writerForm > small,
+.writerForm label small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.writerForm {
+  padding: 10px;
+  border: 1px dashed rgba(201, 184, 236, 0.28);
+  background: rgba(167, 107, 239, 0.035);
+}
+
 .deckToggle small,
 .empty,
 .cards small,

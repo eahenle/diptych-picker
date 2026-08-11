@@ -92,6 +92,15 @@ test.beforeEach(async ({ page, request }) => {
   await page.goto("/");
   await expect(page).toHaveTitle("Dipycker");
   await expect(page.getByRole("heading", { name: "Dipycker" })).toBeVisible();
+  const startup = page.getByRole("dialog", { name: "Open Diptych Picker" });
+  await expect(startup).toBeVisible();
+  await expect(startup.getByRole("button", { name: "Resume" })).toBeEnabled();
+  await expect(startup.getByRole("button", { name: "Load" })).toBeEnabled();
+  await expect(
+    startup.getByRole("button", { name: "Initialize" }),
+  ).toBeEnabled();
+  await expect(startup.getByRole("button", { name: "Import" })).toBeEnabled();
+  await startup.getByRole("button", { name: "Resume" }).click();
   await expect(page.getByTestId("candidate-image")).toHaveCount(2);
 });
 
@@ -947,6 +956,94 @@ test("writes an approval-gated prompt card from three generated favorites", asyn
   );
 });
 
+test("drafts an approval-gated prompt card from text guidance", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByText("Prompt deck").click();
+  await page
+    .getByLabel("Text guidance")
+    .fill("A quiet ultraviolet architectural nocturne with negative space.");
+
+  const writerResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck/write/custom") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Draft reviewable card" }).click();
+  expect((await writerResponse).status()).toBe(200);
+  await expect(
+    page.getByText("Writer is synthesizing a reviewable card"),
+  ).toBeVisible();
+  await expect(page.getByText("Guided synthesis")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(page.getByText("Written from text guidance")).toBeVisible();
+
+  const acceptResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck") &&
+      response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Accept as new card" }).click();
+  expect((await acceptResponse).status()).toBe(200);
+  const state = await (await request.get("/api/game")).json();
+  const card = state.game.promptDeck.cards.at(-1);
+  expect(card).toMatchObject({
+    title: "Guided synthesis",
+    parents: [],
+    sourceTextDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+  });
+  expect(card.sourceCandidateIds).toBeUndefined();
+  expect(card.sourceImageDigests).toBeUndefined();
+});
+
+test("drafts a prompt card from a private seed image plus text", async ({
+  page,
+  request,
+}) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByText("Prompt deck").click();
+  await page
+    .getByLabel("Text guidance")
+    .fill("Keep the observatory scale but shift toward colder light.");
+  await page
+    .getByLabel("Seed images")
+    .setInputFiles(
+      join(process.cwd(), "public/seed-assets/coastal-observatory.png"),
+    );
+
+  const writerResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck/write/custom") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Draft reviewable card" }).click();
+  expect((await writerResponse).status()).toBe(200);
+  await expect(page.getByText("Source synthesis")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(
+    page.getByText("Written from 1 image + text guidance"),
+  ).toBeVisible();
+
+  const acceptResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/preferences/deck") &&
+      response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Accept as new card" }).click();
+  expect((await acceptResponse).status()).toBe(200);
+  const state = await (await request.get("/api/game")).json();
+  const card = state.game.promptDeck.cards.at(-1);
+  expect(card.sourceCandidateIds).toBeUndefined();
+  expect(card.sourceImageDigests).toEqual([
+    expect.stringMatching(/^[a-f0-9]{64}$/),
+  ]);
+  expect(card.sourceTextDigest).toMatch(/^[a-f0-9]{64}$/);
+});
+
 test("derives an editable preference profile from a private source image", async ({
   page,
   request,
@@ -995,6 +1092,71 @@ test("derives an editable preference profile from a private source image", async
   expect(await readdir(join(dataDirectory, "profile-sources"))).toEqual([
     expect.stringMatching(/^[a-f0-9]{64}\.png$/),
   ]);
+});
+
+test("imports an edited challenger pool and activates it as a clean game", async ({
+  page,
+}) => {
+  const sources = [
+    "coastal-observatory.png",
+    "crystal-synthesizer.png",
+    "midnight-laundry-tide.png",
+    "mushroom-maestro.png",
+    "pool-sized-circuit.png",
+  ].map((filename) => join(process.cwd(), "public/seed-assets", filename));
+
+  await page.getByRole("button", { name: "New game" }).click();
+  await page.getByRole("button", { name: "Import images" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Import images for a new game",
+  });
+  await expect(dialog).toBeVisible();
+  await page.getByLabel("Choose images for a new game").setInputFiles(sources);
+  await expect(dialog.getByRole("button", { name: /accept all/i })).toHaveCount(
+    0,
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Close / Pause" }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+
+  for (let index = 0; index < sources.length; index += 1) {
+    await expect(
+      dialog.getByRole("button", { name: "Approve image" }),
+    ).toBeVisible();
+    if (index === 0) {
+      await dialog.getByRole("radio", { name: "Fit full image" }).click();
+      await dialog.getByLabel(/^Rotation:/).fill("37");
+      await expect(dialog.getByLabel(/^Zoom:/)).toBeDisabled();
+      await expect(dialog.getByLabel("Horizontal position")).toBeDisabled();
+      await expect(dialog.getByLabel("Vertical position")).toBeDisabled();
+    }
+    const uploadResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/game/import/items") &&
+        response.request().method() === "POST",
+    );
+    const sealResponse =
+      index === sources.length - 1
+        ? page.waitForResponse(
+            (response) =>
+              response.url().endsWith("/api/game/import/seal") &&
+              response.request().method() === "POST",
+          )
+        : null;
+    await dialog.getByRole("button", { name: "Approve image" }).click();
+    expect((await uploadResponse).status()).toBe(202);
+    if (sealResponse) expect((await sealResponse).status()).toBe(202);
+  }
+
+  await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("candidate-image")).toHaveCount(2);
+  await expect(page.getByText("Round 1", { exact: true })).toBeVisible();
+  await page.getByTitle("View generation queue details").click();
+  await expect(
+    page.getByRole("dialog", { name: "Generation queue" }),
+  ).toContainText("3 imported challengers waiting");
 });
 
 test("adopts a complete model-authored profile at the unfettered cadence", async ({

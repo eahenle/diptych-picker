@@ -22,17 +22,63 @@ normal implementation and play-testing loop.
 6. [x] Write prompt cards from sets of three to five generated favorites,
        keeping the images immutable, the proposal approval-gated, and accepted
        card lineage attributable to every source candidate.
-7. [ ] Continue the persistent `co-proc` transport design in
+7. [x] Import a reviewed pool of still images as a clean game, with exact
+       starter shortfall generation, imported-first serving, durable receipts,
+       and restart-safe activation.
+8. [x] Generalize prompt-card writing into a challenger-card utility that can
+       combine approved seed images, text guidance, or both without requiring
+       the sources to be generated favorites.
+9. [ ] Continue the persistent `co-proc` transport design in
        [Co-proc agent transport and prompt deck](CO_PROC_DECK_DESIGN.md), keeping
        durable mailbox operation as the fallback during migration.
-8. [ ] After those foundations, consider tournament play.
-       The dedicated favorites gallery has shipped. Broad refactoring should
-       follow feature boundaries instead of preceding them.
+10. [ ] After those foundations, consider tournament play.
+        The dedicated favorites gallery has shipped. Broad refactoring should
+        follow feature boundaries instead of preceding them.
 
 Compatibility remains the default: a moderate, non-blocking advisory alone is
 not sufficient reason to introduce a breaking save, API, or workflow change.
 Prefer additive validation and migration-safe hardening unless a higher-severity
 risk justifies a deliberate compatibility break.
+
+## 2026-08-11
+
+### Source-driven prompt-card drafting
+
+The Prompt deck now drafts one approval-gated card from text guidance, one to
+five private seed images, or both. Uploaded PNG, JPEG, and WebP files reuse the
+same decode, dimension, metadata-stripping, and content-addressed normalization
+boundary as source-profile analysis. A dedicated non-image writer inspects the
+exact normalized inputs and returns one reviewable proposal; it never generates,
+alters, or publishes an input image. Candidate IDs, normalized-image SHA-256
+digests, and the optional trimmed-guidance digest survive reconciliation and are
+recorded on an accepted immutable card. The existing three-to-five generated
+favorites workflow remains available and now records image-digest lineage too.
+
+## 2026-08-10
+
+### Imported challenger pools
+
+New Game now offers an image-pool import that keeps each original browser file
+client-only, structurally rejects animated or multi-picture containers, and
+requires explicit per-image crop or fit approval before uploading one
+normalized 1024×1024 PNG. Browser-only work cannot be lost through Close,
+Pause, Escape, or backdrop dismissal; confirmed abandonment is the sole exit
+until every local input is approved or removed.
+
+Approved assets receive durable analysis-only annotation jobs. Display-safe
+failures support retry, manual metadata, or removal. Sealing requests exactly
+the generated shortfall needed to reach five starter candidates, with a stable
+idempotency key for failed-attempt retries. Clean activation is journaled across
+import, game, challenger, and bootstrap state. Two candidates form round 1;
+remaining imports enter a receipt-backed priority queue ahead of generated
+ready work and pool fallback, and ordinary refill remains suppressed until the
+import supply is terminal.
+
+Snapshots preserve activated import provenance and both activation-display and
+dequeue receipts while rekeying session-bound IDs on restore. The game UI polls
+aggregate import progress, distinguishes it from ordinary generation capacity,
+and retains one actionable annotation-failure notice without changing the
+visible comparison.
 
 ## 2026-07-26
 
@@ -372,7 +418,10 @@ proposal, and creates a child carrying both parent IDs only after acceptance.
 The Favorites gallery similarly accepts three to five generated favorites for
 a dedicated writer job. It receives normalized immutable source images, returns
 one reviewable proposal, and records every source candidate ID only when the
-player accepts the card.
+player accepts the card. Prompt deck also accepts text guidance, one to five
+private uploaded seed images, or both through the same approval-gated writer;
+accepted cards record image and text digests without copying those sources into
+the playable image library.
 
 ## 2026-07-20
 

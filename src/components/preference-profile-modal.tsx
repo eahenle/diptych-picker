@@ -112,6 +112,7 @@ interface PreferenceProfileModalProps {
   onCreatePromptCard: ComponentProps<typeof PromptDeckEditor>["onCreate"];
   onUpdatePromptDeck: ComponentProps<typeof PromptDeckEditor>["onUpdate"];
   onBlendPromptCards: ComponentProps<typeof PromptDeckEditor>["onBlend"];
+  onWriteCustomPromptCard: ComponentProps<typeof PromptDeckEditor>["onWrite"];
   onUpdateGameRules: (rules: GameRules) => Promise<boolean>;
   onFieldChange: <Key extends PreferenceField>(
     key: Key,
@@ -150,6 +151,7 @@ export function PreferenceProfileModal({
   onCreatePromptCard,
   onUpdatePromptDeck,
   onBlendPromptCards,
+  onWriteCustomPromptCard,
   onUpdateGameRules,
   onFieldChange,
   onFreedomChange,
@@ -272,6 +274,7 @@ export function PreferenceProfileModal({
           onCreate={onCreatePromptCard}
           onUpdate={onUpdatePromptDeck}
           onBlend={onBlendPromptCards}
+          onWrite={onWriteCustomPromptCard}
         />
         <GameRulesEditor
           rules={gameRules}

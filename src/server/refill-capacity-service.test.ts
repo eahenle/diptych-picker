@@ -137,6 +137,48 @@ describe("RefillCapacityService", () => {
     );
   });
 
+  it("suppresses ordinary refills from a locked nonterminal import supply snapshot", async () => {
+    const context = fixture();
+    const current = (await context.gameRepository.load())!;
+    const state = (await context.challengerRepository.load())!;
+    const capacity = context.service.plan(
+      state,
+      {
+        game: current,
+        winnerSide: "left",
+        retainedWinner: current.round.leftCandidate,
+        rejectedCandidate: current.round.rightCandidate,
+      },
+      {
+        importSessionId: "import-session-1",
+        annotating: 0,
+        failed: 0,
+        readyUnserved: 3,
+        servedImportedItemCount: 2,
+        activationDisplayReceiptCount: 2,
+        dequeueReceiptCount: 0,
+        initialFillPending: 0,
+        initialFillFailed: 0,
+        terminal: false,
+      },
+    );
+
+    expect(capacity).toEqual({ state, jobs: [] });
+    await context.service.ensure({
+      importSessionId: "import-session-1",
+      annotating: 0,
+      failed: 1,
+      readyUnserved: 0,
+      servedImportedItemCount: 0,
+      activationDisplayReceiptCount: 0,
+      dequeueReceiptCount: 0,
+      initialFillPending: 0,
+      initialFillFailed: 0,
+      terminal: false,
+    });
+    expect(context.ensureAll).not.toHaveBeenCalled();
+  });
+
   it("does nothing without a retained-winner context or capacity deficit", async () => {
     const noWinner = game({
       round: { ...game().round, retainedCandidateId: null },

@@ -1,7 +1,8 @@
 # Agent mode
 
-Agent mode connects the loopback web application to one interactive Codex CLI
-session without putting model credentials or execution inside the web server.
+Agent mode connects the loopback web application to one interactive
+`multi-cli codex/personal` session without putting model credentials or
+execution inside the web server.
 
 ## Process ownership
 

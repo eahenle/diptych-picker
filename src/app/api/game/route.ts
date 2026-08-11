@@ -10,6 +10,7 @@ import {
   generationProvider,
   getBufferHealth,
   getDisplayedEloRatings,
+  getImportProgress,
   getOrCreateGame,
   updatePreferenceSeed,
 } from "@/server/runtime";
@@ -68,6 +69,7 @@ export async function GET() {
           ...state,
           bufferHealth: await getBufferHealth(),
           eloRatings: await getDisplayedEloRatings(state.game),
+          importProgress: await getImportProgress(),
         }
       : state;
   return NextResponse.json(response, {

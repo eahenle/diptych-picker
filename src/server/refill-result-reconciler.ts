@@ -17,6 +17,7 @@ import { createCandidateRating } from "./game-comparison";
 import { validRefillWork, withoutRefillRecord } from "./game-refill";
 import type { AssetStore } from "./providers";
 import type { GameRepository } from "./repository";
+import type { LockedStateContext } from "./state-lock-coordinator";
 
 interface RefillObservation {
   record: RefillJobRecord;
@@ -36,6 +37,7 @@ interface RefillResultReconcilerOptions {
   completePreparedSelection: (
     game: GameState,
     challengers: ChallengerState,
+    lockContext?: LockedStateContext,
   ) => Promise<{ game: GameState; challengers: ChallengerState }>;
   removeDisplayedCandidatesFromReady: (
     game: GameState,
@@ -49,6 +51,7 @@ export class RefillResultReconciler {
   async reconcile(
     initialGame: GameState,
     initialChallengers: ChallengerState,
+    lockContext?: LockedStateContext,
   ): Promise<{ game: GameState; challengers: ChallengerState }> {
     let game = initialGame;
     let challengers = initialChallengers;
@@ -79,6 +82,7 @@ export class RefillResultReconciler {
         game,
         challengers,
         observation,
+        lockContext,
       );
       game = outcome.game;
       challengers = outcome.challengers;
@@ -90,6 +94,7 @@ export class RefillResultReconciler {
     game: GameState,
     challengers: ChallengerState,
     observation: RefillObservation,
+    lockContext?: LockedStateContext,
   ): Promise<{ game: GameState; challengers: ChallengerState }> {
     const { record, work, result } = observation;
     const expected = record.expectedJob;
@@ -187,6 +192,7 @@ export class RefillResultReconciler {
       const replayed = await this.options.completePreparedSelection(
         game,
         challengers,
+        lockContext,
       );
       game = replayed.game;
       challengers = await this.options.removeDisplayedCandidatesFromReady(
@@ -249,6 +255,7 @@ export class RefillResultReconciler {
     const replayed = await this.options.completePreparedSelection(
       game,
       applied,
+      lockContext,
     );
     game = replayed.game;
     applied = replayed.challengers;

@@ -8,7 +8,9 @@ import type {
   GameStartState,
   GameState,
   PreferenceProfile,
+  Side,
 } from "@/domain/game";
+import type { ImportProgress } from "@/domain/import-progress";
 import {
   refillJobMatchesGenerationPreferences,
   summarizeBufferHealth,
@@ -37,6 +39,8 @@ import {
 import {
   MockAgentWorker,
   MockGenerationMailbox,
+  MockImportAnnotationMailbox,
+  MockInitialImportFillMailbox,
   MockLeaderboardProfileMailbox,
   MockPromptCardBlenderMailbox,
   MockPromptCardEditorMailbox,
@@ -44,8 +48,17 @@ import {
   MockSourceProfileMailbox,
 } from "./mock-agent";
 import { JsonGameRepository } from "./repository";
+import { JsonImportSessionRepository } from "./import-session-repository";
+import { JsonImportActivationIntentRepository } from "./import-activation-intent-repository";
+import { ImportActivationService } from "./import-activation-service";
+import { StateLockCoordinator } from "./state-lock-coordinator";
+import { normalizeImportedCandidate } from "./import-asset-service";
+import {
+  ImportSessionService,
+  type ManualImportAnnotationInput,
+} from "./import-session-service";
 import { challengerConfig } from "./challenger-config";
-import { effectiveGameRules } from "./game-rules";
+import { configuredGameRules, effectiveGameRules } from "./game-rules";
 import { SourceProfileService } from "./source-profile-service";
 import { LeaderboardProfileService } from "./leaderboard-profile-service";
 import { PromptCardWriterService } from "./prompt-card-writer-service";
@@ -109,6 +122,13 @@ export const initialBootstrapRepository = new JsonInitialBootstrapRepository(
 );
 const mailboxDirectory = join(dataDirectory, "agent-mailbox");
 const fileGenerationMailbox = new FileGenerationMailbox(mailboxDirectory);
+export const importSessionRepository = new JsonImportSessionRepository(
+  join(dataDirectory, "import-session.json"),
+);
+export const importActivationIntentRepository =
+  new JsonImportActivationIntentRepository(
+    join(dataDirectory, "import-activation-intent.json"),
+  );
 const coProcGenerationChannels = (
   process.env.CO_PROC_GENERATION_CHANNELS ??
   process.env.CO_PROC_GENERATION_CHANNEL ??
@@ -198,6 +218,57 @@ export const generationMailbox =
 const sourceProfileMailbox = mockAgent
   ? new MockSourceProfileMailbox(fileGenerationMailbox, mockAgent)
   : fileGenerationMailbox;
+const importAnnotationMailbox = mockAgent
+  ? new MockImportAnnotationMailbox(fileGenerationMailbox, mockAgent)
+  : fileGenerationMailbox;
+const initialImportFillMailbox = mockAgent
+  ? new MockInitialImportFillMailbox(fileGenerationMailbox, mockAgent)
+  : fileGenerationMailbox;
+export const importSessionService = new ImportSessionService({
+  repository: importSessionRepository,
+  mailbox: importAnnotationMailbox,
+  initialFillMailbox: initialImportFillMailbox,
+  defaultPreferenceSeed: DEFAULT_PREFERENCE_SEED,
+  normalizeAsset: (contents) =>
+    normalizeImportedCandidate(
+      contents,
+      join(dataDirectory, "assets"),
+      runtimeExportDirectory,
+    ),
+  verifyAsset: (asset) => assetStore.verifyImportedAsset(asset),
+  verifyGeneratedAsset: (asset) => assetStore.verifyExistingPng(asset.filename),
+});
+const stateLockCoordinator = new StateLockCoordinator({
+  activationIntent: importActivationIntentRepository,
+  importSession: importSessionRepository,
+  game: repository,
+  challenger: challengerRepository,
+  initialBootstrap: initialBootstrapRepository,
+});
+export const importActivationService = new ImportActivationService({
+  coordinator: stateLockCoordinator,
+  intentRepository: importActivationIntentRepository,
+  importSessionRepository,
+  gameRepository: repository,
+  challengerRepository,
+  bootstrapRepository: initialBootstrapRepository,
+  preferenceSeed: DEFAULT_PREFERENCE_SEED,
+  gameRules: configuredGameRules(challengerConfig),
+  initialRating: challengerConfig.initialRating,
+  initialGenerationTurnaroundMs: challengerConfig.initialTurnaroundMs,
+  verifyCandidateAsset: async (candidate) => {
+    const filename = candidate.imageUrl.match(
+      /^\/api\/assets\/([^/]+\.png)$/,
+    )?.[1];
+    if (!filename) {
+      throw new Error(
+        `Invalid activated candidate asset URL ${candidate.imageUrl}`,
+      );
+    }
+    await assetStore.verifyExistingPng(filename);
+  },
+  archiveSupersededJob: (jobId) => fileGenerationMailbox.archive(jobId),
+});
 const sourceProfileService = new SourceProfileService({
   mailbox: sourceProfileMailbox,
   sourceDirectory: join(dataDirectory, "profile-sources"),
@@ -284,6 +355,10 @@ export const gameService = new GameService(
   promptCardEditorMailbox,
   promptCardBlenderMailbox,
   promptCardWriterService,
+  {
+    importSessionRepository,
+    stateLockCoordinator,
+  },
 );
 const forceGeneratedInitial =
   process.env.GENERATE_INITIAL_CANDIDATES === "true";
@@ -306,11 +381,14 @@ const gameSnapshotService = new GameSnapshotService({
   challengerRepository,
   bootstrapRepository: initialBootstrapRepository,
   mailbox: generationMailbox,
+  importSessionRepository,
+  stateLockCoordinator,
+  verifyImportedAsset: (asset) => assetStore.verifyImportedAsset(asset),
   verifyCandidateAsset: async (candidate, source) => {
-    if (source === "generated") {
+    if (source !== "curated") {
       const match = candidate.imageUrl.match(/^\/api\/assets\/([^/]+\.png)$/);
       if (!match)
-        throw new Error(`Invalid generated asset URL for ${candidate.id}`);
+        throw new Error(`Invalid local asset URL for ${candidate.id}`);
       await assetStore.verifyExistingPng(match[1]);
       return;
     }
@@ -352,6 +430,7 @@ export async function publishGameExport(contents: Buffer) {
 }
 
 export async function importGameSnapshot(value: unknown): Promise<GameState> {
+  await reconcileImportPipeline();
   await gameService.assertIdle();
   const imported = await gameSnapshotService.import(value);
   await gameService.ensureRefillCapacity();
@@ -359,10 +438,46 @@ export async function importGameSnapshot(value: unknown): Promise<GameState> {
 }
 
 export async function getOrCreateGame(): Promise<GameStartState> {
+  const importState = await reconcileImportPipeline();
+  if (importState?.status === "ready") {
+    const reconciled = await gameService.reconcile();
+    return { status: "ready", game: reconciled ?? importState.game };
+  }
   const start = await initialGameService.getOrCreate();
   if (start.status !== "ready") return start;
   const reconciled = await gameService.reconcile();
   return { status: "ready", game: reconciled ?? start.game };
+}
+
+export async function getGameStartupStatus(): Promise<{
+  canResume: boolean;
+  importInProgress: boolean;
+}> {
+  const [game, bootstrap, activationIntent, importSession] = await Promise.all([
+    repository.load(),
+    initialBootstrapRepository.load(),
+    importActivationIntentRepository.load(),
+    importSessionRepository.load(),
+  ]);
+  return {
+    canResume: Boolean(game || bootstrap || activationIntent),
+    importInProgress: Boolean(
+      importSession && importSession.status !== "completed",
+    ),
+  };
+}
+
+export async function selectGameRound(
+  selection:
+    | { winnerSide: Side; roundNumber: number }
+    | { outcome: "tie" | "both-lose"; roundNumber: number },
+): Promise<GameState> {
+  await reconcileImportPipeline();
+  return "outcome" in selection
+    ? selection.outcome === "tie"
+      ? gameService.tie(selection.roundNumber)
+      : gameService.bothLose(selection.roundNumber)
+    : gameService.select(selection.winnerSide, selection.roundNumber);
 }
 
 export async function getBufferHealth(): Promise<BufferHealth> {
@@ -395,12 +510,44 @@ export async function getBufferHealth(): Promise<BufferHealth> {
   );
 }
 
+export async function getImportProgress(): Promise<ImportProgress | null> {
+  const current = await importSessionRepository.load();
+  if (!current) return null;
+  const status = await importSessionService.status(current.id);
+  const session = await importSessionRepository.load();
+  if (!session) return null;
+  return {
+    status: status.status,
+    annotating: status.counts.annotating,
+    ready: status.counts.ready,
+    failed: status.counts.failed,
+    unserved: status.counts.ready,
+    activationDisplayServed: session.servedReceipts.filter(
+      ({ kind }) => kind === "activation-display",
+    ).length,
+    dequeueServed: session.servedReceipts.filter(
+      ({ kind }) => kind === "dequeue",
+    ).length,
+    initialFillPending: status.initialFill.pending,
+    initialFillFailed: status.initialFill.failed,
+    initialFillAttemptId:
+      status.initialFill.failedAttemptId ??
+      session.initialFillJobs.find(({ status: value }) => value === "pending")
+        ?.attemptId ??
+      null,
+    initialFillFailureMessage: status.initialFill.failureMessage,
+    activationTarget: 5,
+  };
+}
+
 export async function refreshBufferHealth(): Promise<BufferHealth> {
+  await reconcileImportPipeline();
   await gameService.reconcile();
   return getBufferHealth();
 }
 
 export async function getPoolLeaderboard() {
+  await reconcileImportPipeline();
   await gameService.reconcile();
   const game = await repository.load();
   return {
@@ -410,6 +557,7 @@ export async function getPoolLeaderboard() {
 }
 
 export async function getFavoriteGallery() {
+  await reconcileImportPipeline();
   await gameService.reconcile();
   return {
     entries: summarizeFavoriteGallery(await challengerRepository.load()),
@@ -417,6 +565,7 @@ export async function getFavoriteGallery() {
 }
 
 export async function getComparisonHistory() {
+  await reconcileImportPipeline();
   const game = await gameService.reconcile();
   const history = game?.history ?? [];
   return {
@@ -527,6 +676,12 @@ export async function requestPromptCardWriter(
   return gameService.requestPromptCardWriter(candidateIds);
 }
 
+export async function requestCustomPromptCardWriter(
+  input: import("./prompt-card-writer-service").PromptCardWriterCustomInput,
+): Promise<GameState> {
+  return gameService.requestCustomPromptCardWriter(input);
+}
+
 export async function updatePromptDeck(
   update:
     | { kind: "deck"; enabled: boolean }
@@ -557,4 +712,68 @@ export async function getSourceProfileStatus(jobId: string) {
 
 export async function acknowledgeSourceProfile(jobId: string) {
   await sourceProfileService.acknowledge(jobId);
+}
+
+export function createOrResumeImportSession() {
+  return importSessionService.createOrResume();
+}
+
+export async function getImportSessionStatus(sessionId?: string) {
+  const status = await importSessionService.status(sessionId);
+  await reconcileImportPipeline();
+  return importSessionService.status(status.sessionId);
+}
+
+export function approveImportItem(sessionId: string, contents: Uint8Array) {
+  return importSessionService.approve(sessionId, contents);
+}
+
+export async function sealImportSession(sessionId: string) {
+  await importSessionService.seal(sessionId);
+  await reconcileImportPipeline();
+  return importSessionService.status(sessionId);
+}
+
+export function pauseImportSession(sessionId: string) {
+  return importSessionService.pause(sessionId);
+}
+
+export function retryImportAnnotation(sessionId: string, itemId: string) {
+  return importSessionService.retry(sessionId, itemId);
+}
+
+export function manuallyAnnotateImportItem(
+  sessionId: string,
+  itemId: string,
+  input: ManualImportAnnotationInput,
+) {
+  return importSessionService.annotateManually(sessionId, itemId, input);
+}
+
+export function removeImportItem(sessionId: string, itemId: string) {
+  return importSessionService.remove(sessionId, itemId);
+}
+
+export function retryImportInitialFill(
+  sessionId: string,
+  failedAttemptId: string,
+  requestId: string,
+) {
+  return importSessionService.retryInitialFill(
+    sessionId,
+    failedAttemptId,
+    requestId,
+  );
+}
+
+export function abandonImportSession(sessionId: string) {
+  return importSessionService.abandon(sessionId);
+}
+
+async function reconcileImportPipeline(): Promise<GameStartState | null> {
+  const session = await importSessionRepository.load();
+  if (session && session.status !== "completed") {
+    await importSessionService.status(session.id);
+  }
+  return importActivationService.reconcile();
 }

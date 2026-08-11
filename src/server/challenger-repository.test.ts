@@ -96,6 +96,7 @@ const populatedState: ChallengerState = {
   leaderboardVisualProfile: null,
   leaderboardProfileAttemptedFingerprint: null,
   pendingComparison: null,
+  preparedDequeues: [],
   pendingSelectionBaseline: null,
   ratings: [
     {

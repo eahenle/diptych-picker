@@ -1,5 +1,20 @@
 # User guide
 
+## Choose how to start
+
+Every browser load opens a startup chooser before the game is created or
+resumed:
+
+- **Resume** continues the durable current game or its initial comparison. It
+  is disabled when there is nothing to resume.
+- **Load** validates and restores a saved game.
+- **Initialize** starts a clean game from the configured defaults.
+- **Import** starts or continues an image-pool import. An unfinished import is
+  called out in the chooser.
+
+The availability check is read-only. Reloading the page does not initialize a
+new game until one of these actions succeeds.
+
 ## The comparison loop
 
 Each round shows exactly two independent images. Choose the stronger image:
@@ -37,6 +52,36 @@ If the queue empties, the exact winner remains visible. After the fallback
 delay, the game can draw from the reusable local pool. Once the configured
 consecutive fallback limit is reached, the losing side waits for generated
 capacity instead of cycling indefinitely.
+
+### Start from an imported image pool
+
+Choose **Import** at startup or **New game → Import images** during play to build
+a clean game from your own still PNG, JPEG, or WebP files. Each source may be up
+to 4096 pixels per side. Review every image separately: crop it to fill the
+square or fit the full rotated image against a chosen background, then select
+**Approve image**. There is no bulk approval.
+
+Only the approved 1024×1024 PNG is uploaded to the local server. The original
+file and decoded browser image remain client-only. While any browser input is
+unapproved, Close, Pause, Escape, and backdrop dismissal are disabled; remove
+individual inputs or explicitly confirm **Abandon import** instead. After the
+last approval or removal seals the import, **Close / Pause** can hide the modal
+without stopping server-owned work.
+
+Approved images receive display-safe concept, description, and style metadata.
+If automatic annotation fails, retry it, annotate it manually, or remove the
+image. Manual annotation requires a concept, description, and one through eight
+unique style tags. A failed generated starter shortfall has a separate
+**Retry initial fill** action.
+
+The clean game activates once five starter candidates are ready. If fewer than
+five imported images remain, the app requests exactly the missing number of
+generated starters. Two candidates become round 1 and every remaining imported
+candidate enters the challenger stream ahead of ordinary ready or pool images.
+Generated refill stays paused until those admitted imports have been served or
+removed. Queue details report annotating, failed, and waiting imported supply;
+the comparison screen keeps one actionable notice for any unresolved imported
+image.
 
 ## Scores, pool, and history
 
@@ -126,14 +171,17 @@ You can:
 - activate cards and tune positive weights up to 100;
 - blend two active cards at a ratio from 0.1 through 0.9;
 - write one card from three to five distinct generated favorites.
+- draft one card from text guidance, one to five private seed images, or both.
 
 Weighted draws affect future jobs only. Card-backed winners gain 10% weight,
 and card-backed wins and rejections remain attributable.
 
 Four recent rejections of one card can request two repair alternatives. Repair,
-blend, and favorite-set writer results are approval-gated suggestions: accept
+blend, and source-driven writer results are approval-gated suggestions: accept
 one to create a new immutable child, or discard it. Source cards and source
-images never change.
+images never change. Uploaded writer images remain private analysis inputs and
+do not become candidate assets; accepted cards preserve candidate IDs and/or
+image and text digests as provenance.
 
 ## Game rules
 
@@ -160,9 +208,9 @@ content-addressed file under `output/artifacts/`.
 asset before replacing state. In-flight job IDs are excluded from exports;
 restored games create a fresh session and request missing capacity safely.
 
-**New game** can export first, load a prior save, or start fresh. Starting fresh
-clears the current round, history, and preference profile while preserving
-learned ratings and immutable images.
+**New game** can export first, load a prior save, import an image pool, or start
+fresh. Starting fresh clears the current round, history, and preference profile
+while preserving learned ratings and immutable images.
 
 ## Moderation and operational failures
 

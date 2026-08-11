@@ -139,6 +139,39 @@ export function usePromptDeck({ commitGame }: UsePromptDeckOptions) {
     [commitGame],
   );
 
+  const writeCustomPromptCard = useCallback(
+    async (input: {
+      guidance: string;
+      images: readonly File[];
+    }): Promise<boolean> => {
+      setSaving(true);
+      setError(null);
+      try {
+        const form = new FormData();
+        if (input.guidance.trim()) form.set("guidance", input.guidance.trim());
+        for (const image of input.images) form.append("images", image);
+        const state = await readJson<GameState>(
+          await fetch("/api/game/preferences/deck/write/custom", {
+            method: "POST",
+            body: form,
+          }),
+        );
+        commitGame(state);
+        return true;
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Could not draft a prompt card from those sources",
+        );
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [commitGame],
+  );
+
   const clearError = useCallback(() => setError(null), []);
 
   return {
@@ -148,6 +181,7 @@ export function usePromptDeck({ commitGame }: UsePromptDeckOptions) {
     clearError,
     createPromptCard,
     updatePromptDeck,
+    writeCustomPromptCard,
     writePromptCard,
   };
 }
