@@ -1,9 +1,14 @@
-import type { ChallengerState } from "@/domain/challenger-state";
+import type {
+  ChallengerState,
+  LeaderboardVisualProfile,
+} from "@/domain/challenger-state";
 import {
   applyWinnerPreferenceRevision,
   composePreferenceSeed,
+  preferenceAdaptationStrength,
   preferenceProfileFromSeed,
   recordRejectedPreferenceEvidence,
+  type Candidate,
   type GameState,
   type PreferenceProfile,
   type PreferenceProfileSnapshot,
@@ -17,6 +22,7 @@ export interface AdaptivePreferenceResult {
 export function applyAdaptivePreferences(
   game: GameState,
   challengers: ChallengerState,
+  leaderboardVisualProfile: LeaderboardVisualProfile | null = null,
 ): AdaptivePreferenceResult {
   const selection = game.history.at(-1);
   const profile = game.preferenceProfile;
@@ -49,10 +55,17 @@ export function applyAdaptivePreferences(
     const rejected = challengers.ratings.find(
       ({ candidate }) => candidate.id === selection.loserId,
     );
-    nextProfile = winner
+    const revisionCandidate = winner
+      ? candidateWithUnfetteredLeaderboardRevision(
+          winner.candidate,
+          profile,
+          leaderboardVisualProfile,
+        )
+      : null;
+    nextProfile = revisionCandidate
       ? applyWinnerPreferenceRevision(
           profile,
-          winner.candidate,
+          revisionCandidate,
           game.history.length,
         )
       : profile;
@@ -93,6 +106,34 @@ export function applyAdaptivePreferences(
         ? challengers
         : { ...challengers, ready: [] },
   };
+}
+
+function candidateWithUnfetteredLeaderboardRevision(
+  winner: Candidate,
+  profile: PreferenceProfile,
+  leaderboardVisualProfile: LeaderboardVisualProfile | null,
+): Candidate {
+  if (
+    winner.preferenceRevision ||
+    preferenceAdaptationStrength(profile) !== "unfettered" ||
+    !leaderboardVisualProfile
+  ) {
+    return winner;
+  }
+  const leaderboardRevision = leaderboardVisualProfile.profile;
+  return {
+    ...winner,
+    preferenceRevision: {
+      ...leaderboardRevision,
+      contentLevel: profile.contentLevel,
+      avoid: mergeAvoidGuidance(profile.avoid, leaderboardRevision.avoid),
+    },
+  };
+}
+
+function mergeAvoidGuidance(explicit: string, inferred: string): string {
+  const values = [explicit.trim(), inferred.trim()].filter(Boolean);
+  return [...new Set(values)].join(", ").slice(0, 800);
 }
 
 export function appendPreferenceRevision(

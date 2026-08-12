@@ -225,7 +225,11 @@ export class GameSelectionService {
         selectedAt,
         "Selected comparison winner",
       );
-      const adapted = applyAdaptivePreferences(nextGame, nextChallengers);
+      const adapted = applyAdaptivePreferences(
+        nextGame,
+        nextChallengers,
+        nextChallengers.leaderboardVisualProfile ?? null,
+      );
       nextGame = adapted.game;
       nextChallengers = adapted.challengers;
       const capacity = this.options.refillCapacityService.plan(

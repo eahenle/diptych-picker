@@ -162,6 +162,80 @@ describe("applyAdaptivePreferences", () => {
     expect(result.challengers.ready).toEqual([]);
   });
 
+  it("uses validated leaderboard guidance when an Unfettered winner has no revision", () => {
+    const current = game(selectionHistory());
+    current.round.leftCandidate = candidate("winner");
+    current.preferenceProfile = {
+      ...current.preferenceProfile!,
+      contentLevel: "adult-allowed",
+      avoid: "preserve this explicit exclusion",
+    };
+    const state = challengers([
+      rating(current.round.leftCandidate, "imported"),
+      rating(current.round.rightCandidate),
+    ]);
+
+    const result = applyAdaptivePreferences(current, state, {
+      fingerprint: "a".repeat(64),
+      sourceCandidateIds: ["leader-1", "leader-2"],
+      profile: {
+        themes: "Layered nocturnal figures in reflective architectural space",
+        inspiration: "Overlapping silhouettes and restrained edge light",
+        mediaTypes: "painterly mixed-media illustration",
+        visualStyle: "low-key, cinematic, tactile, and subtly surreal",
+        colorPalette: "deep indigo, charcoal, teal, and sparse amber",
+        contentLevel: "family-friendly",
+        avoid: "readable text, logos, and exact copies",
+      },
+      reasoningSummary: "Shared qualities across recent pool leaders.",
+      analyzedAt: NOW,
+    });
+
+    expect(result.game.preferenceProfile).toMatchObject({
+      themes: "Layered nocturnal figures in reflective architectural space",
+      contentLevel: "adult-allowed",
+      adaptationLastDecision: 5,
+      adaptationSourceWinnerIds: ["winner"],
+      adaptationSourceRejectedIds: ["loser"],
+    });
+    expect(result.game.preferenceProfile?.avoid).toContain(
+      "preserve this explicit exclusion",
+    );
+    expect(result.game.preferenceProfile?.avoid).toContain(
+      "readable text, logos, and exact copies",
+    );
+    expect(result.challengers.ready).toEqual([]);
+  });
+
+  it("does not use leaderboard-only guidance for Guided adaptation", () => {
+    const current = game(selectionHistory(15));
+    current.round.leftCandidate = candidate("winner");
+    current.preferenceProfile = {
+      ...current.preferenceProfile!,
+      adaptationStrength: "guided",
+    };
+    const state = challengers([
+      rating(current.round.leftCandidate, "imported"),
+      rating(current.round.rightCandidate),
+    ]);
+
+    const result = applyAdaptivePreferences(current, state, {
+      fingerprint: "a".repeat(64),
+      sourceCandidateIds: ["leader-1", "leader-2"],
+      profile: revision,
+      reasoningSummary: "Shared qualities across recent pool leaders.",
+      analyzedAt: NOW,
+    });
+
+    expect(result.game.preferenceProfile).toMatchObject({
+      themes: "Industrial, gothic, natural, and surprising",
+      adaptationStrength: "guided",
+      adaptationLastDecision: 0,
+      adaptationSourceWinnerIds: [],
+      adaptationSourceRejectedIds: ["loser"],
+    });
+  });
+
   it("records generated rejection evidence without flushing capacity", () => {
     const current = game(selectionHistory(1));
     const state = challengers([

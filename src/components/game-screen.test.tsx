@@ -1904,7 +1904,7 @@ describe("GameScreen challenger reconciliation", () => {
     });
     expect(cadence).toHaveTextContent("Rewrite checkpoint ready");
     expect(cadence).toHaveTextContent(
-      "The next winning generated candidate may update this profile.",
+      "The next winning comparison may update this profile from validated leaderboard evidence.",
     );
     expect(
       screen.getByRole("progressbar", {

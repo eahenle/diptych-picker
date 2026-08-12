@@ -432,7 +432,7 @@ export function PreferenceProfileModal({
             />
             <small>
               {adaptationProgress.due
-                ? "The next winning generated candidate may update this profile."
+                ? "The next winning comparison may update this profile from validated leaderboard evidence."
                 : `${adaptationProgress.completed} of ${adaptationProgress.interval} rounds completed since the last rewrite checkpoint.`}
             </small>
           </div>
