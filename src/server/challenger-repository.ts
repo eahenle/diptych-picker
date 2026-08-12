@@ -159,7 +159,7 @@ const leaderboardPreferenceEvidenceSchema = z
             rating: z.number().int(),
             wins: z.number().int().nonnegative(),
             losses: z.number().int().nonnegative(),
-            source: z.enum(["curated", "generated"]),
+            source: z.enum(["curated", "generated", "imported"]),
             favorite: z.boolean(),
           })
           .strict(),
@@ -235,7 +235,7 @@ const leaderboardProfileJobSnapshotSchema = z
             wins: z.number().int().nonnegative(),
             losses: z.number().int().nonnegative(),
             favorite: z.boolean(),
-            source: z.enum(["curated", "generated"]),
+            source: z.enum(["curated", "generated", "imported"]),
             concept: z.string().trim().min(1).max(240),
             style: z.array(z.string().trim().min(1).max(80)).max(4),
             sourceImage: profileSourceImageSchema,

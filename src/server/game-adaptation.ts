@@ -58,6 +58,7 @@ export function applyAdaptivePreferences(
     const revisionCandidate = winner
       ? candidateWithUnfetteredLeaderboardRevision(
           winner.candidate,
+          game,
           profile,
           leaderboardVisualProfile,
         )
@@ -110,6 +111,7 @@ export function applyAdaptivePreferences(
 
 function candidateWithUnfetteredLeaderboardRevision(
   winner: Candidate,
+  game: GameState,
   profile: PreferenceProfile,
   leaderboardVisualProfile: LeaderboardVisualProfile | null,
 ): Candidate {
@@ -126,14 +128,20 @@ function candidateWithUnfetteredLeaderboardRevision(
     preferenceRevision: {
       ...leaderboardRevision,
       contentLevel: profile.contentLevel,
-      avoid: mergeAvoidGuidance(profile.avoid, leaderboardRevision.avoid),
+      avoid: latestExplicitAvoidGuidance(game, profile),
     },
   };
 }
 
-function mergeAvoidGuidance(explicit: string, inferred: string): string {
-  const values = [explicit.trim(), inferred.trim()].filter(Boolean);
-  return [...new Set(values)].join(", ").slice(0, 800);
+function latestExplicitAvoidGuidance(
+  game: GameState,
+  profile: PreferenceProfile,
+): string {
+  return (
+    game.preferenceRevisions
+      ?.findLast(({ source }) => source !== "adaptive")
+      ?.profile.avoid.trim() ?? profile.avoid.trim()
+  );
 }
 
 export function appendPreferenceRevision(

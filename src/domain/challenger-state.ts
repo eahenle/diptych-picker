@@ -82,7 +82,7 @@ export interface LeaderboardProfileSourceSnapshot {
   wins: number;
   losses: number;
   favorite: boolean;
-  source: ReusableCandidateSource;
+  source: CandidateRating["source"];
   concept: string;
   style: string[];
   sourceImage: ProfileSourceImageSnapshot;
@@ -232,7 +232,7 @@ export interface PreferenceLeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
-  source: ReusableCandidateSource;
+  source: CandidateRating["source"];
   favorite: boolean;
 }
 
@@ -493,9 +493,7 @@ export function summarizeLeaderboardPreferenceEvidence(
   state: ChallengerState | null,
   limit = 12,
 ): LeaderboardPreferenceEvidence {
-  const leaderboard = summarizePoolLeaderboard(state)
-    .filter(isReusablePoolLeaderboardEntry)
-    .map((entry, index) => ({ ...entry, rank: index + 1 }));
+  const leaderboard = summarizePoolLeaderboard(state);
   const boundedLimit = Math.max(1, Math.min(12, Math.floor(limit)));
   const topCount = Math.ceil(boundedLimit / 2);
   const bottomCount = boundedLimit - topCount;

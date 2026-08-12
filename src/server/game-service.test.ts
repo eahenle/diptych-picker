@@ -817,6 +817,16 @@ describe("GameService challenger buffer", () => {
         leftCandidate: { ...base.round.leftCandidate, promptCardId: "card-1" },
       },
     });
+    game.preferenceRevisions = [
+      {
+        createdAt: NOW,
+        source: "manual",
+        profile: {
+          ...game.preferenceProfile!,
+          avoid: "preserve explicit exclusions",
+        },
+      },
+    ];
     const context = serviceFor({
       game,
       createId: ids("card-1", "refill-1"),
@@ -1091,11 +1101,8 @@ describe("GameService challenger buffer", () => {
       adaptationLastDecision: 5,
       adaptationSourceWinnerIds: ["imported-winner"],
     });
-    expect(updated.preferenceProfile?.avoid).toContain(
+    expect(updated.preferenceProfile?.avoid).toBe(
       "preserve explicit exclusions",
-    );
-    expect(updated.preferenceProfile?.avoid).toContain(
-      "readable text, logos, and exact copies",
     );
   });
 

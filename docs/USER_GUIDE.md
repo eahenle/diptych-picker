@@ -137,10 +137,12 @@ jobs drain safely, and requests replacement capacity with the new brief.
 
 Adaptive revisions remain winner-gated. Aggregate leaderboard evidence—rank,
 Elo, repeated outcomes, favorites, and a cached synthesis of the recent top
-cohort—outweighs any single recent decision. When an Unfettered checkpoint is
+established cohort, including imported seed leaders—outweighs any single recent
+decision. When an Unfettered checkpoint is
 due and the comparison winner has no model-authored revision of its own (for
 example, an imported seed), the latest validated leaderboard synthesis supplies
-the rewrite. The saved content range and explicit avoid guidance remain intact.
+the rewrite. The saved content range and latest manually saved avoid guidance
+remain intact instead of accumulating model-authored exclusions.
 
 ### Analyze an image
 

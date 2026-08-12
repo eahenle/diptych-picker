@@ -829,7 +829,7 @@ describe("challenger state", () => {
     expect(evidence.entries).toHaveLength(6);
   });
 
-  it("reranks reusable evidence after excluding an imported leader", () => {
+  it("includes imported leaders in adaptive evidence", () => {
     const evidence = summarizeLeaderboardPreferenceEvidence(
       state({
         ratings: [
@@ -845,10 +845,11 @@ describe("challenger state", () => {
     );
 
     expect(evidence).toMatchObject({
-      poolSize: 2,
+      poolSize: 3,
       entries: [
-        { rank: 1, candidateId: "reusable-first" },
-        { rank: 2, candidateId: "reusable-second" },
+        { rank: 1, candidateId: "imported", source: "imported" },
+        { rank: 2, candidateId: "reusable-first" },
+        { rank: 3, candidateId: "reusable-second" },
       ],
     });
   });
