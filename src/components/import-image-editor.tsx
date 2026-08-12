@@ -14,32 +14,26 @@ interface ImportImageEditorProps {
   position: number;
   total: number;
   busy?: boolean;
+  edit: ImportEditState;
+  onEditChange: (edit: ImportEditState) => void;
   onApprove: (normalizedPng: Blob) => Promise<void> | void;
   onRemove: () => void;
   onPrevious: () => void;
   onNext: () => void;
 }
 
-const initialEdit: ImportEditState = {
-  mode: "crop",
-  rotation: 0,
-  zoom: 1,
-  panX: 0,
-  panY: 0,
-  background: "#111111",
-};
-
 export function ImportImageEditor({
   source,
   position,
   total,
   busy = false,
+  edit,
+  onEditChange,
   onApprove,
   onRemove,
   onPrevious,
   onNext,
 }: ImportImageEditorProps) {
-  const [edit, setEdit] = useState<ImportEditState>(initialEdit);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previewRef = useRef<HTMLCanvasElement | null>(null);
@@ -75,14 +69,14 @@ export function ImportImageEditor({
   const update = <K extends keyof ImportEditState>(
     key: K,
     value: ImportEditState[K],
-  ) => setEdit((current) => ({ ...current, [key]: value }));
+  ) => onEditChange({ ...edit, [key]: value });
 
   const setMode = (mode: ImportEditState["mode"]) => {
-    setEdit((current) => ({
-      ...current,
+    onEditChange({
+      ...edit,
       mode,
       ...(mode === "fit" ? { zoom: 1, panX: 0, panY: 0 } : {}),
-    }));
+    });
   };
 
   const approve = async () => {

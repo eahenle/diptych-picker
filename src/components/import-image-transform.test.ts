@@ -60,4 +60,27 @@ describe("import image transforms", () => {
     expect(Math.abs(transform.panX)).toBeLessThan(2_000);
     expect(Math.abs(transform.panY)).toBeLessThan(2_000);
   });
+
+  it("keeps crop position proportional between preview and saved output", () => {
+    const edit = {
+      rotation: 0,
+      zoom: 2,
+      panX: 256,
+      panY: -128,
+    };
+    const preview = cropTransform(
+      { width: 1200, height: 800 },
+      { width: 512, height: 512 },
+      edit,
+    );
+    const saved = cropTransform(
+      { width: 1200, height: 800 },
+      { width: 1024, height: 1024 },
+      edit,
+    );
+
+    expect(saved.scale).toBeCloseTo(preview.scale * 2);
+    expect(saved.panX).toBeCloseTo(preview.panX * 2);
+    expect(saved.panY).toBeCloseTo(preview.panY * 2);
+  });
 });

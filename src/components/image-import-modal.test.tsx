@@ -61,6 +61,7 @@ function controller(overrides: Partial<Controller> = {}): Controller {
     selectFiles: vi.fn(async () => undefined),
     status: baseStatus,
     unresolved: false,
+    updateCurrentEdit: vi.fn(),
     ...overrides,
   };
 }

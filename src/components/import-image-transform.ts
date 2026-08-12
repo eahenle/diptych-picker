@@ -26,6 +26,17 @@ export interface ImportRenderTransform {
   rotatedHeight: number;
 }
 
+export function createInitialImportEditState(): ImportEditState {
+  return {
+    mode: "crop",
+    rotation: 0,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    background: "#111111",
+  };
+}
+
 export function rotatedBounds(
   source: ImportImageSize,
   rotation: number,
@@ -72,11 +83,13 @@ export function cropTransform(
     0,
     (bounds.height * scale - viewport.height) / 2,
   );
+  const scaledPanX = edit.panX * (viewport.width / NORMALIZED_IMPORT_SIZE);
+  const scaledPanY = edit.panY * (viewport.height / NORMALIZED_IMPORT_SIZE);
   return {
     scale,
     rotationRadians: radians,
-    panX: clamp(edit.panX, -maximumPanX, maximumPanX),
-    panY: clamp(edit.panY, -maximumPanY, maximumPanY),
+    panX: clamp(scaledPanX, -maximumPanX, maximumPanX),
+    panY: clamp(scaledPanY, -maximumPanY, maximumPanY),
     rotatedWidth: bounds.width * scale,
     rotatedHeight: bounds.height * scale,
   };

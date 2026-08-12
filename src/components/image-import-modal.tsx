@@ -107,6 +107,8 @@ export function ImageImportModal({ controller }: ImageImportModalProps) {
                     position={controller.currentIndex + 1}
                     total={controller.localInputs.length}
                     busy={controller.busy}
+                    edit={controller.currentInput.edit}
+                    onEditChange={controller.updateCurrentEdit}
                     onApprove={controller.approveCurrent}
                     onRemove={() => void controller.removeCurrent()}
                     onPrevious={controller.previous}

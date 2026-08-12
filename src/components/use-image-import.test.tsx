@@ -229,6 +229,50 @@ describe("useImageImport", () => {
     expect(result.current.currentInput?.error).toMatch(/already exists/i);
   });
 
+  it("preserves independent crop edits while navigating local images", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json(status())),
+    );
+    const { result } = renderImport();
+
+    await act(() => result.current.begin());
+    await act(() =>
+      result.current.selectFiles([
+        new File(["first"], "first.png", { type: "image/png" }),
+        new File(["second"], "second.png", { type: "image/png" }),
+      ]),
+    );
+    act(() =>
+      result.current.updateCurrentEdit({
+        ...result.current.currentInput!.edit,
+        zoom: 2,
+        panX: 192,
+      }),
+    );
+    act(() => result.current.next());
+    act(() =>
+      result.current.updateCurrentEdit({
+        ...result.current.currentInput!.edit,
+        rotation: 37,
+      }),
+    );
+    act(() => result.current.previous());
+
+    expect(result.current.currentInput?.file.name).toBe("first.png");
+    expect(result.current.currentInput?.edit).toMatchObject({
+      zoom: 2,
+      panX: 192,
+      rotation: 0,
+    });
+    act(() => result.current.next());
+    expect(result.current.currentInput?.edit).toMatchObject({
+      zoom: 1,
+      panX: 0,
+      rotation: 37,
+    });
+  });
+
   it("warns before unloading only while browser-only inputs are unresolved", async () => {
     const editing = status();
     const preparing = status({

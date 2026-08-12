@@ -15,6 +15,10 @@ import {
   inspectImportFile,
   type ImportSource,
 } from "./import-image-file";
+import {
+  createInitialImportEditState,
+  type ImportEditState,
+} from "./import-image-transform";
 import { preloadChangedAssets } from "./image-preload";
 
 const IMPORT_POLL_INTERVAL_MS = 500;
@@ -67,6 +71,7 @@ export interface LocalImportInput {
   source: ImportSource | null;
   validating: boolean;
   error: string | null;
+  edit: ImportEditState;
 }
 
 export interface ManualImportAnnotation {
@@ -325,6 +330,7 @@ export function useImageImport({
         source: null,
         validating: true,
         error: null,
+        edit: createInitialImportEditState(),
       }));
       const startIndex = localInputsRef.current.length;
       replaceInputs([...localInputsRef.current, ...additions]);
@@ -410,6 +416,19 @@ export function useImageImport({
     const input = localInputsRef.current[currentIndex];
     if (input) await finishLocalInput(input.id);
   }, [currentIndex, finishLocalInput]);
+
+  const updateCurrentEdit = useCallback(
+    (edit: ImportEditState) => {
+      const input = localInputsRef.current[currentIndex];
+      if (!input) return;
+      replaceInputs(
+        localInputsRef.current.map((entry) =>
+          entry.id === input.id ? { ...entry, edit } : entry,
+        ),
+      );
+    },
+    [currentIndex, replaceInputs],
+  );
 
   const mutateItem = useCallback(
     async (
@@ -639,5 +658,6 @@ export function useImageImport({
     selectFiles,
     status,
     unresolved,
+    updateCurrentEdit,
   };
 }
