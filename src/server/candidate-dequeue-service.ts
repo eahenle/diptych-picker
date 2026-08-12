@@ -11,6 +11,7 @@ import type { Candidate } from "@/domain/game";
 import {
   deriveDequeueOperationId,
   type DequeueServedImportReceipt,
+  type ImportItem,
   type ImportSession,
   type ImportSupplySnapshot,
 } from "@/domain/import-session";
@@ -100,6 +101,17 @@ export class CandidateDequeueService {
       throw new Error("Candidate dequeue import session is unavailable");
     }
     if (request.importSessionId === null) importSession = null;
+
+    if (importSession) {
+      const synchronized = synchronizeReadyImportQueue(
+        challengers,
+        importSession,
+      );
+      if (synchronized !== challengers) {
+        challengers = synchronized;
+        await this.options.challengerRepository.save(challengers);
+      }
+    }
 
     const preparedReplay = challengers.preparedDequeues?.find(
       ({ dequeueOperationId }) =>
@@ -322,6 +334,70 @@ export class CandidateDequeueService {
     }
     return completed;
   }
+}
+
+function synchronizeReadyImportQueue(
+  state: ChallengerState,
+  session: ImportSession,
+): ChallengerState {
+  const existingByItemId = new Map<string, BufferedCandidate>();
+  for (const entry of state.importQueue) {
+    if (entry.source !== "imported" || !entry.importItemId) {
+      throw new Error("Imported challenger queue contains invalid provenance");
+    }
+    if (existingByItemId.has(entry.importItemId)) {
+      throw new Error("Imported challenger queue contains a duplicate item");
+    }
+    const item = session.items.find(({ id }) => id === entry.importItemId);
+    if (item?.status === "ready" && item.candidateId !== entry.candidate.id) {
+      throw new Error(
+        "Imported challenger queue does not match ready import state",
+      );
+    }
+    existingByItemId.set(entry.importItemId, entry);
+  }
+
+  const importQueue = session.items
+    .filter(
+      (
+        item,
+      ): item is ImportItem & {
+        candidateId: string;
+        annotation: NonNullable<ImportItem["annotation"]>;
+      } =>
+        item.status === "ready" &&
+        item.candidateId !== null &&
+        item.annotation !== null,
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(left.readyAt ?? left.approvedAt) -
+          Date.parse(right.readyAt ?? right.approvedAt) ||
+        left.id.localeCompare(right.id),
+    )
+    .map((item) => {
+      const expected: BufferedCandidate = {
+        candidate: {
+          id: item.candidateId,
+          imageUrl: item.asset.url,
+          prompt: item.annotation.prompt,
+          concept: item.annotation.concept,
+          style: item.annotation.style,
+          createdAt: item.readyAt ?? item.approvedAt,
+          winCount: 0,
+          reasoningSummary: item.annotation.reasoningSummary,
+        },
+        source: "imported",
+        importItemId: item.id,
+        pinnedWinnerId: null,
+        enqueuedAt: item.readyAt ?? item.approvedAt,
+      };
+      return expected;
+    });
+
+  return isDeepStrictEqual(importQueue, state.importQueue)
+    ? state
+    : { ...state, importQueue };
 }
 
 function assertPreparedReplayMatches(

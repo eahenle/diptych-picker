@@ -35,6 +35,7 @@ function candidate(id: string, character = "a"): Candidate {
     style: ["studio photography"],
     createdAt: timestamp,
     winCount: 0,
+    reasoningSummary: "Visible transferable composition.",
   };
 }
 
@@ -191,6 +192,42 @@ function harness(
 }
 
 describe("CandidateDequeueService", () => {
+  it("queues imported candidates that become ready after activation", async () => {
+    const first = candidate("imported-late-1", "1");
+    const second = candidate("imported-late-2", "2");
+    const imports = new MemoryImportSessionRepository(
+      importSession([first, second]),
+    );
+    const challengers = new MemoryChallengerRepository(
+      challengerState({
+        consecutiveFallbackDraws: 10,
+        nextFallbackAt: timestamp,
+      }),
+    );
+    const { dequeue } = harness(challengers, imports);
+
+    const result = await dequeue(request(receipt()));
+
+    expect(result).toMatchObject({
+      candidate: { id: "imported-late-1" },
+      provenance: "imported",
+      importItemId: "import-item-1",
+      importSupply: {
+        readyUnserved: 1,
+        servedImportedItemCount: 1,
+      },
+    });
+    expect(result.challengers.importQueue).toMatchObject([
+      {
+        candidate: { id: "imported-late-2" },
+        source: "imported",
+        importItemId: "import-item-2",
+      },
+    ]);
+    expect(result.challengers.consecutiveFallbackDraws).toBe(0);
+    expect(result.challengers.nextFallbackAt).toBeNull();
+  });
+
   it("serves imported candidates first and replays one receipt without skipping", async () => {
     const first = candidate("imported-1", "1");
     const second = candidate("imported-2", "2");

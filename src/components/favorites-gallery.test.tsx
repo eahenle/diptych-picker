@@ -103,6 +103,17 @@ describe("FavoritesGallery", () => {
     );
   });
 
+  it("labels user-provided favorites as imported", () => {
+    renderGallery({
+      entries: [{ ...entries[0], source: "imported" }],
+    });
+
+    expect(screen.getByText(/6W–3L · Imported · Archived/)).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Select for card" }),
+    ).not.toBeInTheDocument();
+  });
+
   it.each([
     [{ loading: true }, "Gathering favorites…"],
     [{ error: "Favorites failed" }, "Favorites failed"],

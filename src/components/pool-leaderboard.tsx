@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- Leaderboard thumbnails use immutable local candidate assets. */
 
 import type { PoolLeaderboardEntry } from "@/domain/challenger-state";
+import { candidateSourceLabel } from "./candidate-source-label";
 import { ModalShell } from "./modal-shell";
 import modalStyles from "./game-modal.module.css";
 import styles from "./pool-leaderboard.module.css";
@@ -87,9 +88,7 @@ export function PoolLeaderboard({
                     <small>
                       {entry.candidate.style.slice(0, 3).join(" · ")}
                     </small>
-                    <em>
-                      {entry.source === "curated" ? "Curated" : "Generated"}
-                    </em>
+                    <em>{candidateSourceLabel(entry.source)}</em>
                   </span>
                   <span
                     className={styles.score}

@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import type { FavoriteGalleryEntry } from "@/domain/challenger-state";
+import { candidateSourceLabel } from "./candidate-source-label";
 import { ModalShell } from "./modal-shell";
 import modalStyles from "./game-modal.module.css";
 import styles from "./favorites-gallery.module.css";
@@ -135,7 +136,7 @@ export function FavoritesGallery({
                     <strong>{entry.rating} Elo</strong>
                     <small>
                       {entry.wins}W–{entry.losses}L ·{" "}
-                      {entry.source === "curated" ? "Curated" : "Generated"} ·{" "}
+                      {candidateSourceLabel(entry.source)} ·{" "}
                       {entry.poolMember ? "In pool" : "Archived"}
                     </small>
                   </span>
