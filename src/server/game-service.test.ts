@@ -1021,6 +1021,84 @@ describe("GameService challenger buffer", () => {
     ).toEqual([updated.preferenceSeed, updated.preferenceSeed]);
   });
 
+  it("adopts validated leaderboard guidance when an imported winner reaches an Unfettered checkpoint", async () => {
+    const baseProfile = preferenceProfileFromSeed(
+      "industrial, gothic, natural, and surprising",
+    );
+    const importedWinner = candidate("imported-winner");
+    const game = gameState({
+      preferenceProfile: {
+        ...baseProfile,
+        adaptationMode: "adaptive",
+        adaptationStrength: "unfettered",
+        adaptationLastDecision: 0,
+        contentLevel: "adult-allowed",
+        avoid: "preserve explicit exclusions",
+      },
+      history: Array.from({ length: 4 }, (_, index) => ({
+        winnerId: `prior-winner-${index}`,
+        loserId: `prior-loser-${index}`,
+        winnerPrompt: `prior winner prompt ${index}`,
+        loserPrompt: `prior loser prompt ${index}`,
+        winnerConcept: `prior winner concept ${index}`,
+        loserConcept: `prior loser concept ${index}`,
+        selectedAt: `2026-07-1${index + 1}T00:00:00.000Z`,
+      })),
+      round: {
+        ...gameState().round,
+        roundNumber: 5,
+        leftCandidate: importedWinner,
+      },
+    });
+    const challengers = challengerState(game);
+    challengers.ratings = challengers.ratings.map((item) =>
+      item.candidate.id === importedWinner.id
+        ? {
+            ...item,
+            source: "imported",
+            importItemId: "import-item-winner",
+          }
+        : item,
+    );
+    challengers.leaderboardVisualProfile = {
+      fingerprint: "c".repeat(64),
+      sourceCandidateIds: ["leader-1", "leader-2"],
+      profile: {
+        themes: "Layered nocturnal figures in reflective architectural space",
+        inspiration: "Overlapping silhouettes and restrained edge light",
+        mediaTypes: "painterly mixed-media illustration",
+        visualStyle: "low-key, cinematic, tactile, and subtly surreal",
+        colorPalette: "deep indigo, charcoal, teal, and sparse amber",
+        contentLevel: "family-friendly",
+        avoid: "readable text, logos, and exact copies",
+      },
+      reasoningSummary: "Shared qualities across recent pool leaders.",
+      analyzedAt: NOW,
+    };
+    const context = serviceFor({
+      game,
+      challengers,
+      bufferTarget: 2,
+      createId: ids("import-adaptive-1", "import-adaptive-2"),
+    });
+
+    const updated = await context.service.select("left", 5);
+
+    expect(updated.preferenceProfile).toMatchObject({
+      themes: "Layered nocturnal figures in reflective architectural space",
+      contentLevel: "adult-allowed",
+      adaptationStrength: "unfettered",
+      adaptationLastDecision: 5,
+      adaptationSourceWinnerIds: ["imported-winner"],
+    });
+    expect(updated.preferenceProfile?.avoid).toContain(
+      "preserve explicit exclusions",
+    );
+    expect(updated.preferenceProfile?.avoid).toContain(
+      "readable text, logos, and exact copies",
+    );
+  });
+
   it("records a generated loser as negative adaptive evidence for future jobs", async () => {
     const baseProfile = preferenceProfileFromSeed(
       "industrial, gothic, natural, and surprising",

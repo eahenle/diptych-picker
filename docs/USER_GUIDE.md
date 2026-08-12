@@ -136,8 +136,11 @@ jobs drain safely, and requests replacement capacity with the new brief.
 - **Unfettered** permits broad, leaderboard-supported revisions every 5 rounds.
 
 Adaptive revisions remain winner-gated. Aggregate leaderboard evidence—rank,
-Elo, repeated outcomes, favorites, and a cached synthesis of the current top
-cohort—outweighs any single recent decision.
+Elo, repeated outcomes, favorites, and a cached synthesis of the recent top
+cohort—outweighs any single recent decision. When an Unfettered checkpoint is
+due and the comparison winner has no model-authored revision of its own (for
+example, an imported seed), the latest validated leaderboard synthesis supplies
+the rewrite. The saved content range and explicit avoid guidance remain intact.
 
 ### Analyze an image
 
