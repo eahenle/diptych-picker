@@ -11,6 +11,7 @@ import { FileGenerationMailbox } from "./agent-mailbox";
 import { LeaderboardProfileService } from "./leaderboard-profile-service";
 
 const roots: string[] = [];
+const NOW = "2026-07-20T20:01:00.000Z";
 
 afterEach(async () => {
   await Promise.all(
@@ -36,6 +37,14 @@ function rating(id: string, value: number): CandidateRating {
     importItemId: null,
     poolMember: true,
     lastServedAt: null,
+  };
+}
+
+function importedRating(id: string, value: number): CandidateRating {
+  return {
+    ...rating(id, value),
+    source: "imported",
+    importItemId: `import-item-${id}`,
   };
 }
 
@@ -118,6 +127,64 @@ describe("leaderboard profile service", () => {
 
     await service.enqueue(job);
     await expect(service.readWork(job.id)).resolves.toEqual(job);
+  });
+
+  it("uses established imported leaders and skips untested filler", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diptych-import-leaders-"));
+    roots.push(root);
+    const png = await sharp({
+      create: {
+        width: 48,
+        height: 48,
+        channels: 3,
+        background: "#243247",
+      },
+    })
+      .png()
+      .toBuffer();
+    const service = new LeaderboardProfileService({
+      mailbox: new FileGenerationMailbox(join(root, "agent-mailbox")),
+      sourceDirectory: join(root, "profile-sources"),
+      readCandidateImage: async () => ({
+        contents: png,
+        contentType: "image/png",
+      }),
+    });
+    const untested = rating("untested", 1300);
+    untested.wins = 0;
+    untested.losses = 0;
+
+    const request = service.desired(
+      state([
+        untested,
+        importedRating("imported-first", 1260),
+        importedRating("imported-second", 1240),
+        rating("generated-third", 1220),
+      ]),
+    );
+
+    expect(
+      request?.entries.map(({ candidate, source, rank }) => ({
+        id: candidate.id,
+        source,
+        rank,
+      })),
+    ).toEqual([
+      { id: "imported-first", source: "imported", rank: 2 },
+      { id: "imported-second", source: "imported", rank: 3 },
+      { id: "generated-third", source: "generated", rank: 4 },
+    ]);
+    const job = await service.prepare("import-leaders-job", NOW, request!);
+    expect(
+      job.sources.map(({ candidateId, source }) => ({
+        candidateId,
+        source,
+      })),
+    ).toEqual([
+      { candidateId: "imported-first", source: "imported" },
+      { candidateId: "imported-second", source: "imported" },
+      { candidateId: "generated-third", source: "generated" },
+    ]);
   });
 
   it("fingerprints ordered leader identity rather than routine Elo movement", () => {

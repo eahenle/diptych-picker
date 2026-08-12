@@ -168,8 +168,23 @@ describe("applyAdaptivePreferences", () => {
     current.preferenceProfile = {
       ...current.preferenceProfile!,
       contentLevel: "adult-allowed",
-      avoid: "preserve this explicit exclusion",
+      avoid: "stale inferred constraint, preserve this explicit exclusion",
     };
+    current.preferenceRevisions = [
+      {
+        createdAt: NOW,
+        source: "manual",
+        profile: {
+          ...current.preferenceProfile,
+          avoid: "preserve this explicit exclusion",
+        },
+      },
+      {
+        createdAt: NOW,
+        source: "adaptive",
+        profile: current.preferenceProfile,
+      },
+    ];
     const state = challengers([
       rating(current.round.leftCandidate, "imported"),
       rating(current.round.rightCandidate),
@@ -198,11 +213,8 @@ describe("applyAdaptivePreferences", () => {
       adaptationSourceWinnerIds: ["winner"],
       adaptationSourceRejectedIds: ["loser"],
     });
-    expect(result.game.preferenceProfile?.avoid).toContain(
+    expect(result.game.preferenceProfile?.avoid).toBe(
       "preserve this explicit exclusion",
-    );
-    expect(result.game.preferenceProfile?.avoid).toContain(
-      "readable text, logos, and exact copies",
     );
     expect(result.challengers.ready).toEqual([]);
   });

@@ -49,7 +49,7 @@ const expectedLeaderboardJob: LeaderboardProfileJob = {
     wins: 4 - rank,
     losses: rank,
     favorite: rank === 1,
-    source: "generated" as const,
+    source: rank === 1 ? ("imported" as const) : ("generated" as const),
     concept: `leader ${rank} concept`,
     style: ["cinematic"],
     sourceImage: {

@@ -124,6 +124,20 @@ describe("generationJobSchema", () => {
     };
 
     expect(generationJobSchema.parse(withEvidence)).toEqual(withEvidence);
+    expect(
+      generationJobSchema.parse({
+        ...withEvidence,
+        leaderboardEvidence: {
+          ...withEvidence.leaderboardEvidence,
+          entries: [
+            {
+              ...withEvidence.leaderboardEvidence!.entries[0],
+              source: "imported",
+            },
+          ],
+        },
+      }).leaderboardEvidence?.entries[0].source,
+    ).toBe("imported");
     expect(() =>
       generationJobSchema.parse({
         ...withEvidence,
@@ -590,6 +604,10 @@ describe("FileGenerationMailbox", () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);
     const analysisJob = leaderboardProfileJob();
+    analysisJob.sources[0] = {
+      ...analysisJob.sources[0],
+      source: "imported",
+    };
     await mailbox.enqueueLeaderboardProfile(analysisJob);
 
     await expect(

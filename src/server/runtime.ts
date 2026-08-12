@@ -280,13 +280,13 @@ const leaderboardProfileService = new LeaderboardProfileService({
   mailbox: leaderboardProfileMailbox,
   sourceDirectory: join(dataDirectory, "profile-sources"),
   readCandidateImage: async (entry: PoolLeaderboardEntry) => {
-    if (entry.source === "generated") {
+    if (entry.source !== "curated") {
       const match = entry.candidate.imageUrl.match(
         /^\/api\/assets\/([a-zA-Z0-9-]+\.png)$/,
       );
       if (!match) {
         throw new Error(
-          `Invalid generated leaderboard asset URL for ${entry.candidate.id}`,
+          `Invalid local leaderboard asset URL for ${entry.candidate.id}`,
         );
       }
       return {
