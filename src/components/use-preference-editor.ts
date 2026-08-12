@@ -40,6 +40,7 @@ interface UsePreferenceEditorOptions {
   game: GameState | null;
   profile: PreferenceProfile;
   baseProfile: PreferenceProfile;
+  draftDirty: boolean;
   variationSource: VariationSource | null;
   commitGame: (next: GameState) => void;
   dismissImageInspector: () => void;
@@ -78,6 +79,7 @@ export function usePreferenceEditor({
   game,
   profile,
   baseProfile,
+  draftDirty,
   variationSource,
   commitGame,
   dismissImageInspector,
@@ -94,6 +96,7 @@ export function usePreferenceEditor({
   const [sourceAnalyzing, setSourceAnalyzing] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [sourceSummary, setSourceSummary] = useState<string | null>(null);
+  const [supplementalDirty, setSupplementalDirty] = useState(false);
   const sourceProfileControllerRef = useRef<AbortController | null>(null);
   const queuedProfileRef = useRef<PreferenceProfile | null>(null);
   const queuedVariationSourceRef = useRef<VariationSource | null>(null);
@@ -128,6 +131,16 @@ export function usePreferenceEditor({
   } = useGameRules({ commitGame });
 
   useEffect(() => () => sourceProfileControllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!open || (!draftDirty && !supplementalDirty)) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [draftDirty, open, supplementalDirty]);
 
   const persistPreferences = useCallback(
     async (
@@ -169,6 +182,14 @@ export function usePreferenceEditor({
   );
 
   const savePreferences = useCallback(async () => {
+    if (
+      supplementalDirty &&
+      !window.confirm(
+        "Save the profile and discard other unfinished Preferences edits?",
+      )
+    ) {
+      return;
+    }
     if (selectionBoundWait) {
       queuedProfileRef.current = profile;
       queuedVariationSourceRef.current = variationSource;
@@ -186,6 +207,7 @@ export function usePreferenceEditor({
     profile,
     selectionBoundWait,
     setLocalError,
+    supplementalDirty,
     variationSource,
   ]);
 
@@ -275,13 +297,21 @@ export function usePreferenceEditor({
       gameRulesSaving
     )
       return;
+    if (
+      (draftDirty || supplementalDirty) &&
+      !window.confirm("Discard unsaved preference changes?")
+    ) {
+      return;
+    }
     setOpen(false);
   }, [
+    draftDirty,
     gameRulesSaving,
     presetSaving,
     promptDeckSaving,
     saving,
     sourceAnalyzing,
+    supplementalDirty,
   ]);
 
   const openPreferences = useCallback(() => {
@@ -296,6 +326,7 @@ export function usePreferenceEditor({
     setSaveError(null);
     setSourceError(null);
     setSourceSummary(null);
+    setSupplementalDirty(false);
     clearPresetError();
     clearPromptDeckError();
     resetPreferenceDraft(currentProfile, game.variationSource ?? null);
@@ -408,6 +439,7 @@ export function usePreferenceEditor({
     savePreferencePreset,
     savePreferences,
     analyzeSourceImage,
+    setSupplementalDirty,
     updatePromptDeck,
     updateGameRules,
     writeCustomPromptCard,

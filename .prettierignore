@@ -1,5 +1,6 @@
 .next/
 .local-data/
+private/tmp/
 .playwright-cli/
 node_modules/
 output/

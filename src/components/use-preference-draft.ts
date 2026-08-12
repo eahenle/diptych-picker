@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   preferenceProfileFromSeed,
   type PreferencePreset,
@@ -11,6 +11,10 @@ import {
 } from "@/domain/game";
 import type { PreferenceField } from "./preference-profile-modal";
 
+function draftValuesMatch(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function usePreferenceDraft(historyLength: number | null) {
   const [profile, setProfile] = useState<PreferenceProfile>(() =>
     preferenceProfileFromSeed(""),
@@ -20,6 +24,14 @@ export function usePreferenceDraft(historyLength: number | null) {
   );
   const [variationSource, setVariationSource] =
     useState<VariationSource | null>(null);
+  const [baseVariationSource, setBaseVariationSource] =
+    useState<VariationSource | null>(null);
+  const dirty = useMemo(
+    () =>
+      !draftValuesMatch(profile, baseProfile) ||
+      !draftValuesMatch(variationSource, baseVariationSource),
+    [baseProfile, baseVariationSource, profile, variationSource],
+  );
 
   const replaceProfile = useCallback((next: PreferenceProfile) => {
     setProfile(next);
@@ -30,6 +42,7 @@ export function usePreferenceDraft(historyLength: number | null) {
       setProfile(next);
       setBaseProfile(next);
       setVariationSource(source);
+      setBaseVariationSource(source);
     },
     [],
   );
@@ -112,6 +125,7 @@ export function usePreferenceDraft(historyLength: number | null) {
 
   return {
     baseProfile,
+    dirty,
     profile,
     variationSource,
     applyAnalyzedProfile,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { GAME_RULE_BOUNDS, type GameRules } from "@/domain/game";
 import styles from "./game-rules-editor.module.css";
 
@@ -9,6 +9,7 @@ interface GameRulesEditorProps {
   busy: boolean;
   error: string | null;
   onSave: (rules: GameRules) => Promise<boolean>;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const FIELDS: ReadonlyArray<{
@@ -56,12 +57,15 @@ export function GameRulesEditor({
   busy,
   error,
   onSave,
+  onDirtyChange,
 }: GameRulesEditorProps) {
   const [overrides, setOverrides] = useState<Partial<GameRules>>({});
   const draft = rules ? { ...rules, ...overrides } : null;
   const changed = Boolean(
     rules && draft && FIELDS.some(({ key }) => rules[key] !== draft[key]),
   );
+
+  useEffect(() => onDirtyChange?.(changed), [changed, onDirtyChange]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

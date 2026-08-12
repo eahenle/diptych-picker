@@ -314,7 +314,8 @@ behavior together while leaving durable state commits explicit at the screen
 boundary.
 
 The remaining modal-level preference orchestration now lives in
-`usePreferenceEditor`: explicit and queued saves, source-image analysis and job
+`usePreferenceEditor`: direct and safely deferred saves, dirty-draft dismissal
+protection, source-image analysis and job
 acknowledgement, candidate-derived variation setup, preset application, revision
 restoration, and prompt-deck/preset controller composition. The screen provides
 the current durable game and renders the modal, while the controller owns its
@@ -455,9 +456,13 @@ The Preference profile title row exposes a three-stop freedom slider for the ent
 
 Mailbox failures carry an explicit operational, moderation, or invalid-output category. A moderation-blocked background refill is replaced normally but also creates a persistent, non-blocking notice in the game. The notice counts repeated blocks and lets the player dismiss it or open Preferences to steer future generations toward allowed content. Saving a profile clears the notice.
 
-### Queued preference saves
+### Preference saves during challenger loading
 
-**Save profile** remains actionable while the active round waits for a challenger. Clicking it captures and locks the edited profile, displays animated queued/saving feedback inside the modal, and applies the profile automatically after the round settles. The queued edit deliberately supersedes an adaptive revision from that in-flight round while exact-profile conflict protection still rejects unrelated concurrent edits.
+**Save profile** remains actionable while the active round waits for a challenger. The normal buffered path persists the edited profile immediately, invalidates ready work made from the earlier brief, and schedules replacement capacity. Only a legacy direct-generation selection is bound to one in-flight challenger; there the modal captures and locks the edit, displays animated waiting feedback, and applies it after that round settles. The deferred edit deliberately supersedes an adaptive revision from the bound round while exact-profile conflict protection still rejects unrelated concurrent edits. Closing an edited profile draft through Cancel, Escape, the backdrop, or browser navigation requires confirmation.
+
+### Browser build freshness
+
+Production launchers stamp the compiled browser bundle and running server with the same git revision. Initial game/startup responses and the recurring queue-health response expose that revision without caching. Once a tab observes a different server revision, it keeps a persistent **New version available** banner with an explicit reload action; an open dirty Preferences draft still receives the browser's unsaved-change warning before navigation.
 
 ### Source-image profile ingestion
 

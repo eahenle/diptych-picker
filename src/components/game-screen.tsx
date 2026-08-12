@@ -27,6 +27,7 @@ import { PoolLeaderboard } from "./pool-leaderboard";
 import { QueueDetails } from "./queue-details";
 import { PreferenceProfileModal } from "./preference-profile-modal";
 import { useCandidateBrowser } from "./use-candidate-browser";
+import { useAppVersion } from "./use-app-version";
 import { useGameSessionPolling } from "./use-game-session-polling";
 import { useGameTransfer } from "./use-game-transfer";
 import { useImageImport } from "./use-image-import";
@@ -121,7 +122,13 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
   );
   const gameRef = useRef<GameState | null>(null);
   const {
+    observeServerResponse,
+    reload: reloadApp,
+    updateAvailable,
+  } = useAppVersion();
+  const {
     baseProfile: preferenceDraftBaseProfile,
+    dirty: preferenceDraftDirty,
     profile: preferenceDraft,
     variationSource: preferenceVariationSource,
     applyAnalyzedProfile,
@@ -169,9 +176,11 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     let active = true;
     const load = async () => {
       try {
-        const status = await readJson<GameStartupStatus>(
-          await fetch("/api/game/start", { cache: "no-store" }),
-        );
+        const response = await fetch("/api/game/start", {
+          cache: "no-store",
+        });
+        observeServerResponse(response);
+        const status = await readJson<GameStartupStatus>(response);
         if (!active) return;
         setStartupStatus(status);
         setStartupStatusError(null);
@@ -188,7 +197,12 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     return () => {
       active = false;
     };
-  }, [promptForStartup, startupOpen, startupStatusAttempt]);
+  }, [
+    observeServerResponse,
+    promptForStartup,
+    startupOpen,
+    startupStatusAttempt,
+  ]);
 
   const { retryInitial } = useGameSessionPolling({
     initialLoadEnabled: !promptForStartup || resumeRequested,
@@ -203,6 +217,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     setInitializing,
     setImportProgress,
     setLocalError,
+    observeServerResponse,
   });
 
   const {
@@ -307,6 +322,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     sourceAnalyzing: sourceProfileAnalyzing,
     sourceError: sourceProfileError,
     sourceSummary: sourceProfileSummary,
+    setSupplementalDirty: setPreferenceSupplementalDirty,
     selectionBoundWait,
     presetError,
     presetSaving,
@@ -334,6 +350,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     game,
     profile: preferenceDraft,
     baseProfile: preferenceDraftBaseProfile,
+    draftDirty: preferenceDraftDirty,
     variationSource: preferenceVariationSource,
     commitGame,
     dismissImageInspector,
@@ -492,6 +509,18 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
           </button>
         </div>
       </header>
+
+      {updateAvailable ? (
+        <div className={styles.versionNotice} role="alert">
+          <span>
+            <strong>New version available</strong>
+            Reload to use the latest fixes and features.
+          </span>
+          <button type="button" onClick={reloadApp}>
+            Reload
+          </button>
+        </div>
+      ) : null}
 
       {initializing && !game ? (
         <div className={styles.startState}>Preparing the gallery…</div>
@@ -892,6 +921,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
           onBlendPromptCards={blendPromptCards}
           onWriteCustomPromptCard={writeCustomPromptCard}
           onUpdateGameRules={updateGameRules}
+          onSupplementalDirtyChange={setPreferenceSupplementalDirty}
           onFieldChange={setPreferenceField}
           onFreedomChange={setAdaptationFreedom}
         />

@@ -100,6 +100,8 @@ describe("GET /api/game", () => {
     const response = await GET();
 
     expect(response.headers.get("X-Diptych-Generation-Provider")).toBe("mock");
+    expect(response.headers.get("X-Diptych-App-Version")).toBe("development");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("includes narrow buffer health data with a ready game", async () => {
@@ -145,6 +147,7 @@ describe("GET /api/game/health", () => {
 
     const response = await GET();
 
+    expect(response.headers.get("X-Diptych-App-Version")).toBe("development");
     expect(await response.json()).toEqual(health);
   });
 });

@@ -753,6 +753,79 @@ describe("GameScreen challenger reconciliation", () => {
     );
   });
 
+  it("warns before discarding an unsaved Preferences draft", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: initializedGame })),
+    );
+    const confirmDiscard = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirmDiscard);
+
+    render(<GameScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preferences" }));
+    fireEvent.change(screen.getByLabelText("Inspiration"), {
+      target: { value: "unsaved diagonal lighting" },
+    });
+
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(confirmDiscard).toHaveBeenCalledWith(
+      "Discard unsaved preference changes?",
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Preference profile" }),
+    ).toBeVisible();
+
+    confirmDiscard.mockReturnValue(true);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: "Preference profile" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("also protects unfinished forms nested inside Preferences", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: initializedGame })),
+    );
+    const confirmDiscard = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirmDiscard);
+
+    render(<GameScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preferences" }));
+    fireEvent.click(screen.getByText("Prompt deck"));
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Unfinished prompt card" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(confirmDiscard).toHaveBeenCalledWith(
+      "Discard unsaved preference changes?",
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Preference profile" }),
+    ).toBeVisible();
+  });
+
+  it("shows a reload banner when the server reports a newer build", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const response = json({ status: "ready", game: initializedGame });
+        response.headers.set("X-Diptych-App-Version", "newer-build");
+        return response;
+      }),
+    );
+
+    render(<GameScreen />);
+
+    expect(await screen.findByText("New version available")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeEnabled();
+  });
+
   it("shows live ready-queue and reusable-pool health", async () => {
     vi.stubGlobal(
       "fetch",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { PromptCard, PromptDeck } from "@/domain/game";
 import styles from "./prompt-deck-editor.module.css";
 
@@ -30,6 +30,7 @@ interface PromptDeckEditorProps {
     guidance: string;
     images: readonly File[];
   }) => Promise<boolean>;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function PromptDeckEditor({
@@ -40,6 +41,7 @@ export function PromptDeckEditor({
   onUpdate,
   onBlend,
   onWrite,
+  onDirtyChange,
 }: PromptDeckEditorProps) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -55,6 +57,17 @@ export function PromptDeckEditor({
   const effectiveBlendSelection = blendSelection.filter((id) =>
     availableBlendIds.has(id),
   );
+  const dirty = Boolean(
+    title.trim() ||
+    prompt.trim() ||
+    negativePrompt.trim() ||
+    tags.trim() ||
+    effectiveBlendSelection.length > 0 ||
+    writerGuidance.trim() ||
+    writerImages.length > 0,
+  );
+
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
 
   const toggleBlendCard = (cardId: string) => {
     setBlendSelection((current) => {

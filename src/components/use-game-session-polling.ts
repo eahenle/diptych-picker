@@ -31,6 +31,7 @@ interface UseGameSessionPollingOptions {
   setInitializing: Dispatch<SetStateAction<boolean>>;
   setImportProgress: Dispatch<SetStateAction<ImportProgress | null>>;
   setLocalError: Dispatch<SetStateAction<string | null>>;
+  observeServerResponse: (response: Response) => void;
 }
 
 type GameStartResponse = GameStartState & {
@@ -57,6 +58,7 @@ export function useGameSessionPolling({
   setInitializing,
   setImportProgress,
   setLocalError,
+  observeServerResponse,
 }: UseGameSessionPollingOptions) {
   const initialPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -69,6 +71,14 @@ export function useGameSessionPolling({
     game?.promptDeck?.writerJob?.jobId,
   ].filter((jobId): jobId is string => Boolean(jobId));
   const promptCardBackgroundJobKey = promptCardBackgroundJobIds.join(":");
+  const requestJson = useCallback(
+    async <Value>(input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      observeServerResponse(response);
+      return readJson<Value>(response);
+    },
+    [observeServerResponse],
+  );
 
   useEffect(() => {
     if (!initialLoadEnabled) return;
@@ -77,9 +87,9 @@ export function useGameSessionPolling({
     const load = async (): Promise<void> => {
       if (!active) return;
       try {
-        const state = await readJson<GameStartResponse>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
+        const state = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
         if (!active) return;
         setImportProgress(
           state.status === "ready" ? (state.importProgress ?? null) : null,
@@ -108,6 +118,7 @@ export function useGameSessionPolling({
   }, [
     commitStartState,
     initialLoadEnabled,
+    requestJson,
     setConnectionStatus,
     setImportProgress,
     setInitializing,
@@ -122,9 +133,9 @@ export function useGameSessionPolling({
     const poll = async (): Promise<void> => {
       if (!active) return;
       try {
-        const response = await readJson<GameStartResponse>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
+        const response = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
         if (!active) return;
         setImportProgress(
           response.status === "ready"
@@ -167,6 +178,7 @@ export function useGameSessionPolling({
     };
   }, [
     commitStartState,
+    requestJson,
     setConnectionStatus,
     setImportProgress,
     setLocalError,
@@ -180,9 +192,9 @@ export function useGameSessionPolling({
 
     const poll = async () => {
       try {
-        const health = await readJson<BufferHealth>(
-          await fetch("/api/game/health", { cache: "no-store" }),
-        );
+        const health = await requestJson<BufferHealth>("/api/game/health", {
+          cache: "no-store",
+        });
         if (active) setBufferHealth(health);
       } catch {
         // Health is supporting information; gameplay reconnects separately.
@@ -197,7 +209,7 @@ export function useGameSessionPolling({
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [healthPollingEnabled, healthRound, setBufferHealth]);
+  }, [healthPollingEnabled, healthRound, requestJson, setBufferHealth]);
 
   useEffect(() => {
     if (!importProgress || importProgress.status === "completed") return;
@@ -206,9 +218,9 @@ export function useGameSessionPolling({
 
     const poll = async () => {
       try {
-        const response = await readJson<GameStartResponse>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
+        const response = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
         if (!active || response.status !== "ready") return;
         const comparisonChanged =
           !game ||
@@ -240,7 +252,7 @@ export function useGameSessionPolling({
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [commitStartState, game, importProgress, setImportProgress]);
+  }, [commitStartState, game, importProgress, requestJson, setImportProgress]);
 
   useEffect(() => {
     if (!promptCardBackgroundJobKey) return;
@@ -250,9 +262,9 @@ export function useGameSessionPolling({
 
     const poll = async () => {
       try {
-        const response = await readJson<GameStartResponse>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
+        const response = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
         if (!active || response.status !== "ready") return;
         setImportProgress(response.importProgress ?? null);
         commitGame(response.game);
@@ -274,14 +286,14 @@ export function useGameSessionPolling({
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [commitGame, promptCardBackgroundJobKey, setImportProgress]);
+  }, [commitGame, promptCardBackgroundJobKey, requestJson, setImportProgress]);
 
   const retryInitial = useCallback(async () => {
     setInitializing(true);
     try {
-      const state = await readJson<GameStartState>(
-        await fetch("/api/game/start", { method: "POST" }),
-      );
+      const state = await requestJson<GameStartState>("/api/game/start", {
+        method: "POST",
+      });
       commitStartState(state);
       setLocalError(null);
     } catch (error) {
@@ -293,7 +305,7 @@ export function useGameSessionPolling({
     } finally {
       setInitializing(false);
     }
-  }, [commitStartState, setInitializing, setLocalError]);
+  }, [commitStartState, requestJson, setInitializing, setLocalError]);
 
   return { retryInitial };
 }

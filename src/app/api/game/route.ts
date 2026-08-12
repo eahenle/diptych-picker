@@ -4,6 +4,7 @@ import {
   composePreferenceSeed,
   preferenceProfileFromSeed,
 } from "@/domain/game";
+import { appVersionResponseHeaders } from "@/server/app-version";
 import { SelectionConflictError } from "@/server/game-service";
 import { preferenceProfileRequestSchema as preferenceProfileSchema } from "@/server/preference-profile-schema";
 import {
@@ -73,7 +74,10 @@ export async function GET() {
         }
       : state;
   return NextResponse.json(response, {
-    headers: { "X-Diptych-Generation-Provider": generationProvider },
+    headers: {
+      ...appVersionResponseHeaders(),
+      "X-Diptych-Generation-Provider": generationProvider,
+    },
   });
 }
 

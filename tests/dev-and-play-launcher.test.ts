@@ -57,6 +57,8 @@ describe("run-only launcher", () => {
     expect(stdout).toContain("NEXT_DIST_DIR=.next-run");
     expect(stdout).toContain("npm run build");
     expect(stdout).toContain("GENERATION_PROVIDER=agent");
+    expect(stdout).toContain("APP_BUILD_VERSION=");
+    expect(stdout).toContain("NEXT_PUBLIC_APP_BUILD_VERSION=");
     expect(stdout).toContain("npm run start");
     expect(stdout).toContain("--hostname 127.0.0.1");
     expect(stdout).not.toContain("npm run dev");
