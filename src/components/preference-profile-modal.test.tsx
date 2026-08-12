@@ -37,6 +37,7 @@ function renderPreferences(
     historyLength: 0,
     saving: false,
     saveQueued: false,
+    saveError: null,
     sourceAnalyzing: false,
     sourceError: null,
     sourceSummary: null,
@@ -229,6 +230,7 @@ describe("PreferenceProfileModal", () => {
   it.each([
     [{ sourceAnalyzing: true }, "Analyzing source image"],
     [{ sourceError: "Analysis failed" }, "Analysis failed"],
+    [{ saveError: "Save failed" }, "Save failed"],
     [{ sourceSummary: "Transferred palette." }, "Profile populated for review"],
     [
       { selectionBoundWait: true },

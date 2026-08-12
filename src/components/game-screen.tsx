@@ -303,6 +303,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     open: preferencesOpen,
     saving: preferencesSaving,
     saveQueued: preferenceSaveQueued,
+    saveError: preferenceSaveError,
     sourceAnalyzing: sourceProfileAnalyzing,
     sourceError: sourceProfileError,
     sourceSummary: sourceProfileSummary,
@@ -863,6 +864,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
           historyLength={game.history.length}
           saving={preferencesSaving}
           saveQueued={preferenceSaveQueued}
+          saveError={preferenceSaveError}
           sourceAnalyzing={sourceProfileAnalyzing}
           sourceError={sourceProfileError}
           sourceSummary={sourceProfileSummary}

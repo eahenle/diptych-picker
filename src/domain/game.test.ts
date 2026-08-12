@@ -253,17 +253,24 @@ describe("round transitions", () => {
     expect(next.round.rightCandidate).toBe(challenger);
   });
 
-  it("distinguishes a selection-bound wait from idle and retryable states", () => {
+  it("only binds preference saves to a direct generation job", () => {
     const initial = game();
-    const pending = beginBufferedSelection(
+    const buffered = beginBufferedSelection(
       initial,
       "left",
       "2026-07-16T00:01:00.000Z",
     )!;
+    const generated = beginSelection(
+      initial,
+      "left",
+      "2026-07-16T00:01:00.000Z",
+      "job-1",
+    )!;
 
     expect(isSelectionBoundWait(initial)).toBe(false);
-    expect(isSelectionBoundWait(pending)).toBe(true);
-    expect(isSelectionBoundWait(failSelection(pending, "retry"))).toBe(false);
+    expect(isSelectionBoundWait(buffered)).toBe(false);
+    expect(isSelectionBoundWait(generated)).toBe(true);
+    expect(isSelectionBoundWait(failSelection(generated, "retry"))).toBe(false);
   });
 
   it("rejects a generation job ID that cannot be used as a mailbox filename", () => {

@@ -60,7 +60,11 @@ export class PreferenceService {
           "Preferences changed while this editor was open. Reopen Preferences and try again.",
         );
       }
-      if (current.round.status === "generating") {
+      if (
+        current.round.status === "generating" &&
+        (!current.pendingSelection ||
+          current.pendingSelection.kind === "generation")
+      ) {
         throw new SelectionConflictError(
           "A challenger is already being generated",
         );

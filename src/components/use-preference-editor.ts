@@ -90,6 +90,7 @@ export function usePreferenceEditor({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveQueued, setSaveQueued] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [sourceAnalyzing, setSourceAnalyzing] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [sourceSummary, setSourceSummary] = useState<string | null>(null);
@@ -135,6 +136,7 @@ export function usePreferenceEditor({
       nextVariationSource: VariationSource | null,
     ) => {
       setSaving(true);
+      setSaveError(null);
       try {
         const state = await readJson<GameState>(
           await fetch("/api/game", {
@@ -152,7 +154,7 @@ export function usePreferenceEditor({
         setOpen(false);
         setLocalError(null);
       } catch (error) {
-        setLocalError(
+        setSaveError(
           error instanceof Error ? error.message : "Could not save preferences",
         );
       } finally {
@@ -173,6 +175,7 @@ export function usePreferenceEditor({
       queuedSaveStartedRef.current = false;
       setSaveQueued(true);
       setSaving(true);
+      setSaveError(null);
       setLocalError(null);
       return;
     }
@@ -290,6 +293,7 @@ export function usePreferenceEditor({
     queuedSaveStartedRef.current = false;
     setSaveQueued(false);
     setSaving(false);
+    setSaveError(null);
     setSourceError(null);
     setSourceSummary(null);
     clearPresetError();
@@ -381,6 +385,7 @@ export function usePreferenceEditor({
     open,
     saving,
     saveQueued,
+    saveError,
     sourceAnalyzing,
     sourceError,
     sourceSummary,

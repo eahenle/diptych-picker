@@ -1603,7 +1603,7 @@ describe("GameScreen challenger reconciliation", () => {
     });
   });
 
-  it("animates and completes a queued preference save after the challenger arrives", async () => {
+  it("persists a preference save while a buffered challenger is loading", async () => {
     installSuccessfulImagePreload();
     const adaptiveCompletion = completedGame();
     adaptiveCompletion.preferenceSeed = initializedGame.preferenceSeed;
@@ -1648,43 +1648,33 @@ describe("GameScreen challenger reconciliation", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Save now to apply these changes when the challenger arrives.",
       ),
-    ).toBeVisible();
+    ).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Inspiration"), {
-      target: { value: "queued diagonal lighting" },
+      target: { value: "saved diagonal lighting" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
 
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByText("Profile queued")).toBeVisible();
-    expect(
-      screen.getByText("Waiting for the challenger to arrive…"),
-    ).toBeVisible();
+    expect(screen.getByText("Saving profile")).toBeVisible();
+    expect(screen.getByText("Applying your preferences…")).toBeVisible();
     expect(screen.getByTestId("preference-save-spinner")).toBeVisible();
     expect(screen.getByLabelText("Inspiration")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(
       fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
-    ).toBe(false);
-
-    expect(await screen.findByText("Saving profile")).toBeVisible();
-    expect(screen.getByText("Applying your preferences…")).toBeVisible();
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
-      ).toBe(true),
-    );
+    ).toBe(true);
     const patchCall = fetchMock.mock.calls.find(
       ([, init]) => init?.method === "PATCH",
     );
     expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
-      preferenceProfile: { inspiration: "queued diagonal lighting" },
+      preferenceProfile: { inspiration: "saved diagonal lighting" },
       expectedPreferenceProfile: {
-        adaptationMode: "adaptive",
-        adaptationSourceWinnerIds: ["generated-left"],
-        adaptationSourceRejectedIds: ["generated-right"],
+        adaptationMode: "static",
+        adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
       },
     });
 
@@ -1753,6 +1743,9 @@ describe("GameScreen challenger reconciliation", () => {
 
     await screen.findByText(
       "Preferences changed while this editor was open. Reopen Preferences and try again.",
+    );
+    expect(screen.getByRole("dialog")).toContainElement(
+      screen.getByRole("alert"),
     );
     const patchCall = fetchMock.mock.calls.find(
       ([, init]) => init?.method === "PATCH",

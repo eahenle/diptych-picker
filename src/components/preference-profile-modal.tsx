@@ -84,6 +84,7 @@ interface PreferenceProfileModalProps {
   historyLength: number;
   saving: boolean;
   saveQueued: boolean;
+  saveError: string | null;
   sourceAnalyzing: boolean;
   sourceError: string | null;
   sourceSummary: string | null;
@@ -126,6 +127,7 @@ export function PreferenceProfileModal({
   historyLength,
   saving,
   saveQueued,
+  saveError,
   sourceAnalyzing,
   sourceError,
   sourceSummary,
@@ -590,6 +592,11 @@ export function PreferenceProfileModal({
         ) : sourceSummary ? (
           <p className={styles.sourceSummary} role="status">
             Profile populated for review. {sourceSummary}
+          </p>
+        ) : null}
+        {saveError ? (
+          <p className={styles.sourceError} role="alert">
+            {saveError}
           </p>
         ) : null}
         {saving ? (
