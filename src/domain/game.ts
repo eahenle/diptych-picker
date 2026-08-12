@@ -79,6 +79,8 @@ export interface PromptCard {
   tags: string[];
   parents: string[];
   sourceCandidateIds?: string[];
+  sourceImageDigests?: string[];
+  sourceTextDigest?: string;
   active: boolean;
   createdAt: string;
   stats: PromptCardStats;
@@ -131,7 +133,7 @@ export interface PromptCardBlendJobRecord {
 }
 
 export interface PromptCardWriterSource {
-  candidateId: string;
+  candidateId?: string;
   concept: string;
   style: string[];
   sourceImage: {
@@ -149,11 +151,15 @@ export interface PromptCardWriterRequest {
   kind: "prompt-card-writer";
   createdAt: string;
   sources: PromptCardWriterSource[];
+  guidance?: string;
+  sourceTextDigest?: string;
 }
 
 export interface PromptCardWriterJobRecord {
   jobId: string;
   sourceCandidateIds: string[];
+  sourceImageDigests?: string[];
+  sourceTextDigest?: string;
   enqueuedAt: string;
   expectedJob: PromptCardWriterRequest;
 }
@@ -163,6 +169,8 @@ export interface PromptCardSuggestion {
   parentCardId?: string;
   parentCardIds?: string[];
   sourceCandidateIds?: string[];
+  sourceImageDigests?: string[];
+  sourceTextDigest?: string;
   title: string;
   prompt: string;
   negativePrompt: string;
@@ -478,7 +486,10 @@ export function candidateAt(round: Round, side: Side): Candidate {
 }
 
 export function isSelectionBoundWait(state: GameState): boolean {
-  return state.round.status === "generating" && Boolean(state.pendingSelection);
+  return (
+    state.round.status === "generating" &&
+    state.pendingSelection?.kind === "generation"
+  );
 }
 
 export function beginSelection(

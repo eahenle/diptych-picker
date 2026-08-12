@@ -37,6 +37,7 @@ function renderPreferences(
     historyLength: 0,
     saving: false,
     saveQueued: false,
+    saveError: null,
     sourceAnalyzing: false,
     sourceError: null,
     sourceSummary: null,
@@ -67,6 +68,7 @@ function renderPreferences(
     onCreatePromptCard: vi.fn(async () => true),
     onUpdatePromptDeck: vi.fn(async () => undefined),
     onBlendPromptCards: vi.fn(async () => true),
+    onWriteCustomPromptCard: vi.fn(async () => true),
     onUpdateGameRules: vi.fn(async () => true),
     onFieldChange: vi.fn(),
     onFreedomChange: vi.fn(),
@@ -228,6 +230,7 @@ describe("PreferenceProfileModal", () => {
   it.each([
     [{ sourceAnalyzing: true }, "Analyzing source image"],
     [{ sourceError: "Analysis failed" }, "Analysis failed"],
+    [{ saveError: "Save failed" }, "Save failed"],
     [{ sourceSummary: "Transferred palette." }, "Profile populated for review"],
     [
       { selectionBoundWait: true },

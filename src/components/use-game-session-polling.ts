@@ -8,24 +8,35 @@ import {
   type SetStateAction,
 } from "react";
 import type { BufferHealth, GameStartState, GameState } from "@/domain/game";
+import type { ImportProgress } from "@/domain/import-progress";
 import { readJson } from "./game-api";
+import { preloadChangedAssets } from "./image-preload";
 
 const POLL_INTERVAL_MS = 150;
 const HEALTH_POLL_INTERVAL_MS = 2_000;
+const IMPORT_POLL_INTERVAL_MS = 500;
 const MAX_RECONNECT_DELAY_MS = 2_400;
 const RECONNECT_MESSAGE = "Connection interrupted. Reconnecting…";
 
 interface UseGameSessionPollingOptions {
+  initialLoadEnabled?: boolean;
   bufferHealth: BufferHealth | null;
   game: GameState | null;
+  importProgress: ImportProgress | null;
   startState: GameStartState | null;
   commitGame: (next: GameState) => void;
   commitStartState: (next: GameStartState) => void;
   setBufferHealth: Dispatch<SetStateAction<BufferHealth | null>>;
   setConnectionStatus: Dispatch<SetStateAction<string | null>>;
   setInitializing: Dispatch<SetStateAction<boolean>>;
+  setImportProgress: Dispatch<SetStateAction<ImportProgress | null>>;
   setLocalError: Dispatch<SetStateAction<string | null>>;
+  observeServerResponse: (response: Response) => void;
 }
+
+type GameStartResponse = GameStartState & {
+  importProgress?: ImportProgress | null;
+};
 
 function reconnectDelay(attempt: number): number {
   return Math.min(
@@ -35,15 +46,19 @@ function reconnectDelay(attempt: number): number {
 }
 
 export function useGameSessionPolling({
+  initialLoadEnabled = true,
   bufferHealth,
   game,
+  importProgress,
   startState,
   commitGame,
   commitStartState,
   setBufferHealth,
   setConnectionStatus,
   setInitializing,
+  setImportProgress,
   setLocalError,
+  observeServerResponse,
 }: UseGameSessionPollingOptions) {
   const initialPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -56,17 +71,29 @@ export function useGameSessionPolling({
     game?.promptDeck?.writerJob?.jobId,
   ].filter((jobId): jobId is string => Boolean(jobId));
   const promptCardBackgroundJobKey = promptCardBackgroundJobIds.join(":");
+  const requestJson = useCallback(
+    async <Value>(input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      observeServerResponse(response);
+      return readJson<Value>(response);
+    },
+    [observeServerResponse],
+  );
 
   useEffect(() => {
+    if (!initialLoadEnabled) return;
     let active = true;
     let retryAttempt = 0;
     const load = async (): Promise<void> => {
       if (!active) return;
       try {
-        const state = await readJson<GameStartState>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
+        const state = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
         if (!active) return;
+        setImportProgress(
+          state.status === "ready" ? (state.importProgress ?? null) : null,
+        );
         commitStartState(state);
         setInitializing(false);
         setLocalError(null);
@@ -88,7 +115,15 @@ export function useGameSessionPolling({
         clearTimeout(initialPollTimerRef.current);
       initialPollTimerRef.current = null;
     };
-  }, [commitStartState, setConnectionStatus, setInitializing, setLocalError]);
+  }, [
+    commitStartState,
+    initialLoadEnabled,
+    requestJson,
+    setConnectionStatus,
+    setImportProgress,
+    setInitializing,
+    setLocalError,
+  ]);
 
   useEffect(() => {
     if (startState?.status !== "initializing") return;
@@ -98,10 +133,15 @@ export function useGameSessionPolling({
     const poll = async (): Promise<void> => {
       if (!active) return;
       try {
-        const response = await readJson<GameStartState>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
+        const response = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
         if (!active) return;
+        setImportProgress(
+          response.status === "ready"
+            ? (response.importProgress ?? null)
+            : null,
+        );
         if (response.status === "initializing") {
           retryAttempt = 0;
           setConnectionStatus(null);
@@ -138,7 +178,9 @@ export function useGameSessionPolling({
     };
   }, [
     commitStartState,
+    requestJson,
     setConnectionStatus,
+    setImportProgress,
     setLocalError,
     startState?.status,
   ]);
@@ -150,9 +192,9 @@ export function useGameSessionPolling({
 
     const poll = async () => {
       try {
-        const health = await readJson<BufferHealth>(
-          await fetch("/api/game/health", { cache: "no-store" }),
-        );
+        const health = await requestJson<BufferHealth>("/api/game/health", {
+          cache: "no-store",
+        });
         if (active) setBufferHealth(health);
       } catch {
         // Health is supporting information; gameplay reconnects separately.
@@ -167,7 +209,50 @@ export function useGameSessionPolling({
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [healthPollingEnabled, healthRound, setBufferHealth]);
+  }, [healthPollingEnabled, healthRound, requestJson, setBufferHealth]);
+
+  useEffect(() => {
+    if (!importProgress || importProgress.status === "completed") return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const response = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
+        if (!active || response.status !== "ready") return;
+        const comparisonChanged =
+          !game ||
+          response.game.round.leftCandidate.id !==
+            game.round.leftCandidate.id ||
+          response.game.round.rightCandidate.id !==
+            game.round.rightCandidate.id;
+        if (comparisonChanged) {
+          if (game) {
+            await preloadChangedAssets(
+              game,
+              response.game,
+              new AbortController().signal,
+            );
+          }
+          if (active) commitStartState(response);
+        }
+        if (active) setImportProgress(response.importProgress ?? null);
+      } catch {
+        // Import progress is supporting information; the next poll retries.
+      } finally {
+        if (active)
+          timer = setTimeout(() => void poll(), IMPORT_POLL_INTERVAL_MS);
+      }
+    };
+
+    timer = setTimeout(() => void poll(), IMPORT_POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [commitStartState, game, importProgress, requestJson, setImportProgress]);
 
   useEffect(() => {
     if (!promptCardBackgroundJobKey) return;
@@ -177,10 +262,11 @@ export function useGameSessionPolling({
 
     const poll = async () => {
       try {
-        const response = await readJson<GameStartState>(
-          await fetch("/api/game", { cache: "no-store" }),
-        );
+        const response = await requestJson<GameStartResponse>("/api/game", {
+          cache: "no-store",
+        });
         if (!active || response.status !== "ready") return;
+        setImportProgress(response.importProgress ?? null);
         commitGame(response.game);
         const activeJobIds = [
           response.game.promptDeck?.editorJob?.jobId,
@@ -200,14 +286,14 @@ export function useGameSessionPolling({
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [commitGame, promptCardBackgroundJobKey]);
+  }, [commitGame, promptCardBackgroundJobKey, requestJson, setImportProgress]);
 
   const retryInitial = useCallback(async () => {
     setInitializing(true);
     try {
-      const state = await readJson<GameStartState>(
-        await fetch("/api/game/start", { method: "POST" }),
-      );
+      const state = await requestJson<GameStartState>("/api/game/start", {
+        method: "POST",
+      });
       commitStartState(state);
       setLocalError(null);
     } catch (error) {
@@ -219,7 +305,7 @@ export function useGameSessionPolling({
     } finally {
       setInitializing(false);
     }
-  }, [commitStartState, setInitializing, setLocalError]);
+  }, [commitStartState, requestJson, setInitializing, setLocalError]);
 
   return { retryInitial };
 }

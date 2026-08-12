@@ -4,12 +4,14 @@ import {
   composePreferenceSeed,
   preferenceProfileFromSeed,
 } from "@/domain/game";
+import { appVersionResponseHeaders } from "@/server/app-version";
 import { SelectionConflictError } from "@/server/game-service";
 import { preferenceProfileRequestSchema as preferenceProfileSchema } from "@/server/preference-profile-schema";
 import {
   generationProvider,
   getBufferHealth,
   getDisplayedEloRatings,
+  getImportProgress,
   getOrCreateGame,
   updatePreferenceSeed,
 } from "@/server/runtime";
@@ -68,10 +70,14 @@ export async function GET() {
           ...state,
           bufferHealth: await getBufferHealth(),
           eloRatings: await getDisplayedEloRatings(state.game),
+          importProgress: await getImportProgress(),
         }
       : state;
   return NextResponse.json(response, {
-    headers: { "X-Diptych-Generation-Provider": generationProvider },
+    headers: {
+      ...appVersionResponseHeaders(),
+      "X-Diptych-Generation-Provider": generationProvider,
+    },
   });
 }
 

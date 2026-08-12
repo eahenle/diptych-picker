@@ -47,6 +47,40 @@ const deck: PromptDeck = {
 };
 
 describe("PromptDeckEditor", () => {
+  it("drafts a reviewable card from text and seed images", async () => {
+    const onWrite = vi.fn(async () => true);
+    render(
+      <PromptDeckEditor
+        deck={deck}
+        busy={false}
+        error={null}
+        onCreate={vi.fn(async () => true)}
+        onUpdate={vi.fn(async () => undefined)}
+        onBlend={vi.fn(async () => true)}
+        onWrite={onWrite}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Prompt deck"));
+    fireEvent.change(screen.getByLabelText("Text guidance"), {
+      target: { value: "Keep the cold monumental negative space." },
+    });
+    const seed = new File(["seed"], "seed.webp", { type: "image/webp" });
+    fireEvent.change(screen.getByLabelText("Seed images"), {
+      target: { files: [seed] },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Draft reviewable card" }),
+    );
+
+    await waitFor(() =>
+      expect(onWrite).toHaveBeenCalledWith({
+        guidance: "Keep the cold monumental negative space.",
+        images: [seed],
+      }),
+    );
+  });
+
   it("selects two active cards for a balanced blend", async () => {
     const onBlend = vi.fn(async () => true);
     const second = {
@@ -63,6 +97,7 @@ describe("PromptDeckEditor", () => {
         onCreate={vi.fn(async () => true)}
         onUpdate={vi.fn(async () => undefined)}
         onBlend={onBlend}
+        onWrite={vi.fn(async () => true)}
       />,
     );
 
@@ -95,6 +130,7 @@ describe("PromptDeckEditor", () => {
         onCreate={onCreate}
         onUpdate={onUpdate}
         onBlend={vi.fn(async () => true)}
+        onWrite={vi.fn(async () => true)}
       />,
     );
 

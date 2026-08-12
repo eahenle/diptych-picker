@@ -13,6 +13,7 @@ import type {
   PromptCardEditorMailbox,
 } from "./agent-mailbox";
 import type { ChallengerRepository } from "./challenger-repository";
+import { CandidateDequeueService } from "./candidate-dequeue-service";
 import { challengerConfig } from "./challenger-config";
 import { SelectionConflictError } from "./game-service-errors";
 import { GameReconciler } from "./game-reconciler";
@@ -32,6 +33,13 @@ import type { AssetStore } from "./providers";
 import { RefillResultReconciler } from "./refill-result-reconciler";
 import type { GameRepository } from "./repository";
 import { RefillCapacityService } from "./refill-capacity-service";
+import {
+  MemoryImportSessionRepository,
+  type ImportSessionRepository,
+} from "./import-session-repository";
+import { MemoryImportActivationIntentRepository } from "./import-activation-intent-repository";
+import { MemoryInitialBootstrapRepository } from "./initial-bootstrap";
+import { StateLockCoordinator } from "./state-lock-coordinator";
 
 export {
   GameRulesError,
@@ -50,6 +58,11 @@ export interface GameServiceConfig {
   initialTurnaroundMs: number;
   fallbackDelayMs: number;
   fallbackMaximumConsecutive: number;
+}
+
+export interface GameServiceCandidateStream {
+  importSessionRepository: ImportSessionRepository;
+  stateLockCoordinator: StateLockCoordinator;
 }
 
 export class GameService {
@@ -79,7 +92,28 @@ export class GameService {
     promptCardEditor?: PromptCardEditorMailbox,
     private readonly promptCardBlender?: PromptCardBlenderMailbox,
     private readonly promptCardWriter?: PromptCardWriterCoordinator,
+    candidateStream?: GameServiceCandidateStream,
   ) {
+    const importSessionRepository =
+      candidateStream?.importSessionRepository ??
+      new MemoryImportSessionRepository();
+    const stateLockCoordinator =
+      candidateStream?.stateLockCoordinator ??
+      new StateLockCoordinator({
+        activationIntent: new MemoryImportActivationIntentRepository(),
+        importSession: importSessionRepository,
+        game: this.gameRepository,
+        challenger: this.challengerRepository,
+        initialBootstrap: new MemoryInitialBootstrapRepository(),
+      });
+    const candidateDequeueService = new CandidateDequeueService({
+      challengerRepository: this.challengerRepository,
+      importSessionRepository,
+      initialRating: this.config.initialRating,
+      fallbackDelayMs: this.config.fallbackDelayMs,
+      random: this.random,
+      now: this.now,
+    });
     this.generationJobPublisher = new GenerationJobPublisher(this.mailbox);
     this.generationSelectionReconciler = new GenerationSelectionReconciler({
       repository: this.gameRepository,
@@ -103,6 +137,8 @@ export class GameService {
       createId: this.createId,
       now: this.now,
       random: this.random,
+      importSessionRepository,
+      stateLockCoordinator,
     });
     this.promptCardReconciler = new PromptCardReconciler({
       repository: this.gameRepository,
@@ -147,6 +183,8 @@ export class GameService {
       now: this.now,
       random: this.random,
       rulesFor: (game) => this.rulesFor(game),
+      importSessionRepository,
+      candidateDequeueService,
     });
     this.refillResultReconciler = new RefillResultReconciler({
       gameRepository: this.gameRepository,
@@ -156,8 +194,12 @@ export class GameService {
       initialRating: this.config.initialRating,
       turnaroundEmaAlpha: this.config.turnaroundEmaAlpha,
       ensureEnqueued: (job) => this.generationJobPublisher.ensure(job),
-      completePreparedSelection: (game, challengers) =>
-        this.preparedSelectionReconciler.complete(game, challengers),
+      completePreparedSelection: (game, challengers, lockContext) =>
+        this.preparedSelectionReconciler.complete(
+          game,
+          challengers,
+          lockContext,
+        ),
       removeDisplayedCandidatesFromReady: (game, challengers) =>
         this.preparedSelectionReconciler.removeDisplayedCandidatesFromReady(
           game,
@@ -167,6 +209,8 @@ export class GameService {
     this.gameReconciler = new GameReconciler({
       gameRepository: this.gameRepository,
       challengerRepository: this.challengerRepository,
+      importSessionRepository,
+      stateLockCoordinator,
       generationSelectionReconciler: this.generationSelectionReconciler,
       promptCardReconciler: this.promptCardReconciler,
       leaderboardProfileReconciler: this.leaderboardProfileReconciler,
@@ -175,18 +219,19 @@ export class GameService {
       refillCapacityService: this.refillCapacityService,
       generationJobPublisher: this.generationJobPublisher,
       rulesFor: (game) => this.rulesFor(game),
-      drawFallback: (state, game) => this.drawFallback(state, game),
     });
     this.gameSelectionService = new GameSelectionService({
       gameRepository: this.gameRepository,
       challengerRepository: this.challengerRepository,
+      importSessionRepository,
+      stateLockCoordinator,
+      candidateDequeueService,
       promptCardReconciler: this.promptCardReconciler,
       preparedSelectionReconciler: this.preparedSelectionReconciler,
       refillCapacityService: this.refillCapacityService,
       generationJobPublisher: this.generationJobPublisher,
       config: this.config,
       rulesFor: (game) => this.rulesFor(game),
-      drawFallback: (state, game) => this.drawFallback(state, game),
       now: this.now,
     });
   }
@@ -233,6 +278,12 @@ export class GameService {
 
   async requestPromptCardWriter(candidateIds: string[]): Promise<GameState> {
     return this.promptDeckService.requestWriter(candidateIds);
+  }
+
+  async requestCustomPromptCardWriter(
+    input: import("./prompt-card-writer-service").PromptCardWriterCustomInput,
+  ): Promise<GameState> {
+    return this.promptDeckService.requestCustomWriter(input);
   }
 
   async updatePromptDeck(

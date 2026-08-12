@@ -67,6 +67,15 @@ describe("PoolLeaderboard", () => {
     expect(props.onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("labels user-provided pool entries as imported", () => {
+    renderLeaderboard({
+      entries: [{ ...entries[0], source: "imported" }],
+    });
+
+    expect(screen.getByText("Imported")).toBeVisible();
+    expect(screen.queryByText("Generated")).not.toBeInTheDocument();
+  });
+
   it.each([
     [{ loading: true }, "Ranking the pool…"],
     [{ error: "Leaderboard failed" }, "Leaderboard failed"],

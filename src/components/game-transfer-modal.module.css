@@ -50,6 +50,11 @@
   border-color: rgba(180, 104, 73, 0.45);
 }
 
+.importImagesSection {
+  margin-top: 22px;
+  border-color: rgba(180, 104, 73, 0.7);
+}
+
 .primaryAction {
   color: var(--copper-bright);
   border-color: rgba(180, 104, 73, 0.8);

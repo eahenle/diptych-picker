@@ -4,10 +4,16 @@ import type {
   ChallengerState,
 } from "@/domain/challenger-state";
 import type { Candidate, GameState } from "@/domain/game";
+import type { ImportSession } from "@/domain/import-session";
 import { MemoryChallengerRepository } from "./challenger-repository";
+import { CandidateDequeueService } from "./candidate-dequeue-service";
 import { GameSelectionService } from "./game-selection-service";
+import { MemoryImportActivationIntentRepository } from "./import-activation-intent-repository";
+import { MemoryImportSessionRepository } from "./import-session-repository";
+import { MemoryInitialBootstrapRepository } from "./initial-bootstrap";
 import { PreparedSelectionReconciler } from "./prepared-selection-reconciler";
 import { MemoryGameRepository } from "./repository";
+import { StateLockCoordinator } from "./state-lock-coordinator";
 
 const NOW = "2026-07-26T09:00:00.000Z";
 const RULES = {
@@ -93,9 +99,28 @@ function challengers(
 function fixture(
   current: GameState | null = game(),
   state: ChallengerState | null = current ? challengers(current) : null,
+  importSession: ImportSession | null = null,
 ) {
   const gameRepository = new MemoryGameRepository(current);
   const challengerRepository = new MemoryChallengerRepository(state);
+  const importSessionRepository = new MemoryImportSessionRepository(
+    importSession,
+  );
+  const stateLockCoordinator = new StateLockCoordinator({
+    activationIntent: new MemoryImportActivationIntentRepository(),
+    importSession: importSessionRepository,
+    game: gameRepository,
+    challenger: challengerRepository,
+    initialBootstrap: new MemoryInitialBootstrapRepository(),
+  });
+  const candidateDequeueService = new CandidateDequeueService({
+    challengerRepository,
+    importSessionRepository,
+    initialRating: 1000,
+    fallbackDelayMs: 3_000,
+    now: () => NOW,
+    random: () => 0,
+  });
   const preparedSelectionReconciler = new PreparedSelectionReconciler({
     gameRepository,
     challengerRepository,
@@ -112,20 +137,18 @@ function fixture(
     jobs: [],
   }));
   const ensureAll = vi.fn(async () => {});
-  const drawFallback = vi.fn((value: ChallengerState) => ({
-    state: value,
-    candidate: null,
-  }));
   const service = new GameSelectionService({
     gameRepository,
     challengerRepository,
+    importSessionRepository,
+    stateLockCoordinator,
+    candidateDequeueService,
     promptCardReconciler: { reconcileEditor },
     preparedSelectionReconciler,
     refillCapacityService: { plan },
     generationJobPublisher: { ensureAll },
     config: { initialRating: 1000, eloKFactor: 32 },
     rulesFor: (value) => value.gameRules!,
-    drawFallback,
     now: () => NOW,
   });
 
@@ -133,10 +156,10 @@ function fixture(
     service,
     gameRepository,
     challengerRepository,
+    importSessionRepository,
     reconcileEditor,
     plan,
     ensureAll,
-    drawFallback,
   };
 }
 
@@ -188,7 +211,6 @@ describe("GameSelectionService", () => {
     expect(context.plan).toHaveBeenCalledOnce();
     expect(context.reconcileEditor).toHaveBeenCalledOnce();
     expect(context.ensureAll).toHaveBeenCalledWith([]);
-    expect(context.drawFallback).not.toHaveBeenCalled();
     expect(
       (await context.challengerRepository.load())?.pendingComparison,
     ).toBeNull();
@@ -217,6 +239,7 @@ describe("GameSelectionService", () => {
     expect(context.plan).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ comparisonOutcome: "tie" }),
+      expect.objectContaining({ terminal: true }),
     );
   });
 
@@ -241,6 +264,89 @@ describe("GameSelectionService", () => {
     expect(context.plan).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ comparisonOutcome: "both-lose" }),
+      expect.objectContaining({ terminal: true }),
+    );
+  });
+
+  it("serves an activated imported candidate before the ordinary ready queue", async () => {
+    const current = game();
+    const imported = candidate("imported-1");
+    const digest = "a".repeat(64);
+    imported.imageUrl = `/api/assets/${digest}.png`;
+    const session: ImportSession = {
+      version: 1,
+      id: "import-session-1",
+      status: "active",
+      createdAt: NOW,
+      sealedAt: NOW,
+      activatedAt: NOW,
+      items: [
+        {
+          id: "import-item-1",
+          normalizedDigest: digest,
+          status: "ready",
+          asset: {
+            digest,
+            filename: `${digest}.png`,
+            url: `/api/assets/${digest}.png`,
+            contentType: "image/png",
+            width: 1024,
+            height: 1024,
+            byteLength: 1024,
+          },
+          annotationJob: null,
+          annotation: {
+            concept: imported.concept,
+            prompt: imported.prompt,
+            style: imported.style,
+            reasoningSummary: "Visible composition and palette.",
+            source: "automated",
+          },
+          candidateId: imported.id,
+          failureMessage: null,
+          approvedAt: NOW,
+          servedAt: null,
+        },
+      ],
+      initialFillJobs: [],
+      initialFillRetry: null,
+      servedReceipts: [],
+    };
+    const state = challengers(current);
+    state.importQueue = [
+      {
+        candidate: imported,
+        source: "imported",
+        importItemId: "import-item-1",
+        pinnedWinnerId: null,
+        enqueuedAt: NOW,
+      },
+    ];
+    const context = fixture(current, state, session);
+
+    const selected = await context.service.select("left", 6);
+
+    expect(selected.round.rightCandidate.id).toBe("imported-1");
+    expect(
+      (await context.challengerRepository.load())?.ready[0].candidate.id,
+    ).toBe("ready-1");
+    expect(
+      (await context.importSessionRepository.load())?.servedReceipts,
+    ).toMatchObject([
+      {
+        kind: "dequeue",
+        replacementSlot: "single",
+        candidateId: "imported-1",
+      },
+    ]);
+    expect(context.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        readyUnserved: 0,
+        dequeueReceiptCount: 1,
+        terminal: true,
+      }),
     );
   });
 });

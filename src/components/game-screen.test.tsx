@@ -365,6 +365,172 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("GameScreen startup choice", () => {
+  it("offers all four entry paths without opening the game before Resume", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/game/start" && !init?.method) {
+          return json({ canResume: true, importInProgress: false });
+        }
+        return json({ status: "ready", game: initializedGame });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen promptForStartup />);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Open Diptych Picker",
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Resume" }),
+    ).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "Load" })).toBeEnabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Initialize" }),
+    ).toBeEnabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Import" }),
+    ).toBeEnabled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/game", {
+      cache: "no-store",
+    });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
+
+    await screen.findAllByTestId("candidate-image");
+    expect(fetchMock).toHaveBeenCalledWith("/api/game", {
+      cache: "no-store",
+    });
+  });
+
+  it("initializes explicitly when there is no resumable game", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input) === "/api/game/start" && !init?.method
+          ? json({ canResume: false, importInProgress: false })
+          : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen promptForStartup />);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Open Diptych Picker",
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Resume" }),
+    ).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Initialize" }));
+
+    await screen.findAllByTestId("candidate-image");
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/start", {
+      method: "POST",
+    });
+  });
+
+  it("loads a saved game directly from the startup choice", async () => {
+    const restored = cloneGame();
+    restored.round.roundNumber = 12;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/game/start" && !init?.method) {
+          return json({ canResume: false, importInProgress: false });
+        }
+        if (String(input) === "/api/game/snapshot" && init?.method === "PUT") {
+          return json({ status: "ready", game: restored });
+        }
+        throw new Error(`Unexpected request: ${String(input)}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen promptForStartup />);
+    await screen.findByRole("dialog", { name: "Open Diptych Picker" });
+    const save = new File(["{}"], "saved-game.json", {
+      type: "application/json",
+    });
+    fireEvent.change(screen.getByLabelText("Choose saved game file"), {
+      target: { files: [save] },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Game status" }),
+      ).toHaveTextContent("Round 12"),
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/snapshot", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  });
+
+  it("opens an unfinished image-pool import and returns to the chooser when dismissed", async () => {
+    const importStatus = {
+      sessionId: "import-session-1",
+      status: "editing",
+      createdAt: "2026-08-10T12:00:00.000Z",
+      sealedAt: null,
+      activatedAt: null,
+      activationTarget: 5,
+      activationReady: 0,
+      counts: {
+        total: 0,
+        annotating: 0,
+        ready: 0,
+        failed: 0,
+        removed: 0,
+        served: 0,
+      },
+      items: [],
+      initialFill: {
+        pending: 0,
+        ready: 0,
+        failed: 0,
+        failedAttemptId: null,
+        failureMessage: null,
+      },
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/game/start" && !init?.method) {
+          return json({ canResume: false, importInProgress: true });
+        }
+        if (String(input) === "/api/game/import" && init?.method === "POST") {
+          return json(importStatus);
+        }
+        if (String(input) === "/api/game/import" && init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`Unexpected request: ${String(input)}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen promptForStartup />);
+    const startup = await screen.findByRole("dialog", {
+      name: "Open Diptych Picker",
+    });
+    expect(startup).toHaveTextContent(
+      "Continue the image-pool import already in progress.",
+    );
+    fireEvent.click(within(startup).getByRole("button", { name: "Import" }));
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Import images for a new game",
+      }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Abandon import" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm abandon" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Open Diptych Picker" }),
+    ).toBeVisible();
+  });
+});
+
 describe("GameScreen initial generation", () => {
   it("polls with zero candidate images until both initial candidates are ready", async () => {
     let requests = 0;
@@ -585,6 +751,79 @@ describe("GameScreen challenger reconciliation", () => {
         }),
       ),
     );
+  });
+
+  it("warns before discarding an unsaved Preferences draft", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: initializedGame })),
+    );
+    const confirmDiscard = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirmDiscard);
+
+    render(<GameScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preferences" }));
+    fireEvent.change(screen.getByLabelText("Inspiration"), {
+      target: { value: "unsaved diagonal lighting" },
+    });
+
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(confirmDiscard).toHaveBeenCalledWith(
+      "Discard unsaved preference changes?",
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Preference profile" }),
+    ).toBeVisible();
+
+    confirmDiscard.mockReturnValue(true);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: "Preference profile" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("also protects unfinished forms nested inside Preferences", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ status: "ready", game: initializedGame })),
+    );
+    const confirmDiscard = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirmDiscard);
+
+    render(<GameScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Preferences" }));
+    fireEvent.click(screen.getByText("Prompt deck"));
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Unfinished prompt card" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(confirmDiscard).toHaveBeenCalledWith(
+      "Discard unsaved preference changes?",
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Preference profile" }),
+    ).toBeVisible();
+  });
+
+  it("shows a reload banner when the server reports a newer build", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const response = json({ status: "ready", game: initializedGame });
+        response.headers.set("X-Diptych-App-Version", "newer-build");
+        return response;
+      }),
+    );
+
+    render(<GameScreen />);
+
+    expect(await screen.findByText("New version available")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeEnabled();
   });
 
   it("shows live ready-queue and reusable-pool health", async () => {
@@ -1437,7 +1676,7 @@ describe("GameScreen challenger reconciliation", () => {
     });
   });
 
-  it("animates and completes a queued preference save after the challenger arrives", async () => {
+  it("persists a preference save while a buffered challenger is loading", async () => {
     installSuccessfulImagePreload();
     const adaptiveCompletion = completedGame();
     adaptiveCompletion.preferenceSeed = initializedGame.preferenceSeed;
@@ -1482,43 +1721,33 @@ describe("GameScreen challenger reconciliation", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Save now to apply these changes when the challenger arrives.",
       ),
-    ).toBeVisible();
+    ).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Inspiration"), {
-      target: { value: "queued diagonal lighting" },
+      target: { value: "saved diagonal lighting" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
 
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByText("Profile queued")).toBeVisible();
-    expect(
-      screen.getByText("Waiting for the challenger to arrive…"),
-    ).toBeVisible();
+    expect(screen.getByText("Saving profile")).toBeVisible();
+    expect(screen.getByText("Applying your preferences…")).toBeVisible();
     expect(screen.getByTestId("preference-save-spinner")).toBeVisible();
     expect(screen.getByLabelText("Inspiration")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(
       fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
-    ).toBe(false);
-
-    expect(await screen.findByText("Saving profile")).toBeVisible();
-    expect(screen.getByText("Applying your preferences…")).toBeVisible();
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
-      ).toBe(true),
-    );
+    ).toBe(true);
     const patchCall = fetchMock.mock.calls.find(
       ([, init]) => init?.method === "PATCH",
     );
     expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({
-      preferenceProfile: { inspiration: "queued diagonal lighting" },
+      preferenceProfile: { inspiration: "saved diagonal lighting" },
       expectedPreferenceProfile: {
-        adaptationMode: "adaptive",
-        adaptationSourceWinnerIds: ["generated-left"],
-        adaptationSourceRejectedIds: ["generated-right"],
+        adaptationMode: "static",
+        adaptationSourceWinnerIds: [],
+        adaptationSourceRejectedIds: [],
       },
     });
 
@@ -1587,6 +1816,9 @@ describe("GameScreen challenger reconciliation", () => {
 
     await screen.findByText(
       "Preferences changed while this editor was open. Reopen Preferences and try again.",
+    );
+    expect(screen.getByRole("dialog")).toContainElement(
+      screen.getByRole("alert"),
     );
     const patchCall = fetchMock.mock.calls.find(
       ([, init]) => init?.method === "PATCH",
@@ -2135,6 +2367,160 @@ describe("GameScreen game state transfer", () => {
     ).toBeVisible();
     expect(confirm).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens image import from New game while retaining the current comparison", async () => {
+    const importStatus = {
+      sessionId: "import-session-1",
+      status: "editing",
+      createdAt: "2026-08-10T12:00:00.000Z",
+      sealedAt: null,
+      activatedAt: null,
+      activationTarget: 5,
+      activationReady: 0,
+      counts: {
+        total: 0,
+        annotating: 0,
+        ready: 0,
+        failed: 0,
+        removed: 0,
+        served: 0,
+      },
+      items: [],
+      initialFill: {
+        pending: 0,
+        ready: 0,
+        failed: 0,
+        failedAttemptId: null,
+        failureMessage: null,
+      },
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input) === "/api/game/import" && init?.method === "POST"
+          ? json(importStatus)
+          : json({ status: "ready", game: initializedGame }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+    await screen.findAllByTestId("candidate-image");
+    fireEvent.click(screen.getByRole("button", { name: "New game" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import images" }));
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Import images for a new game",
+      }),
+    ).toBeVisible();
+    expect(screen.getAllByTestId("candidate-image")).toHaveLength(2);
+    expect(
+      screen.queryByRole("dialog", { name: "New game" }),
+    ).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/game/import", {
+      method: "POST",
+    });
+  });
+
+  it("keeps one imported-image failure notice and clears it after a server resolution", async () => {
+    const failedItem = {
+      id: "item-1",
+      status: "failed",
+      asset: {
+        url: "/api/assets/imported-failed.png",
+        width: 1024,
+        height: 1024,
+      },
+      annotation: null,
+      candidateId: null,
+      failureMessage: "Automatic annotation failed safely.",
+      approvedAt: "2026-08-10T12:00:00.000Z",
+    };
+    const failedStatus = {
+      sessionId: "import-session-1",
+      status: "active",
+      createdAt: "2026-08-10T12:00:00.000Z",
+      sealedAt: "2026-08-10T12:01:00.000Z",
+      activatedAt: "2026-08-10T12:02:00.000Z",
+      activationTarget: 5,
+      activationReady: 5,
+      counts: {
+        total: 6,
+        annotating: 0,
+        ready: 3,
+        failed: 1,
+        removed: 0,
+        served: 2,
+      },
+      items: [failedItem],
+      initialFill: {
+        pending: 0,
+        ready: 0,
+        failed: 0,
+        failedAttemptId: null,
+        failureMessage: null,
+      },
+    };
+    const resolvedStatus = {
+      ...failedStatus,
+      counts: { ...failedStatus.counts, annotating: 1, failed: 0 },
+      items: [{ ...failedItem, status: "annotating", failureMessage: null }],
+    };
+    const importProgress = {
+      status: "active",
+      annotating: 0,
+      ready: 3,
+      failed: 1,
+      unserved: 3,
+      activationDisplayServed: 2,
+      dequeueServed: 0,
+      initialFillPending: 0,
+      initialFillFailed: 0,
+      initialFillAttemptId: null,
+      initialFillFailureMessage: null,
+      activationTarget: 5,
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/game/import" && init?.method === "POST") {
+          return json(failedStatus);
+        }
+        if (url.endsWith("/api/game/import/items/item-1")) {
+          return json(resolvedStatus, 202);
+        }
+        return json({ status: "ready", game: initializedGame, importProgress });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GameScreen />);
+
+    expect(
+      await screen.findByRole("button", { name: "Resolve imported image" }),
+    ).toBeVisible();
+    expect(screen.getAllByText("Imported image needs attention")).toHaveLength(
+      1,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Resolve imported image" }),
+    );
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Import images for a new game",
+      }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Resolve imported image" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/game/import/items/item-1",
+      expect.objectContaining({ method: "PATCH" }),
+    );
   });
 
   it("downloads the server-provided current-game snapshot", async () => {

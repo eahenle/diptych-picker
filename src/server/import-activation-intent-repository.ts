@@ -454,3 +454,46 @@ export class JsonImportActivationIntentRepository implements ImportActivationInt
     }
   }
 }
+
+export class MemoryImportActivationIntentRepository implements ImportActivationIntentRepository {
+  private lockTail: Promise<void> = Promise.resolve();
+  private intent: ImportActivationIntent | null;
+
+  constructor(intent: ImportActivationIntent | null = null) {
+    this.intent = intent ? parseImportActivationIntent(intent) : null;
+  }
+
+  async load(): Promise<ImportActivationIntent | null> {
+    return this.intent ? parseImportActivationIntent(this.intent) : null;
+  }
+
+  async save(intent: ImportActivationIntent): Promise<void> {
+    this.intent = parseImportActivationIntent(intent);
+  }
+
+  async clear(expectedIntentId: string): Promise<void> {
+    if (this.intent && this.intent.id !== expectedIntentId) {
+      throw new Error(
+        `Expected activation intent ${expectedIntentId}, found ${this.intent.id}`,
+      );
+    }
+    if (this.intent && this.intent.phase !== "cleaned") {
+      throw new Error("Only cleaned activation intents can be cleared");
+    }
+    this.intent = null;
+  }
+
+  async withLock<T>(operation: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.lockTail;
+    this.lockTail = new Promise<void>((resolveLock) => {
+      release = resolveLock;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}

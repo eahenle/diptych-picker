@@ -217,13 +217,35 @@ export class PromptCardReconciler {
       isDeepStrictEqual(work, record.expectedJob) &&
       result.status === "completed" &&
       result.kind === "prompt-card-writer" &&
-      isDeepStrictEqual(result.sourceCandidateIds, record.sourceCandidateIds);
+      isDeepStrictEqual(result.sourceCandidateIds, record.sourceCandidateIds) &&
+      (record.sourceImageDigests === undefined
+        ? result.sourceImageDigests === undefined ||
+          isDeepStrictEqual(
+            result.sourceImageDigests,
+            writerImageDigests(record.expectedJob),
+          )
+        : isDeepStrictEqual(
+            result.sourceImageDigests,
+            record.sourceImageDigests,
+          )) &&
+      result.sourceTextDigest === record.sourceTextDigest;
     const suggestions = validCompleted
       ? [
           ...(deck.suggestions ?? []),
           {
             id: this.options.createId(),
-            sourceCandidateIds: record.sourceCandidateIds,
+            ...(record.sourceCandidateIds.length > 0
+              ? { sourceCandidateIds: record.sourceCandidateIds }
+              : {}),
+            ...((result.sourceImageDigests ?? record.sourceImageDigests)?.length
+              ? {
+                  sourceImageDigests:
+                    result.sourceImageDigests ?? record.sourceImageDigests,
+                }
+              : {}),
+            ...(record.sourceTextDigest
+              ? { sourceTextDigest: record.sourceTextDigest }
+              : {}),
             ...result.proposal,
             createdAt: result.completedAt,
           },
@@ -255,4 +277,14 @@ export class PromptCardReconciler {
       throw error;
     }
   }
+}
+
+function writerImageDigests(
+  job: Parameters<PromptCardWriterCoordinator["enqueue"]>[0],
+): string[] {
+  return [
+    ...new Set(
+      job.sources.map(({ sourceImage }) => sourceImage.filename.slice(0, -4)),
+    ),
+  ];
 }

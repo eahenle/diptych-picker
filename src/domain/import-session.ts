@@ -36,6 +36,7 @@ export interface ImportItem {
   candidateId: string | null;
   failureMessage: string | null;
   approvedAt: string;
+  readyAt?: string | null;
   servedAt: string | null;
 }
 
@@ -51,6 +52,8 @@ export interface ImportAnnotationJobRecord {
 export interface InitialFillJobRecord {
   id: string;
   attemptId: string;
+  createdAt?: string;
+  preferenceSeed?: string;
   status: "pending" | "ready" | "failed" | "superseded";
   candidate: Candidate | null;
   source: "generated";
@@ -198,6 +201,7 @@ const itemSchema = z
     candidateId: nonBlank.nullable(),
     failureMessage: nonBlank.nullable(),
     approvedAt: timestampSchema,
+    readyAt: timestampSchema.nullable().optional(),
     servedAt: timestampSchema.nullable(),
   })
   .strict()
@@ -226,6 +230,7 @@ const itemSchema = z
       (item.annotation ||
         item.candidateId ||
         item.failureMessage ||
+        item.readyAt ||
         item.servedAt)
     ) {
       context.addIssue({
@@ -255,6 +260,7 @@ const itemSchema = z
         !item.failureMessage ||
         item.annotation ||
         item.candidateId ||
+        item.readyAt ||
         item.servedAt)
     ) {
       context.addIssue({
@@ -413,6 +419,8 @@ const initialFillJobSchema = z
   .object({
     id: durableId,
     attemptId: durableId,
+    createdAt: timestampSchema.optional(),
+    preferenceSeed: nonBlank.optional(),
     status: z.enum(["pending", "ready", "failed", "superseded"]),
     candidate: candidateSchema.nullable(),
     source: z.literal("generated"),

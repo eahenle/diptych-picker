@@ -18,6 +18,12 @@ import {
   type GameRules,
   type GameState,
 } from "@/domain/game";
+import {
+  deriveDequeueOperationId,
+  type ImportSession,
+  type ImportSupplySnapshot,
+} from "@/domain/import-session";
+import type { CandidateDequeueService } from "./candidate-dequeue-service";
 import type { ChallengerRepository } from "./challenger-repository";
 import { applyAdaptivePreferences } from "./game-adaptation";
 import {
@@ -27,6 +33,8 @@ import {
   recordTie,
 } from "./game-comparison";
 import type { GameRepository } from "./repository";
+import type { ImportSessionRepository } from "./import-session-repository";
+import type { LockedStateContext } from "./state-lock-coordinator";
 
 interface PreparedSelectionReconcilerOptions {
   gameRepository: GameRepository;
@@ -37,6 +45,14 @@ interface PreparedSelectionReconcilerOptions {
   now: () => string;
   random: () => number;
   rulesFor: (game: GameState) => GameRules;
+  importSessionRepository?: ImportSessionRepository;
+  candidateDequeueService?: Pick<CandidateDequeueService, "dequeueLocked">;
+}
+
+export interface PreparedSelectionResult {
+  game: GameState;
+  challengers: ChallengerState;
+  importSupply?: ImportSupplySnapshot;
 }
 
 export class PreparedSelectionReconciler {
@@ -131,12 +147,40 @@ export class PreparedSelectionReconciler {
   async complete(
     game: GameState,
     challengers: ChallengerState,
-  ): Promise<{ game: GameState; challengers: ChallengerState }> {
+    lockContext?: LockedStateContext,
+  ): Promise<PreparedSelectionResult> {
     if (game.round.status !== "generating" || !game.pendingSelection) {
       return { game, challengers };
     }
 
     if (game.pendingSelection.kind === "retirement") {
+      if (lockContext && this.options.candidateDequeueService) {
+        const replacements = await this.drawPairSourceAware(
+          lockContext,
+          game,
+          challengers,
+          "retirement",
+        );
+        if (!replacements.candidates) {
+          return {
+            game,
+            challengers: replacements.challengers,
+            importSupply: replacements.importSupply,
+          };
+        }
+        const adapted = applyAdaptivePreferences(
+          completeChampionRetirement(game, ...replacements.candidates),
+          replacements.challengers,
+        );
+        await this.options.gameRepository.save(adapted.game);
+        const finalized = this.finalize(adapted.challengers);
+        await this.options.challengerRepository.save(finalized);
+        return {
+          game: adapted.game,
+          challengers: finalized,
+          importSupply: replacements.importSupply,
+        };
+      }
       if (challengers.ready.length < 2) return { game, challengers };
       const leftDraw = popReady(challengers);
       const rightDraw = popReady(leftDraw.state);
@@ -159,6 +203,37 @@ export class PreparedSelectionReconciler {
       game.pendingSelection.kind === "both-lose"
     ) {
       const outcome = game.pendingSelection.kind;
+      if (lockContext && this.options.candidateDequeueService) {
+        const replacements = await this.drawPairSourceAware(
+          lockContext,
+          game,
+          challengers,
+          outcome,
+        );
+        if (!replacements.candidates) {
+          return {
+            game,
+            challengers: replacements.challengers,
+            importSupply: replacements.importSupply,
+          };
+        }
+        const completed =
+          outcome === "tie"
+            ? completeTie(game, ...replacements.candidates)
+            : completeBothLose(game, ...replacements.candidates);
+        const adapted =
+          outcome === "both-lose"
+            ? applyAdaptivePreferences(completed, replacements.challengers)
+            : { game: completed, challengers: replacements.challengers };
+        await this.options.gameRepository.save(adapted.game);
+        const finalized = this.finalize(adapted.challengers);
+        await this.options.challengerRepository.save(finalized);
+        return {
+          game: adapted.game,
+          challengers: finalized,
+          importSupply: replacements.importSupply,
+        };
+      }
       const replacements = this.drawPairReplacements(challengers, game);
       if (!replacements.candidates) {
         if (replacements.state !== challengers) {
@@ -182,6 +257,36 @@ export class PreparedSelectionReconciler {
 
     if (game.pendingSelection.kind !== "buffer") {
       return { game, challengers };
+    }
+
+    if (lockContext && this.options.candidateDequeueService) {
+      const dequeued = await this.dequeueSourceAware(
+        lockContext,
+        game,
+        challengers,
+        "single",
+        "selection",
+        [],
+      );
+      if (!dequeued.candidate) {
+        return {
+          game,
+          challengers: dequeued.challengers,
+          importSupply: dequeued.importSupply,
+        };
+      }
+      const adapted = applyAdaptivePreferences(
+        completeSelection(game, dequeued.candidate),
+        dequeued.challengers,
+      );
+      await this.options.gameRepository.save(adapted.game);
+      const finalized = this.finalize(adapted.challengers);
+      await this.options.challengerRepository.save(finalized);
+      return {
+        game: adapted.game,
+        challengers: finalized,
+        importSupply: dequeued.importSupply,
+      };
     }
 
     let draw = popReady(challengers);
@@ -232,6 +337,87 @@ export class PreparedSelectionReconciler {
     const cleaned = { ...challengers, ready };
     await this.options.challengerRepository.save(cleaned);
     return cleaned;
+  }
+
+  private async drawPairSourceAware(
+    context: LockedStateContext,
+    game: GameState,
+    challengers: ChallengerState,
+    reason: "retirement" | "tie" | "both-lose",
+  ): Promise<{
+    candidates: [Candidate, Candidate] | null;
+    challengers: ChallengerState;
+    importSupply: ImportSupplySnapshot;
+  }> {
+    const left = await this.dequeueSourceAware(
+      context,
+      game,
+      challengers,
+      "pair-left",
+      reason,
+      [],
+    );
+    if (!left.candidate) {
+      return {
+        candidates: null,
+        challengers: left.challengers,
+        importSupply: left.importSupply,
+      };
+    }
+    const right = await this.dequeueSourceAware(
+      context,
+      game,
+      left.challengers,
+      "pair-right",
+      reason,
+      [left.candidate.id],
+    );
+    return {
+      candidates: right.candidate ? [left.candidate, right.candidate] : null,
+      challengers: right.challengers,
+      importSupply: right.importSupply,
+    };
+  }
+
+  private async dequeueSourceAware(
+    context: LockedStateContext,
+    game: GameState,
+    challengers: ChallengerState,
+    replacementSlot: "single" | "pair-left" | "pair-right",
+    reason: "selection" | "retirement" | "tie" | "both-lose",
+    extraExcludedCandidateIds: string[],
+  ) {
+    const originalReceipt = challengers.pendingComparison;
+    if (!originalReceipt) {
+      throw new Error("Prepared selection is missing its comparison receipt");
+    }
+    const importSession = await this.options.importSessionRepository?.load();
+    const importSessionId = activatedImportSessionId(importSession ?? null);
+    const request = {
+      importSessionId,
+      challengerSessionId: challengers.sessionId,
+      originalReceipt,
+      replacementSlot,
+      reason,
+      invocation: "prepared-recovery" as const,
+      roundNumber: game.round.roundNumber + 1,
+      excludedCandidateIds: [
+        game.round.leftCandidate.id,
+        game.round.rightCandidate.id,
+        ...extraExcludedCandidateIds,
+      ],
+      fallbackMaximumConsecutive:
+        this.options.rulesFor(game).fallbackMaximumConsecutive,
+    };
+    return this.options.candidateDequeueService!.dequeueLocked(context, {
+      ...request,
+      dequeueOperationId: deriveDequeueOperationId(
+        request.importSessionId,
+        request.challengerSessionId,
+        request.originalReceipt,
+        request.replacementSlot,
+      ),
+    });
   }
 
   drawPairReplacements(
@@ -298,6 +484,7 @@ export class PreparedSelectionReconciler {
   baseline(state: ChallengerState): PendingSelectionBaseline {
     return {
       ready: state.ready,
+      importQueue: state.importQueue,
       ratings: state.ratings,
       generationTurnaroundEmaMs: state.generationTurnaroundEmaMs,
       consecutiveFallbackDraws: state.consecutiveFallbackDraws,
@@ -309,7 +496,17 @@ export class PreparedSelectionReconciler {
     return {
       ...state,
       pendingComparison: null,
+      preparedDequeues: [],
       pendingSelectionBaseline: null,
     };
   }
+}
+
+function activatedImportSessionId(
+  session: ImportSession | null,
+): string | null {
+  return session?.activatedAt &&
+    (session.status === "active" || session.status === "completed")
+    ? session.id
+    : null;
 }

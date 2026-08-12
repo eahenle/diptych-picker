@@ -48,7 +48,19 @@ const published = await publishTerminal(mailbox, jobId, "completed", {
   kind: "prompt-card-writer",
   status: "completed",
   completedAt: new Date().toISOString(),
-  sourceCandidateIds: activeJob.sources.map(({ candidateId }) => candidateId),
+  sourceCandidateIds: activeJob.sources.flatMap(({ candidateId }) =>
+    candidateId ? [candidateId] : [],
+  ),
+  sourceImageDigests: [
+    ...new Set(
+      activeJob.sources.map(({ sourceImage }) =>
+        sourceImage.filename.slice(0, -4),
+      ),
+    ),
+  ],
+  ...(activeJob.sourceTextDigest
+    ? { sourceTextDigest: activeJob.sourceTextDigest }
+    : {}),
   proposal: suggestion.proposal,
 });
 process.stdout.write(`${JSON.stringify(published)}\n`);

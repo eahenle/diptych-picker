@@ -467,6 +467,48 @@ describe("FileGenerationMailbox", () => {
     ).resolves.toEqual(result);
   });
 
+  it("accepts a text-only prompt-card writer job with digest lineage", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const sourceTextDigest =
+      "754548edd47f62ef35b5aece43e6394f34ec4cba060743b9f37d80abe0f78ed5";
+    const writerJob: PromptCardWriterJob = {
+      id: "prompt-card-writer-text",
+      kind: "prompt-card-writer",
+      createdAt: "2026-08-10T20:00:00.000Z",
+      guidance: "A quiet ultraviolet architectural nocturne.",
+      sourceTextDigest,
+      sources: [],
+    };
+
+    await mailbox.enqueuePromptCardWriter(writerJob);
+    await expect(
+      mailbox.readPromptCardWriterWork(writerJob.id),
+    ).resolves.toEqual(writerJob);
+
+    const result = {
+      jobId: writerJob.id,
+      kind: "prompt-card-writer",
+      status: "completed",
+      completedAt: "2026-08-10T20:01:00.000Z",
+      sourceCandidateIds: [],
+      sourceImageDigests: [],
+      sourceTextDigest,
+      proposal: {
+        title: "Ultraviolet nocturne",
+        prompt:
+          "A quiet ultraviolet architectural nocturne with monumental negative space.",
+        negativePrompt: "readable text, logos",
+        tags: ["architectural", "ultraviolet"],
+        reasoningSummary: "Translates the supplied guidance into one card.",
+      },
+    };
+    await writeRawResult(root, "completed", writerJob.id, result);
+    await expect(
+      mailbox.readPromptCardWriterResult(writerJob.id),
+    ).resolves.toEqual(result);
+  });
+
   it("strictly persists prompt-card blender work and one proposal", async () => {
     const root = await mailboxRoot();
     const mailbox = new FileGenerationMailbox(root);

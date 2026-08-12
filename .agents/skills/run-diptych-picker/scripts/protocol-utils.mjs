@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmod,
   link,
@@ -113,6 +114,25 @@ export function validateJobKind(job) {
     }
     return;
   }
+  if (kind === "initial-import-fill") {
+    if (
+      !isExactObject(job, [
+        "id",
+        "kind",
+        "createdAt",
+        "importSessionId",
+        "attemptId",
+        "preferenceSeed",
+      ]) ||
+      !JOB_ID.test(job.importSessionId ?? "") ||
+      !JOB_ID.test(job.attemptId ?? "") ||
+      typeof job.preferenceSeed !== "string" ||
+      job.preferenceSeed.trim().length === 0
+    ) {
+      throw new Error(`Initial import fill job ${job.id} is invalid`);
+    }
+    return;
+  }
   if (kind === "leaderboard-profile") {
     const sources = job.sources;
     if (
@@ -178,18 +198,34 @@ export function validateJobKind(job) {
     const sources = job.sources;
     if (
       !Array.isArray(sources) ||
-      sources.length < 3 ||
       sources.length > 5 ||
       sources.some(
         (source) =>
-          typeof source.candidateId !== "string" ||
-          source.candidateId.length === 0 ||
+          (source.candidateId !== undefined &&
+            (typeof source.candidateId !== "string" ||
+              source.candidateId.length === 0)) ||
           typeof source.concept !== "string" ||
           !Array.isArray(source.style) ||
           !validProfileSource(source.sourceImage),
       ) ||
-      new Set(sources.map(({ candidateId }) => candidateId)).size !==
-        sources.length
+      new Set(
+        sources.flatMap(({ candidateId }) =>
+          candidateId ? [candidateId] : [],
+        ),
+      ).size !== sources.filter(({ candidateId }) => candidateId).length ||
+      (sources.length === 0 &&
+        (typeof job.guidance !== "string" ||
+          job.guidance.trim().length === 0)) ||
+      (job.guidance !== undefined &&
+        (typeof job.guidance !== "string" ||
+          job.guidance.trim().length === 0 ||
+          job.guidance.length > 2_000)) ||
+      Boolean(job.guidance) !== Boolean(job.sourceTextDigest) ||
+      (job.sourceTextDigest !== undefined &&
+        !/^[a-f0-9]{64}$/.test(job.sourceTextDigest)) ||
+      (job.guidance &&
+        createHash("sha256").update(job.guidance.trim()).digest("hex") !==
+          job.sourceTextDigest)
     ) {
       throw new Error(`Prompt-card writer job ${job.id} is invalid`);
     }

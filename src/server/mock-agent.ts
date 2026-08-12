@@ -8,6 +8,8 @@ import type {
   GenerationJob,
   GenerationMailbox,
   GenerationResult,
+  InitialImportFillJob,
+  InitialImportFillMailbox,
   ImportAnnotationJob,
   ImportAnnotationMailbox,
   ImportAnnotationResult,
@@ -108,6 +110,45 @@ export class MockAgentWorker {
     }
     if (job.kind === "import-annotation") {
       await this.completeImportAnnotation(job);
+      return;
+    }
+
+    if (job.kind === "initial-import-fill") {
+      const proposal = {
+        concept: `Imported pool starter ${job.id}`,
+        visualPrompt: job.preferenceSeed,
+        styleTags: ["generated initial fill"],
+        reasoningSummary:
+          "Generates one standalone candidate from the clean import session's default preference seed.",
+      };
+      const image = await this.imageProvider.generate(proposal.visualPrompt);
+      if (
+        image.extension !== "png" ||
+        image.contentType !== "image/png" ||
+        image.width !== image.height
+      ) {
+        throw new Error("Mock generation must produce one square PNG");
+      }
+      const candidateId = `challenger-${job.id}`;
+      const stored = await this.options.assetStore.save({
+        ...image,
+        id: candidateId,
+      });
+      await this.publish("completed", job.id, {
+        jobId: job.id,
+        status: "completed",
+        completedAt: this.now(),
+        proposal,
+        asset: {
+          candidateId,
+          filename: stored.filename,
+          imageUrl: stored.url,
+          contentType: "image/png",
+          width: image.width,
+          height: image.height,
+          byteLength: stored.byteLength,
+        },
+      });
       return;
     }
 
@@ -301,16 +342,36 @@ export class MockAgentWorker {
       0,
       8,
     );
+    const favoriteSet =
+      job.sources.length >= 3 &&
+      job.sources.every(({ candidateId }) => Boolean(candidateId)) &&
+      !job.guidance;
     const result: PromptCardWriterResult = {
       jobId: job.id,
       kind: "prompt-card-writer",
       status: "completed",
       completedAt: this.now(),
-      sourceCandidateIds: job.sources.map(({ candidateId }) => candidateId),
+      sourceCandidateIds: job.sources.flatMap(({ candidateId }) =>
+        candidateId ? [candidateId] : [],
+      ),
+      sourceImageDigests: [
+        ...new Set(
+          job.sources.map(({ sourceImage }) =>
+            sourceImage.filename.slice(0, -4),
+          ),
+        ),
+      ],
+      ...(job.sourceTextDigest
+        ? { sourceTextDigest: job.sourceTextDigest }
+        : {}),
       proposal: {
-        title: "Favorite-set synthesis",
+        title: favoriteSet
+          ? "Favorite-set synthesis"
+          : job.sources.length > 0
+            ? "Source synthesis"
+            : "Guided synthesis",
         prompt:
-          `Create a new image direction that synthesizes the transferable composition, mood, medium, and palette shared by ${concepts.join(", ")} without copying any source exactly.`.slice(
+          `Create a new image direction that synthesizes ${concepts.length > 0 ? `the transferable composition, mood, medium, and palette shared by ${concepts.join(", ")}` : "the supplied text guidance"}${job.guidance ? `. Follow this guidance: ${job.guidance}` : ""} without copying any source exactly.`.slice(
             0,
             1_000,
           ),
@@ -318,7 +379,7 @@ export class MockAgentWorker {
           "exact reproduction, recognizable identity, readable text, logos",
         tags,
         reasoningSummary:
-          "Extracts shared aesthetic qualities from the selected immutable generated favorites while preserving them as read-only sources.",
+          "Extracts transferable aesthetic qualities from private read-only sources and/or text guidance.",
       },
     };
     await this.publish("completed", job.id, result);
@@ -419,6 +480,34 @@ export class MockGenerationMailbox implements GenerationMailbox {
     if (job && !(await this.mailbox.readResult(job.id))) {
       this.worker.schedule(job);
     }
+  }
+}
+
+export class MockInitialImportFillMailbox implements InitialImportFillMailbox {
+  constructor(
+    private readonly mailbox: InitialImportFillMailbox,
+    private readonly worker: MockAgentWorker,
+  ) {}
+
+  async enqueueInitialImportFill(job: InitialImportFillJob): Promise<void> {
+    await this.mailbox.enqueueInitialImportFill(job);
+    this.worker.schedule(job);
+  }
+
+  async readInitialImportFillWork(jobId: string) {
+    const job = await this.mailbox.readInitialImportFillWork(jobId);
+    if (job && !(await this.mailbox.readInitialImportFillResult(job.id))) {
+      this.worker.schedule(job);
+    }
+    return job;
+  }
+
+  readInitialImportFillResult(jobId: string) {
+    return this.mailbox.readInitialImportFillResult(jobId);
+  }
+
+  archiveInitialImportFill(jobId: string) {
+    return this.mailbox.archiveInitialImportFill(jobId);
   }
 }
 

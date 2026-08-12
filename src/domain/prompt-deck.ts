@@ -22,6 +22,8 @@ export interface CreatePromptCardInput {
   tags: string[];
   parents?: string[];
   sourceCandidateIds?: string[];
+  sourceImageDigests?: string[];
+  sourceTextDigest?: string;
 }
 
 export function emptyPromptDeck(): PromptDeck {
@@ -51,6 +53,12 @@ export function createPromptCard(
     parents: input.parents ?? [],
     ...(input.sourceCandidateIds
       ? { sourceCandidateIds: [...input.sourceCandidateIds] }
+      : {}),
+    ...(input.sourceImageDigests
+      ? { sourceImageDigests: [...input.sourceImageDigests] }
+      : {}),
+    ...(input.sourceTextDigest
+      ? { sourceTextDigest: input.sourceTextDigest }
       : {}),
     active: true,
     createdAt,
@@ -167,12 +175,16 @@ export function createPromptCardWriterRequest(
   sources: PromptCardWriterSource[],
   id: string,
   createdAt: string,
+  guidance?: string,
+  sourceTextDigest?: string,
 ): PromptCardWriterRequest {
   return {
     id,
     kind: "prompt-card-writer",
     createdAt,
     sources,
+    ...(guidance ? { guidance } : {}),
+    ...(sourceTextDigest ? { sourceTextDigest } : {}),
   };
 }
 

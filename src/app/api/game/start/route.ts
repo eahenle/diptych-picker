@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
+import { appVersionResponseHeaders } from "@/server/app-version";
 import { SelectionConflictError } from "@/server/game-service";
 import {
   getBufferHealth,
   getDisplayedEloRatings,
+  getGameStartupStatus,
   resetGame,
 } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
+
+export async function GET() {
+  return NextResponse.json(await getGameStartupStatus(), {
+    headers: appVersionResponseHeaders(),
+  });
+}
 
 export async function POST() {
   try {
@@ -19,6 +27,7 @@ export async function POST() {
             eloRatings: await getDisplayedEloRatings(state.game),
           }
         : state,
+      { headers: appVersionResponseHeaders() },
     );
   } catch (error) {
     if (error instanceof SelectionConflictError) {

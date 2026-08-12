@@ -456,6 +456,41 @@
   cursor: pointer;
 }
 
+.versionNotice {
+  width: min(680px, 100%);
+  margin: 18px auto 0;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(118, 166, 139, 0.62);
+  background: rgba(50, 80, 63, 0.28);
+  color: #c8d9cd;
+  font-size: 12px;
+}
+
+.versionNotice span {
+  display: grid;
+  gap: 3px;
+}
+
+.versionNotice strong {
+  color: #e1ede4;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.versionNotice button {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  color: #e1ede4;
+  background: transparent;
+  border: 1px solid #76a68b;
+  cursor: pointer;
+}
+
 .generationNotice {
   width: min(680px, 100%);
   margin: 18px auto 0;
@@ -499,6 +534,41 @@
 
 .generationNotice button:last-child {
   border-color: var(--accent);
+}
+
+.importFailureNotice {
+  width: min(680px, 100%);
+  margin: 18px auto 0;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(183, 77, 66, 0.55);
+  background: rgba(183, 77, 66, 0.1);
+  color: #dfbbb4;
+  font-size: 12px;
+}
+
+.importFailureNotice span {
+  display: grid;
+  gap: 3px;
+}
+
+.importFailureNotice strong {
+  color: #f0d2cc;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.importFailureNotice button {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  color: #f0c7c2;
+  background: transparent;
+  border: 1px solid var(--danger);
+  cursor: pointer;
 }
 
 .exportNotice {
@@ -561,6 +631,17 @@
   }
   .generationNotice > div {
     justify-content: flex-end;
+  }
+  .importFailureNotice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .versionNotice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .versionNotice button {
+    align-self: flex-end;
   }
   .conceptLabel {
     font-size: 9px;

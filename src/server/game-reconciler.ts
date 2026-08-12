@@ -1,16 +1,8 @@
-import {
-  backfillGeneratedPool,
-  popReady,
-  type CandidateDraw,
-  type ChallengerState,
-} from "@/domain/challenger-state";
-import {
-  completeSelection,
-  type GameRules,
-  type GameState,
-} from "@/domain/game";
+import { backfillGeneratedPool } from "@/domain/challenger-state";
+import type { GameRules, GameState } from "@/domain/game";
+import type { ImportSession } from "@/domain/import-session";
+import { summarizeImportSupply } from "./candidate-dequeue-service";
 import type { ChallengerRepository } from "./challenger-repository";
-import { applyAdaptivePreferences } from "./game-adaptation";
 import { refillContext } from "./game-refill";
 import type { GenerationJobPublisher } from "./generation-job-publisher";
 import type { GenerationSelectionReconciler } from "./generation-selection-reconciler";
@@ -20,10 +12,17 @@ import type { PromptCardReconciler } from "./prompt-card-reconciler";
 import type { RefillCapacityService } from "./refill-capacity-service";
 import type { RefillResultReconciler } from "./refill-result-reconciler";
 import type { GameRepository } from "./repository";
+import type { ImportSessionRepository } from "./import-session-repository";
+import type {
+  LockedStateContext,
+  StateLockCoordinator,
+} from "./state-lock-coordinator";
 
 interface GameReconcilerOptions {
   gameRepository: GameRepository;
   challengerRepository: ChallengerRepository;
+  importSessionRepository: ImportSessionRepository;
+  stateLockCoordinator: StateLockCoordinator;
   generationSelectionReconciler: Pick<
     GenerationSelectionReconciler,
     "cleanup" | "reconcile"
@@ -38,7 +37,6 @@ interface GameReconcilerOptions {
   refillCapacityService: Pick<RefillCapacityService, "plan">;
   generationJobPublisher: Pick<GenerationJobPublisher, "ensureAll">;
   rulesFor: (game: GameState) => GameRules;
-  drawFallback: (state: ChallengerState, game: GameState) => CandidateDraw;
 }
 
 export class GameReconciler {
@@ -49,7 +47,9 @@ export class GameReconciler {
   async reconcile(): Promise<GameState | null> {
     if (this.reconciliation) return this.reconciliation;
 
-    const reconciliation = this.withStateLocks(() => this.reconcileLocked());
+    const reconciliation = this.withStateLocks((context) =>
+      this.reconcileLocked(context),
+    );
     this.reconciliation = reconciliation;
     try {
       return await reconciliation;
@@ -58,9 +58,15 @@ export class GameReconciler {
     }
   }
 
-  private async reconcileLocked(): Promise<GameState | null> {
+  private async reconcileLocked(
+    lockContext: LockedStateContext,
+  ): Promise<GameState | null> {
     let game = await this.options.gameRepository.load();
     if (!game) return null;
+    const importSession = await this.options.importSessionRepository.load();
+    let importSupply = summarizeImportSupply(
+      activatedImportSessionId(importSession) ? importSession : null,
+    );
 
     game = await this.options.generationSelectionReconciler.cleanup(game);
     game = await this.options.promptCardReconciler.reconcile(game);
@@ -96,8 +102,10 @@ export class GameReconciler {
     const prepared = await this.options.preparedSelectionReconciler.complete(
       game,
       challengers,
+      lockContext,
     );
     game = prepared.game;
+    importSupply = prepared.importSupply ?? importSupply;
     challengers =
       await this.options.preparedSelectionReconciler.removeDisplayedCandidatesFromReady(
         prepared.game,
@@ -107,41 +115,27 @@ export class GameReconciler {
     const refills = await this.options.refillResultReconciler.reconcile(
       game,
       challengers,
+      lockContext,
     );
     game = refills.game;
     challengers = refills.challengers;
 
-    if (
-      game.round.status === "generating" &&
-      game.pendingSelection?.kind === "buffer"
-    ) {
-      let draw = popReady(challengers);
-      if (!draw.candidate) {
-        draw = this.options.drawFallback(challengers, game);
-      }
-      challengers = draw.state;
-      if (draw.candidate) {
-        const adapted = applyAdaptivePreferences(
-          completeSelection(game, draw.candidate),
-          challengers,
-        );
-        game = adapted.game;
-        challengers = adapted.challengers;
-        await this.options.gameRepository.save(game);
-        challengers = {
-          ...challengers,
-          pendingComparison: null,
-          pendingSelectionBaseline: null,
-        };
-        await this.options.challengerRepository.save(challengers);
-      }
-    }
+    const afterRefills =
+      await this.options.preparedSelectionReconciler.complete(
+        game,
+        challengers,
+        lockContext,
+      );
+    game = afterRefills.game;
+    challengers = afterRefills.challengers;
+    importSupply = afterRefills.importSupply ?? importSupply;
 
     const context = refillContext(game, challengers);
     if (context) {
       const capacity = this.options.refillCapacityService.plan(
         challengers,
         context,
+        importSupply,
       );
       challengers = capacity.state;
       if (capacity.jobs.length > 0) {
@@ -153,9 +147,21 @@ export class GameReconciler {
     return game;
   }
 
-  private withStateLocks<T>(operation: () => Promise<T>): Promise<T> {
-    return this.options.gameRepository.withLock(() =>
-      this.options.challengerRepository.withLock(operation),
+  private withStateLocks<T>(
+    operation: (context: LockedStateContext) => Promise<T>,
+  ): Promise<T> {
+    return this.options.stateLockCoordinator.withStateLocks(
+      ["activation-intent", "import-session", "game", "challenger"],
+      operation,
     );
   }
+}
+
+function activatedImportSessionId(
+  session: ImportSession | null,
+): string | null {
+  return session?.activatedAt &&
+    (session.status === "active" || session.status === "completed")
+    ? session.id
+    : null;
 }

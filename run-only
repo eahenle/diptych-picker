@@ -14,9 +14,16 @@ fi
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 production_dist_dir=".next-run"
+app_build_version="${DIPTYCH_APP_BUILD_VERSION:-}"
+if [[ -z "$app_build_version" ]]; then
+  app_build_version="$(git -C "$repository_root" rev-parse --verify HEAD 2>/dev/null || true)"
+fi
+app_build_version="${app_build_version:-development}"
 build_command=(
   env
+  APP_BUILD_VERSION="$app_build_version"
   GENERATION_PROVIDER=agent
+  NEXT_PUBLIC_APP_BUILD_VERSION="$app_build_version"
   NEXT_DIST_DIR="$production_dist_dir"
   npm
   run
@@ -24,7 +31,9 @@ build_command=(
 )
 start_command=(
   env
+  APP_BUILD_VERSION="$app_build_version"
   GENERATION_PROVIDER=agent
+  NEXT_PUBLIC_APP_BUILD_VERSION="$app_build_version"
   NEXT_DIST_DIR="$production_dist_dir"
   npm
   run

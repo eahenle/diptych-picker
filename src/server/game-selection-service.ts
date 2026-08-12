@@ -1,10 +1,4 @@
-import {
-  popReady,
-  type BufferedCandidate,
-  type CandidateDraw,
-  type ChallengerState,
-  type PendingComparisonReceipt,
-} from "@/domain/challenger-state";
+import type { PendingComparisonReceipt } from "@/domain/challenger-state";
 import {
   beginChampionRetirement,
   beginBothLose,
@@ -21,8 +15,17 @@ import {
   type GameState,
   type Side,
 } from "@/domain/game";
+import {
+  deriveDequeueOperationId,
+  type ImportSession,
+} from "@/domain/import-session";
 import { recordPromptCardDecision } from "@/domain/prompt-deck";
 import type { ChallengerRepository } from "./challenger-repository";
+import {
+  type CandidateDequeueRequest,
+  type CandidateDequeueService,
+  summarizeImportSupply,
+} from "./candidate-dequeue-service";
 import { applyAdaptivePreferences } from "./game-adaptation";
 import {
   MissingGameError,
@@ -39,16 +42,21 @@ import type { GenerationJobPublisher } from "./generation-job-publisher";
 import type { PreparedSelectionReconciler } from "./prepared-selection-reconciler";
 import type { PromptCardReconciler } from "./prompt-card-reconciler";
 import type { RefillCapacityService } from "./refill-capacity-service";
+import type { ImportSessionRepository } from "./import-session-repository";
 import type { GameRepository } from "./repository";
+import type {
+  LockedStateContext,
+  StateLockCoordinator,
+} from "./state-lock-coordinator";
 
 interface GameSelectionServiceOptions {
   gameRepository: GameRepository;
   challengerRepository: ChallengerRepository;
+  importSessionRepository: ImportSessionRepository;
+  stateLockCoordinator: StateLockCoordinator;
+  candidateDequeueService: Pick<CandidateDequeueService, "dequeueLocked">;
   promptCardReconciler: Pick<PromptCardReconciler, "reconcileEditor">;
-  preparedSelectionReconciler: Pick<
-    PreparedSelectionReconciler,
-    "baseline" | "drawPairReplacements"
-  >;
+  preparedSelectionReconciler: Pick<PreparedSelectionReconciler, "baseline">;
   refillCapacityService: Pick<RefillCapacityService, "plan">;
   generationJobPublisher: Pick<GenerationJobPublisher, "ensureAll">;
   config: {
@@ -56,7 +64,6 @@ interface GameSelectionServiceOptions {
     eloKFactor: number;
   };
   rulesFor: (game: GameState) => GameRules;
-  drawFallback: (state: ChallengerState, game: GameState) => CandidateDraw;
   now: () => string;
 }
 
@@ -67,7 +74,7 @@ export class GameSelectionService {
     winnerSide: Side,
     expectedRoundNumber: number,
   ): Promise<GameState> {
-    return this.withStateLocks(async () => {
+    const outcome = await this.withStateLocks(async (lockContext) => {
       const current = await this.options.gameRepository.load();
       if (!current) {
         throw new MissingGameError("Start a game before choosing an image");
@@ -111,6 +118,11 @@ export class GameSelectionService {
         current.round,
         oppositeSide(winnerSide),
       );
+      const originalReceipt = comparisonReceipt(
+        current,
+        winnerSide,
+        selectedAt,
+      );
       let nextChallengers = recordComparison(
         {
           ...challengerState,
@@ -119,35 +131,90 @@ export class GameSelectionService {
         },
         retainedWinner,
         rejectedCandidate,
-        comparisonReceipt(current, winnerSide, selectedAt),
+        originalReceipt,
         { ...this.options.config, poolMaximum: rules.poolMaximum },
       );
-      let preparedReadyHeads: BufferedCandidate[] = [];
+      await this.options.gameRepository.save(
+        recordPromptCardDecision(
+          inFlight,
+          [retainedWinner],
+          [rejectedCandidate],
+          selectedAt,
+          "Selected comparison winner",
+        ),
+      );
+      await this.options.challengerRepository.save(nextChallengers);
+
+      const importSession = await this.options.importSessionRepository.load();
+      const importSessionId = activatedImportSessionId(importSession);
+      let importSupply = summarizeImportSupply(
+        importSessionId ? importSession : null,
+      );
       let nextGame = inFlight;
       if (retirement) {
-        if (nextChallengers.ready.length >= 2) {
-          preparedReadyHeads = nextChallengers.ready.slice(0, 2);
-          const leftDraw = popReady(nextChallengers);
-          const rightDraw = popReady(leftDraw.state);
-          nextChallengers = rightDraw.state;
+        const leftDraw = await this.dequeue(lockContext, {
+          importSessionId,
+          challengerSessionId: nextChallengers.sessionId,
+          originalReceipt,
+          replacementSlot: "pair-left",
+          reason: "retirement",
+          invocation: "live",
+          roundNumber: current.round.roundNumber + 1,
+          excludedCandidateIds: [
+            current.round.leftCandidate.id,
+            current.round.rightCandidate.id,
+          ],
+          fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
+        });
+        nextChallengers = leftDraw.challengers;
+        importSupply = leftDraw.importSupply;
+        const rightDraw = leftDraw.candidate
+          ? await this.dequeue(lockContext, {
+              importSessionId,
+              challengerSessionId: nextChallengers.sessionId,
+              originalReceipt,
+              replacementSlot: "pair-right",
+              reason: "retirement",
+              invocation: "live",
+              roundNumber: current.round.roundNumber + 1,
+              excludedCandidateIds: [
+                current.round.leftCandidate.id,
+                current.round.rightCandidate.id,
+                leftDraw.candidate.id,
+              ],
+              fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
+            })
+          : null;
+        if (rightDraw) {
+          nextChallengers = rightDraw.challengers;
+          importSupply = rightDraw.importSupply;
+        }
+        if (leftDraw.candidate && rightDraw?.candidate) {
           nextGame = completeChampionRetirement(
             inFlight,
-            leftDraw.candidate!,
-            rightDraw.candidate!,
+            leftDraw.candidate,
+            rightDraw.candidate,
           );
         }
       } else {
-        let draw = popReady(nextChallengers);
+        const draw = await this.dequeue(lockContext, {
+          importSessionId,
+          challengerSessionId: nextChallengers.sessionId,
+          originalReceipt,
+          replacementSlot: "single",
+          reason: "selection",
+          invocation: "live",
+          roundNumber: current.round.roundNumber + 1,
+          excludedCandidateIds: [
+            current.round.leftCandidate.id,
+            current.round.rightCandidate.id,
+          ],
+          fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
+        });
+        nextChallengers = draw.challengers;
+        importSupply = draw.importSupply;
         if (draw.candidate) {
-          preparedReadyHeads = nextChallengers.ready.slice(0, 1);
-          nextChallengers = draw.state;
           nextGame = completeSelection(inFlight, draw.candidate);
-        } else {
-          draw = this.options.drawFallback(nextChallengers, current);
-          nextChallengers = draw.state;
-          if (draw.candidate) {
-            nextGame = completeSelection(inFlight, draw.candidate);
-          }
         }
       }
 
@@ -169,27 +236,9 @@ export class GameSelectionService {
           retainedWinner,
           rejectedCandidate,
         },
+        importSupply,
       );
-      const durableChallengers =
-        preparedReadyHeads.length > 0
-          ? {
-              ...capacity.state,
-              ready: [...preparedReadyHeads, ...capacity.state.ready],
-            }
-          : capacity.state;
-      // Persist a replayable selection before committing either side of the
-      // cross-repository transition. A prepared FIFO head remains durable
-      // until the completed game round is safely stored.
-      await this.options.gameRepository.save(
-        recordPromptCardDecision(
-          inFlight,
-          [retainedWinner],
-          [rejectedCandidate],
-          selectedAt,
-          "Selected comparison winner",
-        ),
-      );
-      await this.options.challengerRepository.save(durableChallengers);
+      await this.options.challengerRepository.save(capacity.state);
       await this.options.gameRepository.save(nextGame);
       nextGame =
         await this.options.promptCardReconciler.reconcileEditor(nextGame);
@@ -197,12 +246,14 @@ export class GameSelectionService {
         await this.options.challengerRepository.save({
           ...capacity.state,
           pendingComparison: null,
+          preparedDequeues: [],
           pendingSelectionBaseline: null,
         });
       }
-      await this.options.generationJobPublisher.ensureAll(capacity.jobs);
-      return nextGame;
+      return { game: nextGame, jobs: capacity.jobs };
     });
+    await this.options.generationJobPublisher.ensureAll(outcome.jobs);
+    return outcome.game;
   }
 
   async tie(expectedRoundNumber: number): Promise<GameState> {
@@ -217,7 +268,7 @@ export class GameSelectionService {
     expectedRoundNumber: number,
     outcome: "tie" | "both-lose",
   ): Promise<GameState> {
-    return this.withStateLocks(async () => {
+    const result = await this.withStateLocks(async (lockContext) => {
       const current = await this.options.gameRepository.load();
       if (!current) {
         throw new MissingGameError(
@@ -233,6 +284,7 @@ export class GameSelectionService {
             : "The round changed before this dual rejection arrived",
         );
       }
+      const rules = this.options.rulesFor(current);
 
       const challengerState = await this.options.challengerRepository.load();
       if (!challengerState) {
@@ -284,20 +336,64 @@ export class GameSelectionService {
               receipt,
               this.options.config.initialRating,
             );
-      let preparedReadyHeads: BufferedCandidate[] = [];
+      await this.options.gameRepository.save(
+        outcome === "both-lose"
+          ? recordPromptCardDecision(
+              inFlight,
+              [],
+              [left, right],
+              selectedAt,
+              "Both images rejected",
+            )
+          : inFlight,
+      );
+      await this.options.challengerRepository.save(nextChallengers);
+
+      const importSession = await this.options.importSessionRepository.load();
+      const importSessionId = activatedImportSessionId(importSession);
+      let importSupply = summarizeImportSupply(
+        importSessionId ? importSession : null,
+      );
       let nextGame = inFlight;
-      const replacements =
-        this.options.preparedSelectionReconciler.drawPairReplacements(
-          nextChallengers,
-          current,
-        );
-      nextChallengers = replacements.state;
-      if (replacements.candidates) {
-        preparedReadyHeads = replacements.readyHeads;
+      const leftDraw = await this.dequeue(lockContext, {
+        importSessionId,
+        challengerSessionId: nextChallengers.sessionId,
+        originalReceipt: receipt,
+        replacementSlot: "pair-left",
+        reason: outcome,
+        invocation: "live",
+        roundNumber: current.round.roundNumber + 1,
+        excludedCandidateIds: [left.id, right.id],
+        fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
+      });
+      nextChallengers = leftDraw.challengers;
+      importSupply = leftDraw.importSupply;
+      const rightDraw = leftDraw.candidate
+        ? await this.dequeue(lockContext, {
+            importSessionId,
+            challengerSessionId: nextChallengers.sessionId,
+            originalReceipt: receipt,
+            replacementSlot: "pair-right",
+            reason: outcome,
+            invocation: "live",
+            roundNumber: current.round.roundNumber + 1,
+            excludedCandidateIds: [left.id, right.id, leftDraw.candidate.id],
+            fallbackMaximumConsecutive: rules.fallbackMaximumConsecutive,
+          })
+        : null;
+      if (rightDraw) {
+        nextChallengers = rightDraw.challengers;
+        importSupply = rightDraw.importSupply;
+      }
+      if (leftDraw.candidate && rightDraw?.candidate) {
         nextGame =
           outcome === "tie"
-            ? completeTie(inFlight, ...replacements.candidates)
-            : completeBothLose(inFlight, ...replacements.candidates);
+            ? completeTie(inFlight, leftDraw.candidate, rightDraw.candidate)
+            : completeBothLose(
+                inFlight,
+                leftDraw.candidate,
+                rightDraw.candidate,
+              );
       }
 
       if (outcome === "both-lose") {
@@ -330,26 +426,9 @@ export class GameSelectionService {
           rejectedCandidate: contrasted,
           comparisonOutcome: outcome,
         },
+        importSupply,
       );
-      const durableChallengers =
-        preparedReadyHeads.length > 0
-          ? {
-              ...capacity.state,
-              ready: [...preparedReadyHeads, ...capacity.state.ready],
-            }
-          : capacity.state;
-      await this.options.gameRepository.save(
-        outcome === "both-lose"
-          ? recordPromptCardDecision(
-              inFlight,
-              [],
-              [left, right],
-              selectedAt,
-              "Both images rejected",
-            )
-          : inFlight,
-      );
-      await this.options.challengerRepository.save(durableChallengers);
+      await this.options.challengerRepository.save(capacity.state);
       await this.options.gameRepository.save(nextGame);
       nextGame =
         await this.options.promptCardReconciler.reconcileEditor(nextGame);
@@ -357,17 +436,46 @@ export class GameSelectionService {
         await this.options.challengerRepository.save({
           ...capacity.state,
           pendingComparison: null,
+          preparedDequeues: [],
           pendingSelectionBaseline: null,
         });
       }
-      await this.options.generationJobPublisher.ensureAll(capacity.jobs);
-      return nextGame;
+      return { game: nextGame, jobs: capacity.jobs };
+    });
+    await this.options.generationJobPublisher.ensureAll(result.jobs);
+    return result.game;
+  }
+
+  private dequeue(
+    context: LockedStateContext,
+    request: Omit<CandidateDequeueRequest, "dequeueOperationId">,
+  ) {
+    return this.options.candidateDequeueService.dequeueLocked(context, {
+      ...request,
+      dequeueOperationId: deriveDequeueOperationId(
+        request.importSessionId,
+        request.challengerSessionId,
+        request.originalReceipt,
+        request.replacementSlot,
+      ),
     });
   }
 
-  private withStateLocks<T>(operation: () => Promise<T>): Promise<T> {
-    return this.options.gameRepository.withLock(() =>
-      this.options.challengerRepository.withLock(operation),
+  private withStateLocks<T>(
+    operation: (context: LockedStateContext) => Promise<T>,
+  ): Promise<T> {
+    return this.options.stateLockCoordinator.withStateLocks(
+      ["activation-intent", "import-session", "game", "challenger"],
+      operation,
     );
   }
+}
+
+function activatedImportSessionId(
+  session: ImportSession | null,
+): string | null {
+  return session?.activatedAt &&
+    (session.status === "active" || session.status === "completed")
+    ? session.id
+    : null;
 }

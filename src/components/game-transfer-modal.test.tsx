@@ -23,6 +23,7 @@ function renderTransfer(
     onClose: vi.fn(),
     onExport: vi.fn(),
     onImport: vi.fn(async () => undefined),
+    onImportImages: vi.fn(),
     onStartFresh: vi.fn(),
     ...overrides,
   };
@@ -68,8 +69,10 @@ describe("GameTransferModal", () => {
       screen.getByRole("button", { name: "Export current game" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Start new game" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import images" }));
     expect(props.onExport).toHaveBeenCalledTimes(1);
     expect(props.onStartFresh).toHaveBeenCalledTimes(1);
+    expect(props.onImportImages).toHaveBeenCalledTimes(1);
   });
 
   it.each([

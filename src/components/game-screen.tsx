@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   preferenceProfileFromSeed,
   type BufferHealth,
@@ -8,18 +14,23 @@ import {
   type GameStartState,
   type GameState,
 } from "@/domain/game";
+import type { ImportProgress } from "@/domain/import-progress";
 import { CandidateCard } from "./candidate-card";
 import { ComparisonHistory } from "./comparison-history";
 import { FavoritesGallery } from "./favorites-gallery";
 import { readJson } from "./game-api";
 import { GameTransferModal } from "./game-transfer-modal";
+import { GameStartupModal, type GameStartupStatus } from "./game-startup-modal";
+import { ImageImportModal } from "./image-import-modal";
 import { ImageInspector } from "./image-inspector";
 import { PoolLeaderboard } from "./pool-leaderboard";
 import { QueueDetails } from "./queue-details";
 import { PreferenceProfileModal } from "./preference-profile-modal";
 import { useCandidateBrowser } from "./use-candidate-browser";
+import { useAppVersion } from "./use-app-version";
 import { useGameSessionPolling } from "./use-game-session-polling";
 import { useGameTransfer } from "./use-game-transfer";
+import { useImageImport } from "./use-image-import";
 import { useGameplayShortcuts } from "./use-gameplay-shortcuts";
 import { usePreferenceDraft } from "./use-preference-draft";
 import { usePreferenceEditor } from "./use-preference-editor";
@@ -81,10 +92,24 @@ function HeaderPictograph({ name }: { name: HeaderPictographName }) {
   );
 }
 
-export function GameScreen() {
+interface GameScreenProps {
+  promptForStartup?: boolean;
+}
+
+export function GameScreen({ promptForStartup = false }: GameScreenProps) {
   const [game, setGame] = useState<GameState | null>(null);
   const [startState, setStartState] = useState<GameStartState | null>(null);
-  const [initializing, setInitializing] = useState(true);
+  const [initializing, setInitializing] = useState(!promptForStartup);
+  const [startupOpen, setStartupOpen] = useState(promptForStartup);
+  const [startupResolved, setStartupResolved] = useState(!promptForStartup);
+  const [resumeRequested, setResumeRequested] = useState(false);
+  const [startupStatus, setStartupStatus] = useState<GameStartupStatus | null>(
+    null,
+  );
+  const [startupStatusError, setStartupStatusError] = useState<string | null>(
+    null,
+  );
+  const [startupStatusAttempt, setStartupStatusAttempt] = useState(0);
   const [queueDetailsOpen, setQueueDetailsOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
@@ -92,9 +117,18 @@ export function GameScreen() {
   const [eloRatings, setEloRatings] = useState<DisplayedEloRatings | null>(
     null,
   );
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(
+    null,
+  );
   const gameRef = useRef<GameState | null>(null);
   const {
+    observeServerResponse,
+    reload: reloadApp,
+    updateAvailable,
+  } = useAppVersion();
+  const {
     baseProfile: preferenceDraftBaseProfile,
+    dirty: preferenceDraftDirty,
     profile: preferenceDraft,
     variationSource: preferenceVariationSource,
     applyAnalyzedProfile,
@@ -132,16 +166,58 @@ export function GameScreen() {
     [commitGame, replacePreferenceDraft],
   );
 
+  const completeStartup = useCallback(() => {
+    setStartupResolved(true);
+    setStartupOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!promptForStartup || !startupOpen) return;
+    let active = true;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/game/start", {
+          cache: "no-store",
+        });
+        observeServerResponse(response);
+        const status = await readJson<GameStartupStatus>(response);
+        if (!active) return;
+        setStartupStatus(status);
+        setStartupStatusError(null);
+      } catch (error) {
+        if (!active) return;
+        setStartupStatusError(
+          error instanceof Error
+            ? error.message
+            : "Could not check for an existing game",
+        );
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [
+    observeServerResponse,
+    promptForStartup,
+    startupOpen,
+    startupStatusAttempt,
+  ]);
+
   const { retryInitial } = useGameSessionPolling({
+    initialLoadEnabled: !promptForStartup || resumeRequested,
     bufferHealth,
     game,
+    importProgress,
     startState,
     commitGame,
     commitStartState,
     setBufferHealth,
     setConnectionStatus,
     setInitializing,
+    setImportProgress,
     setLocalError,
+    observeServerResponse,
   });
 
   const {
@@ -166,12 +242,16 @@ export function GameScreen() {
     action: gameTransferAction,
     error: gameTransferError,
     exportNotice,
+    imageImportOpen,
     loadGameOpen,
     newGameOpen,
+    closeImageImport,
     closeLoadGame,
     closeNewGame,
     exportCurrentGame,
+    finishImageImport,
     importSavedGame,
+    openImageImport,
     openLoadGame,
     openNewGame,
     startFreshGame,
@@ -182,6 +262,23 @@ export function GameScreen() {
     cancelActiveSelection,
     setInitializing,
     setLocalError,
+    onSessionReady: completeStartup,
+  });
+
+  const dismissImageImport = useCallback(() => {
+    closeImageImport();
+    if (!startupResolved) setStartupOpen(true);
+  }, [closeImageImport, startupResolved]);
+
+  const imageImport = useImageImport({
+    modalOpen: imageImportOpen,
+    gameRef,
+    selectionLockedRef: selectionLocked,
+    commitStartState,
+    cancelActiveSelection,
+    onDismiss: dismissImageImport,
+    onActivated: finishImageImport,
+    setImportProgress,
   });
 
   const {
@@ -221,9 +318,11 @@ export function GameScreen() {
     open: preferencesOpen,
     saving: preferencesSaving,
     saveQueued: preferenceSaveQueued,
+    saveError: preferenceSaveError,
     sourceAnalyzing: sourceProfileAnalyzing,
     sourceError: sourceProfileError,
     sourceSummary: sourceProfileSummary,
+    setSupplementalDirty: setPreferenceSupplementalDirty,
     selectionBoundWait,
     presetError,
     presetSaving,
@@ -245,11 +344,13 @@ export function GameScreen() {
     analyzeSourceImage,
     updatePromptDeck,
     updateGameRules,
+    writeCustomPromptCard,
     writePromptCard,
   } = usePreferenceEditor({
     game,
     profile: preferenceDraft,
     baseProfile: preferenceDraftBaseProfile,
+    draftDirty: preferenceDraftDirty,
     variationSource: preferenceVariationSource,
     commitGame,
     dismissImageInspector,
@@ -262,9 +363,11 @@ export function GameScreen() {
 
   useGameplayShortcuts({
     suspended:
+      startupOpen ||
       preferencesOpen ||
       newGameOpen ||
       loadGameOpen ||
+      imageImportOpen ||
       favoritesOpen ||
       leaderboardOpen ||
       queueDetailsOpen ||
@@ -310,6 +413,24 @@ export function GameScreen() {
         ? "refilling"
         : "low"
     : null;
+
+  const resumeCurrentGame = () => {
+    completeStartup();
+    setInitializing(true);
+    setResumeRequested(true);
+  };
+
+  const retryStartupStatus = () => {
+    setStartupStatus(null);
+    setStartupStatusError(null);
+    setStartupStatusAttempt((attempt) => attempt + 1);
+  };
+
+  const openStartupImport = () => {
+    setStartupOpen(false);
+    openImageImport();
+    void imageImport.begin();
+  };
 
   return (
     <main className={styles.shell}>
@@ -388,6 +509,18 @@ export function GameScreen() {
           </button>
         </div>
       </header>
+
+      {updateAvailable ? (
+        <div className={styles.versionNotice} role="alert">
+          <span>
+            <strong>New version available</strong>
+            Reload to use the latest fixes and features.
+          </span>
+          <button type="button" onClick={reloadApp}>
+            Reload
+          </button>
+        </div>
+      ) : null}
 
       {initializing && !game ? (
         <div className={styles.startState}>Preparing the gallery…</div>
@@ -590,6 +723,28 @@ export function GameScreen() {
             </div>
           ) : null}
 
+          {importProgress &&
+          importProgress.status !== "completed" &&
+          importProgress.failed > 0 ? (
+            <div className={styles.importFailureNotice} role="status">
+              <span>
+                <strong>Imported image needs attention</strong>
+                {importProgress.failed} imported image
+                {importProgress.failed === 1 ? " has" : "s have"} no usable
+                annotation yet.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  openImageImport();
+                  void imageImport.begin();
+                }}
+              >
+                Resolve imported image
+              </button>
+            </div>
+          ) : null}
+
           {status === "error" || localError ? (
             <div className={styles.errorBar} role="alert">
               <span>
@@ -685,7 +840,22 @@ export function GameScreen() {
       {queueDetailsOpen && bufferHealth ? (
         <QueueDetails
           health={bufferHealth}
+          importProgress={importProgress}
           onClose={() => setQueueDetailsOpen(false)}
+        />
+      ) : null}
+
+      {startupOpen ? (
+        <GameStartupModal
+          status={startupStatus}
+          statusError={startupStatusError}
+          action={gameTransferAction}
+          actionError={gameTransferError}
+          onRetryStatus={retryStartupStatus}
+          onResume={resumeCurrentGame}
+          onLoad={importSavedGame}
+          onInitialize={() => void startFreshGame()}
+          onImport={openStartupImport}
         />
       ) : null}
 
@@ -709,15 +879,21 @@ export function GameScreen() {
           onClose={closeNewGame}
           onExport={() => void exportCurrentGame()}
           onImport={importSavedGame}
+          onImportImages={() => {
+            openImageImport();
+            void imageImport.begin();
+          }}
           onStartFresh={() => void startFreshGame()}
         />
       ) : null}
+      {imageImportOpen ? <ImageImportModal controller={imageImport} /> : null}
       {preferencesOpen && game ? (
         <PreferenceProfileModal
           profile={preferenceDraft}
           historyLength={game.history.length}
           saving={preferencesSaving}
           saveQueued={preferenceSaveQueued}
+          saveError={preferenceSaveError}
           sourceAnalyzing={sourceProfileAnalyzing}
           sourceError={sourceProfileError}
           sourceSummary={sourceProfileSummary}
@@ -743,7 +919,9 @@ export function GameScreen() {
           onCreatePromptCard={createPromptCard}
           onUpdatePromptDeck={updatePromptDeck}
           onBlendPromptCards={blendPromptCards}
+          onWriteCustomPromptCard={writeCustomPromptCard}
           onUpdateGameRules={updateGameRules}
+          onSupplementalDirtyChange={setPreferenceSupplementalDirty}
           onFieldChange={setPreferenceField}
           onFreedomChange={setAdaptationFreedom}
         />

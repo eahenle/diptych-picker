@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   access,
   link,
@@ -197,6 +198,17 @@ const refillGenerationJobSchema = z
     path: ["pinnedWinnerId"],
   });
 
+const initialImportFillJobSchema = z
+  .object({
+    id: jobIdSchema,
+    kind: z.literal("initial-import-fill"),
+    createdAt: timestampSchema,
+    importSessionId: jobIdSchema,
+    attemptId: jobIdSchema,
+    preferenceSeed: nonBlankStringSchema,
+  })
+  .strict();
+
 const profileSourceImageSchema = z
   .object({
     filename: z.string().regex(/^[a-f0-9]{64}\.png$/),
@@ -363,26 +375,60 @@ const promptCardWriterJobSchema = z
       .array(
         z
           .object({
-            candidateId: nonBlankStringSchema.max(200),
+            candidateId: nonBlankStringSchema.max(200).optional(),
             concept: nonBlankStringSchema.max(240),
             style: z.array(nonBlankStringSchema.max(80)).max(4),
             sourceImage: profileSourceImageSchema,
           })
           .strict(),
       )
-      .min(3)
+      .min(0)
       .max(5),
+    guidance: nonBlankStringSchema.max(2_000).optional(),
+    sourceTextDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .strict()
   .superRefine((job, context) => {
     const candidateIds = new Set(
-      job.sources.map(({ candidateId }) => candidateId),
+      job.sources.flatMap(({ candidateId }) =>
+        candidateId ? [candidateId] : [],
+      ),
     );
-    if (candidateIds.size !== job.sources.length) {
+    const candidateIdCount = job.sources.filter(
+      ({ candidateId }) => candidateId,
+    ).length;
+    if (candidateIds.size !== candidateIdCount) {
       context.addIssue({
         code: "custom",
         path: ["sources"],
         message: "Prompt-card writer sources must use unique candidate IDs",
+      });
+    }
+    if (job.sources.length === 0 && !job.guidance) {
+      context.addIssue({
+        code: "custom",
+        message: "Prompt-card writer requires images, guidance, or both",
+      });
+    }
+    if (Boolean(job.guidance) !== Boolean(job.sourceTextDigest)) {
+      context.addIssue({
+        code: "custom",
+        path: ["sourceTextDigest"],
+        message: "Prompt-card writer guidance must carry a text digest",
+      });
+    }
+    if (
+      job.guidance &&
+      createHash("sha256").update(job.guidance.trim()).digest("hex") !==
+        job.sourceTextDigest
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["sourceTextDigest"],
+        message: "Prompt-card writer text digest must match its guidance",
       });
     }
   });
@@ -411,6 +457,7 @@ const mailboxJobSchema = z.preprocess(
     challengerGenerationJobSchema,
     initialGenerationJobSchema,
     refillGenerationJobSchema,
+    initialImportFillJobSchema,
     sourceProfileJobSchema,
     leaderboardProfileJobSchema,
     promptCardEditorJobSchema,
@@ -555,7 +602,6 @@ const completedPromptCardWriterResultSchema = z
     completedAt: timestampSchema,
     sourceCandidateIds: z
       .array(nonBlankStringSchema.max(200))
-      .min(3)
       .max(5)
       .superRefine((ids, context) => {
         if (new Set(ids).size !== ids.length) {
@@ -565,6 +611,22 @@ const completedPromptCardWriterResultSchema = z
           });
         }
       }),
+    sourceImageDigests: z
+      .array(z.string().regex(/^[a-f0-9]{64}$/))
+      .max(5)
+      .superRefine((digests, context) => {
+        if (new Set(digests).size !== digests.length) {
+          context.addIssue({
+            code: "custom",
+            message: "Prompt-card writer source image digests must be unique",
+          });
+        }
+      })
+      .optional(),
+    sourceTextDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     proposal: promptCardEditorProposalSchema,
   })
   .strict();
@@ -646,6 +708,7 @@ const mailboxResultSchema = z.union([
 export type GenerationJob = z.infer<typeof generationJobSchema>;
 export type { LeaderboardPreferenceEvidence };
 export type GenerationResult = z.infer<typeof generationResultSchema>;
+export type InitialImportFillJob = z.infer<typeof initialImportFillJobSchema>;
 export type SourceProfileJob = z.infer<typeof sourceProfileJobSchema>;
 export type SourceProfileResult = z.infer<typeof sourceProfileResultSchema>;
 export type LeaderboardProfileJob = z.infer<typeof leaderboardProfileJobSchema>;
@@ -678,6 +741,7 @@ export type ImportAnnotationResult =
   | z.infer<typeof failedGenerationResultSchema>;
 export type AgentJob =
   | GenerationJob
+  | InitialImportFillJob
   | SourceProfileJob
   | LeaderboardProfileJob
   | PromptCardEditorJob
@@ -787,6 +851,15 @@ export interface ImportAnnotationMailbox {
   archiveImportAnnotation(jobId: string): Promise<void>;
 }
 
+export interface InitialImportFillMailbox {
+  enqueueInitialImportFill(job: InitialImportFillJob): Promise<void>;
+  readInitialImportFillWork(
+    jobId: string,
+  ): Promise<InitialImportFillJob | null>;
+  readInitialImportFillResult(jobId: string): Promise<GenerationResult | null>;
+  archiveInitialImportFill(jobId: string): Promise<void>;
+}
+
 export class DuplicateGenerationJobError extends Error {}
 
 export class FileGenerationMailbox
@@ -797,7 +870,8 @@ export class FileGenerationMailbox
     PromptCardEditorMailbox,
     PromptCardBlenderMailbox,
     PromptCardWriterMailbox,
-    ImportAnnotationMailbox
+    ImportAnnotationMailbox,
+    InitialImportFillMailbox
 {
   private static readonly inFlightEnqueues = new Map<string, string>();
 
@@ -841,6 +915,11 @@ export class FileGenerationMailbox
 
   async enqueueImportAnnotation(job: ImportAnnotationJob): Promise<void> {
     const validated = importAnnotationJobSchema.parse(job);
+    await this.enqueueValidated(validated);
+  }
+
+  async enqueueInitialImportFill(job: InitialImportFillJob): Promise<void> {
+    const validated = initialImportFillJobSchema.parse(job);
     await this.enqueueValidated(validated);
   }
 
@@ -1139,6 +1218,36 @@ export class FileGenerationMailbox
     return result ? importAnnotationResultSchema.parse(result) : null;
   }
 
+  async readInitialImportFillWork(
+    jobId: string,
+  ): Promise<InitialImportFillJob | null> {
+    const validatedJobId = jobIdSchema.parse(jobId);
+    const pending = await this.readJobAt(
+      join(this.rootDirectory, "pending", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (pending) return initialImportFillJobSchema.parse(pending);
+    const active = await this.readJobAt(
+      join(this.rootDirectory, "active", `${validatedJobId}.json`),
+      validatedJobId,
+    );
+    if (active) return initialImportFillJobSchema.parse(active);
+    const record = await this.readValidated(
+      join(this.rootDirectory, "ids", `${validatedJobId}.json`),
+      generationJobRecordSchema,
+    );
+    return record?.state === "reserved"
+      ? initialImportFillJobSchema.parse(record.job)
+      : null;
+  }
+
+  async readInitialImportFillResult(
+    jobId: string,
+  ): Promise<GenerationResult | null> {
+    const result = await this.readMailboxResult(jobId);
+    return result ? generationResultSchema.parse(result) : null;
+  }
+
   private async readMailboxResult(jobId: string): Promise<AgentResult | null> {
     const validatedJobId = jobIdSchema.parse(jobId);
     const [completed, failed] = await Promise.all([
@@ -1224,6 +1333,10 @@ export class FileGenerationMailbox
   }
 
   archiveImportAnnotation(jobId: string): Promise<void> {
+    return this.archive(jobId);
+  }
+
+  archiveInitialImportFill(jobId: string): Promise<void> {
     return this.archive(jobId);
   }
 

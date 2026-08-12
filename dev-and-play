@@ -25,7 +25,7 @@ repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 spawned_thread_limit=$((requested_threads - 1))
 initial_prompt="Use \$run-diptych-picker to start or resume the local app through ./run-only and continuously run the dev-and-play loop. Keep the root session responsive while one persistent mailbox-monitor subagent owns polling and delegates fresh native-image workers. This session has $requested_threads total agent threads: reserve one for the root and one for the monitor, set workerLimit=3, and use all three worker slots whenever at least three independent jobs are pending."
 command=(
-  codex
+  multi-cli codex/personal
   --cd "$repository_root"
   --strict-config
   --config "agents.max_concurrent_threads_per_session=$spawned_thread_limit"
@@ -38,8 +38,8 @@ if [[ "$print_only" == true ]]; then
   exit 0
 fi
 
-if ! command -v codex >/dev/null 2>&1; then
-  printf '%s\n' "Codex CLI is required. Install it, run 'codex login', then retry 'npm run codex:play'." >&2
+if ! command -v multi-cli >/dev/null 2>&1; then
+  printf '%s\n' "multi-cli is required. Install it, run 'multi-cli codex/personal login', then retry 'npm run codex:play'." >&2
   exit 127
 fi
 

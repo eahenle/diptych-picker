@@ -88,6 +88,17 @@ function importAnnotation(id, createdAt) {
   };
 }
 
+function initialImportFill(id, createdAt) {
+  return {
+    id,
+    kind: "initial-import-fill",
+    createdAt,
+    importSessionId: "import-session-1",
+    attemptId: "fill-attempt-1",
+    preferenceSeed: "Clean-session default image preferences",
+  };
+}
+
 function leaderboardProfile(id, createdAt) {
   return {
     id,
@@ -314,6 +325,44 @@ test("claims the three oldest import annotations as one interactive batch before
   ]);
 });
 
+test("claims initial import fill as a bounded oldest-first batch before cached analysis and refills", async () => {
+  const root = await dataRoot();
+  await Promise.all([
+    put(
+      root,
+      "pending",
+      initialImportFill("fill-3", "2026-07-16T01:00:03.000Z"),
+    ),
+    put(
+      root,
+      "pending",
+      initialImportFill("fill-1", "2026-07-16T01:00:01.000Z"),
+    ),
+    put(
+      root,
+      "pending",
+      initialImportFill("fill-2", "2026-07-16T01:00:02.000Z"),
+    ),
+    put(
+      root,
+      "pending",
+      leaderboardProfile("leaderboard", "2026-07-16T00:00:00.000Z"),
+    ),
+    put(root, "pending", refill("refill", "2026-07-15T00:00:00.000Z")),
+  ]);
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.deepEqual(JSON.parse(stdout), {
+    kind: "initial-import-fill-batch",
+    jobs: [
+      initialImportFill("fill-1", "2026-07-16T01:00:01.000Z"),
+      initialImportFill("fill-2", "2026-07-16T01:00:02.000Z"),
+      initialImportFill("fill-3", "2026-07-16T01:00:03.000Z"),
+    ],
+  });
+});
+
 test("prioritizes an interactive source-profile analysis before refills", async () => {
   const root = await dataRoot();
   await put(
@@ -395,6 +444,24 @@ test("prioritizes prompt-card writer work before cached analysis and refills", a
     ),
     put(root, "pending", writer),
   ]);
+
+  const { stdout } = await run(root, ["--max-refills", "3"]);
+
+  assert.deepEqual(JSON.parse(stdout), writer);
+});
+
+test("claims a valid text-only prompt-card writer request", async () => {
+  const root = await dataRoot();
+  const writer = {
+    id: "writer-text-1",
+    kind: "prompt-card-writer",
+    createdAt: "2026-08-11T01:00:00.000Z",
+    sources: [],
+    guidance: "A quiet ultraviolet architectural nocturne.",
+    sourceTextDigest:
+      "754548edd47f62ef35b5aece43e6394f34ec4cba060743b9f37d80abe0f78ed5",
+  };
+  await put(root, "pending", writer);
 
   const { stdout } = await run(root, ["--max-refills", "3"]);
 

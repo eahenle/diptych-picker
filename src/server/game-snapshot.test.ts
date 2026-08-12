@@ -7,15 +7,22 @@ import {
   type GameState,
   type GenerationPromptCard,
 } from "@/domain/game";
+import {
+  deriveActivationDisplayReceiptId,
+  deriveDequeueOperationId,
+  type ImportSession,
+} from "@/domain/import-session";
 import { MemoryChallengerRepository } from "./challenger-repository";
 import {
   GAME_SNAPSHOT_FORMAT,
+  GAME_SNAPSHOT_VERSION,
   GameSnapshotService,
   GameSnapshotUnavailableError,
   InvalidGameSnapshotError,
   parseGameSnapshot,
 } from "./game-snapshot";
 import { MemoryInitialBootstrapRepository } from "./initial-bootstrap";
+import { MemoryImportSessionRepository } from "./import-session-repository";
 import { MemoryGameRepository } from "./repository";
 
 const NOW = "2026-07-17T12:00:00.000Z";
@@ -109,6 +116,158 @@ function challengerState(): ChallengerState {
     generationTurnaroundEmaMs: 120_000,
     consecutiveFallbackDraws: 4,
     nextFallbackAt: null,
+  };
+}
+
+function importedFixture(): {
+  game: GameState;
+  challengers: ChallengerState;
+  importSession: ImportSession;
+} {
+  const game = gameState();
+  const challengers = challengerState();
+  const firstDigest = "a".repeat(64);
+  const secondDigest = "b".repeat(64);
+  const thirdDigest = "c".repeat(64);
+  const first = {
+    ...game.round.leftCandidate,
+    id: "imported-left",
+    imageUrl: `/api/assets/${firstDigest}.png`,
+  };
+  const second = {
+    ...candidate("imported-queued"),
+    imageUrl: `/api/assets/${secondDigest}.png`,
+  };
+  const third = {
+    ...candidate("imported-served"),
+    imageUrl: `/api/assets/${thirdDigest}.png`,
+  };
+  game.round.leftCandidate = first;
+  challengers.ratings = challengers.ratings.map((rating) =>
+    rating.candidate.id === "left"
+      ? {
+          ...rating,
+          candidate: first,
+          source: "imported" as const,
+          importItemId: "import-item-1",
+          poolMember: false,
+          poolEligible: true,
+        }
+      : rating,
+  );
+  challengers.importQueue = [
+    {
+      candidate: second,
+      source: "imported",
+      importItemId: "import-item-2",
+      pinnedWinnerId: null,
+      enqueuedAt: NOW,
+    },
+  ];
+  challengers.ratings.push({
+    candidate: third,
+    rating: 1000,
+    wins: 0,
+    losses: 0,
+    source: "imported",
+    importItemId: "import-item-3",
+    poolMember: false,
+    poolEligible: true,
+    lastServedAt: NOW,
+  });
+  const originalReceipt = {
+    selectedAt: NOW,
+    roundNumber: 7,
+    winnerSide: "left" as const,
+    winnerId: "imported-left",
+    loserId: "old-loser",
+  };
+  const item = (
+    id: string,
+    digest: string,
+    candidateValue: Candidate,
+    status: "ready" | "served",
+  ) => ({
+    id,
+    normalizedDigest: digest,
+    status,
+    asset: {
+      digest,
+      filename: `${digest}.png`,
+      url: `/api/assets/${digest}.png`,
+      contentType: "image/png" as const,
+      width: 1024 as const,
+      height: 1024 as const,
+      byteLength: 1024,
+    },
+    annotationJob: null,
+    annotation: {
+      concept: candidateValue.concept,
+      prompt: candidateValue.prompt,
+      style: candidateValue.style,
+      reasoningSummary: "Visible imported composition.",
+      source: "automated" as const,
+    },
+    candidateId: candidateValue.id,
+    failureMessage: null,
+    approvedAt: NOW,
+    readyAt: NOW,
+    servedAt: status === "served" ? NOW : null,
+  });
+  return {
+    game,
+    challengers,
+    importSession: {
+      version: 1,
+      id: "import-session-source",
+      status: "active",
+      createdAt: NOW,
+      sealedAt: NOW,
+      activatedAt: NOW,
+      items: [
+        item("import-item-1", firstDigest, first, "served"),
+        item("import-item-2", secondDigest, second, "ready"),
+        item("import-item-3", thirdDigest, third, "served"),
+      ],
+      initialFillJobs: [],
+      initialFillRetry: null,
+      servedReceipts: [
+        {
+          kind: "activation-display",
+          activationDisplayReceiptId: deriveActivationDisplayReceiptId(
+            "activation-source",
+            "import-session-source",
+            "initial-left",
+          ),
+          activationIntentId: "activation-source",
+          importSessionId: "import-session-source",
+          replacementSlot: "initial-left",
+          importItemId: "import-item-1",
+          candidateId: first.id,
+          candidate: first,
+          provenance: "imported",
+          servedAt: NOW,
+        },
+        {
+          kind: "dequeue",
+          dequeueOperationId: deriveDequeueOperationId(
+            "import-session-source",
+            "source-session",
+            originalReceipt,
+            "single",
+          ),
+          importSessionId: "import-session-source",
+          originalReceipt,
+          replacementSlot: "single",
+          importItemId: "import-item-3",
+          candidateId: third.id,
+          candidate: third,
+          provenance: "imported",
+          roundNumber: 8,
+          servedAt: NOW,
+        },
+      ],
+    },
   };
 }
 
@@ -307,6 +466,7 @@ function service(options: {
     source: "generated" | "curated" | "imported",
   ) => Promise<void>;
   createId?: () => string;
+  importSession?: ImportSession | null;
 }) {
   const gameRepository = new MemoryGameRepository(options.game ?? null);
   const challengerRepository = new MemoryChallengerRepository(
@@ -316,6 +476,10 @@ function service(options: {
   const verifyCandidateAsset = vi.fn(
     options.verifyCandidateAsset ?? (async () => undefined),
   );
+  const verifyImportedAsset = vi.fn(async () => undefined);
+  const importSessionRepository = new MemoryImportSessionRepository(
+    options.importSession ?? null,
+  );
   return {
     snapshotService: new GameSnapshotService({
       gameRepository,
@@ -323,17 +487,33 @@ function service(options: {
       bootstrapRepository: new MemoryInitialBootstrapRepository(),
       mailbox: { archive },
       verifyCandidateAsset,
+      importSessionRepository,
+      verifyImportedAsset,
       now: () => NOW,
       createId: options.createId ?? (() => "restored-session"),
     }),
     gameRepository,
     challengerRepository,
+    importSessionRepository,
     archive,
     verifyCandidateAsset,
+    verifyImportedAsset,
   };
 }
 
 describe("GameSnapshotService", () => {
+  it("continues to parse legacy version-one saves without import state", () => {
+    expect(
+      parseGameSnapshot({
+        format: GAME_SNAPSHOT_FORMAT,
+        version: 1,
+        exportedAt: NOW,
+        game: gameState(),
+        challengers: challengerState(),
+      }),
+    ).toMatchObject({ version: 1 });
+  });
+
   it.each([
     [
       "an oversized candidate preference revision",
@@ -375,7 +555,7 @@ describe("GameSnapshotService", () => {
 
     expect(snapshot).toMatchObject({
       format: GAME_SNAPSHOT_FORMAT,
-      version: 1,
+      version: GAME_SNAPSHOT_VERSION,
       exportedAt: NOW,
       game: { round: { roundNumber: 8 } },
       challengers: {
@@ -402,6 +582,102 @@ describe("GameSnapshotService", () => {
     expect(snapshot.game.promptDeck?.writerJob).toBeNull();
     expect(snapshot.game.promptDeck?.cards[0].editorRejectCheckpoint).toBe(0);
     expect(snapshot.game.promptDeck?.verdicts).toHaveLength(4);
+  });
+
+  it("exports and restores an activated imported stream with fresh durable IDs", async () => {
+    const imported = importedFixture();
+    const source = service(imported);
+
+    const snapshot = await source.snapshotService.export();
+
+    expect(snapshot.version).toBe(GAME_SNAPSHOT_VERSION);
+    expect(snapshot.importSession).toMatchObject({
+      status: "active",
+      items: [
+        { id: "import-item-1", status: "served" },
+        { id: "import-item-2", status: "ready" },
+        { id: "import-item-3", status: "served" },
+      ],
+      servedReceipts: [
+        {
+          kind: "activation-display",
+          replacementSlot: "initial-left",
+          importItemId: "import-item-1",
+        },
+        {
+          kind: "dequeue",
+          replacementSlot: "single",
+          importItemId: "import-item-3",
+        },
+      ],
+    });
+    expect(snapshot.importSession?.servedReceipts[0]).not.toHaveProperty(
+      "activationDisplayReceiptId",
+    );
+    expect(snapshot.importSession?.servedReceipts[0]).not.toHaveProperty(
+      "activationIntentId",
+    );
+    expect(snapshot.importSession?.servedReceipts[1]).not.toHaveProperty(
+      "dequeueOperationId",
+    );
+
+    const ids = [
+      "challenger-restored",
+      "import-session-restored",
+      "activation-restored",
+    ];
+    const target = service({
+      game: gameState(),
+      challengers: challengerState(),
+      importSession: null,
+      createId: () => ids.shift()!,
+    });
+    await target.snapshotService.import(snapshot);
+
+    const restoredImport = await target.importSessionRepository.load();
+    expect(restoredImport).toMatchObject({
+      id: "import-session-restored",
+      items: [
+        { id: "import-item-1", status: "served" },
+        { id: "import-item-2", status: "ready" },
+        { id: "import-item-3", status: "served" },
+      ],
+      servedReceipts: [
+        {
+          kind: "activation-display",
+          activationIntentId: "activation-restored",
+          importSessionId: "import-session-restored",
+          importItemId: "import-item-1",
+        },
+        {
+          kind: "dequeue",
+          importSessionId: "import-session-restored",
+          replacementSlot: "single",
+          importItemId: "import-item-3",
+        },
+      ],
+    });
+    const restoredDequeue = restoredImport?.servedReceipts.find(
+      (receipt) => receipt.kind === "dequeue",
+    );
+    expect(restoredDequeue?.kind).toBe("dequeue");
+    if (restoredDequeue?.kind === "dequeue") {
+      expect(restoredDequeue.dequeueOperationId).toBe(
+        deriveDequeueOperationId(
+          "import-session-restored",
+          "challenger-restored",
+          restoredDequeue.originalReceipt,
+          "single",
+        ),
+      );
+    }
+    expect(
+      (await target.challengerRepository.load())?.importQueue[0],
+    ).toMatchObject({
+      candidate: { id: "imported-queued" },
+      importItemId: "import-item-2",
+    });
+    expect(target.verifyImportedAsset).toHaveBeenCalledTimes(3);
   });
 
   it.each(["buffer", "retirement"] as const)(

@@ -21,6 +21,7 @@ interface UseGameTransferOptions {
   cancelActiveSelection: () => void;
   setInitializing: Dispatch<SetStateAction<boolean>>;
   setLocalError: Dispatch<SetStateAction<string | null>>;
+  onSessionReady?: () => void;
 }
 
 export function useGameTransfer({
@@ -30,9 +31,11 @@ export function useGameTransfer({
   cancelActiveSelection,
   setInitializing,
   setLocalError,
+  onSessionReady,
 }: UseGameTransferOptions) {
   const [newGameOpen, setNewGameOpen] = useState(false);
   const [loadGameOpen, setLoadGameOpen] = useState(false);
+  const [imageImportOpen, setImageImportOpen] = useState(false);
   const [action, setAction] = useState<GameTransferAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
@@ -40,17 +43,34 @@ export function useGameTransfer({
   const openNewGame = useCallback(() => {
     setError(null);
     setLoadGameOpen(false);
+    setImageImportOpen(false);
     setNewGameOpen(true);
   }, []);
 
   const openLoadGame = useCallback(() => {
     setError(null);
     setNewGameOpen(false);
+    setImageImportOpen(false);
     setLoadGameOpen(true);
+  }, []);
+
+  const openImageImport = useCallback(() => {
+    setError(null);
+    setLoadGameOpen(false);
+    setNewGameOpen(false);
+    setImageImportOpen(true);
   }, []);
 
   const closeNewGame = useCallback(() => setNewGameOpen(false), []);
   const closeLoadGame = useCallback(() => setLoadGameOpen(false), []);
+  const closeImageImport = useCallback(() => setImageImportOpen(false), []);
+  const finishImageImport = useCallback(() => {
+    setImageImportOpen(false);
+    setNewGameOpen(false);
+    setLoadGameOpen(false);
+    setLocalError(null);
+    onSessionReady?.();
+  }, [onSessionReady, setLocalError]);
 
   const exportCurrentGame = useCallback(async () => {
     setAction("exporting");
@@ -124,6 +144,7 @@ export function useGameTransfer({
         setNewGameOpen(false);
         setLoadGameOpen(false);
         setLocalError(null);
+        onSessionReady?.();
       } catch (caught) {
         setError(
           caught instanceof Error ? caught.message : "Could not load this game",
@@ -133,7 +154,13 @@ export function useGameTransfer({
         setAction(null);
       }
     },
-    [commitStartState, gameRef, selectionLockedRef, setLocalError],
+    [
+      commitStartState,
+      gameRef,
+      onSessionReady,
+      selectionLockedRef,
+      setLocalError,
+    ],
   );
 
   const startFreshGame = useCallback(async () => {
@@ -150,6 +177,7 @@ export function useGameTransfer({
       setNewGameOpen(false);
       setLoadGameOpen(false);
       setLocalError(null);
+      onSessionReady?.();
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Could not start a new game",
@@ -162,6 +190,7 @@ export function useGameTransfer({
   }, [
     cancelActiveSelection,
     commitStartState,
+    onSessionReady,
     selectionLockedRef,
     setInitializing,
     setLocalError,
@@ -171,12 +200,16 @@ export function useGameTransfer({
     action,
     error,
     exportNotice,
+    imageImportOpen,
     loadGameOpen,
     newGameOpen,
+    closeImageImport,
     closeLoadGame,
     closeNewGame,
     exportCurrentGame,
+    finishImageImport,
     importSavedGame,
+    openImageImport,
     openLoadGame,
     openNewGame,
     startFreshGame,

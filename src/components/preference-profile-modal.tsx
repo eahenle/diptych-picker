@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -84,6 +85,7 @@ interface PreferenceProfileModalProps {
   historyLength: number;
   saving: boolean;
   saveQueued: boolean;
+  saveError: string | null;
   sourceAnalyzing: boolean;
   sourceError: string | null;
   sourceSummary: string | null;
@@ -112,7 +114,9 @@ interface PreferenceProfileModalProps {
   onCreatePromptCard: ComponentProps<typeof PromptDeckEditor>["onCreate"];
   onUpdatePromptDeck: ComponentProps<typeof PromptDeckEditor>["onUpdate"];
   onBlendPromptCards: ComponentProps<typeof PromptDeckEditor>["onBlend"];
+  onWriteCustomPromptCard: ComponentProps<typeof PromptDeckEditor>["onWrite"];
   onUpdateGameRules: (rules: GameRules) => Promise<boolean>;
+  onSupplementalDirtyChange?: (dirty: boolean) => void;
   onFieldChange: <Key extends PreferenceField>(
     key: Key,
     value: PreferenceProfile[Key],
@@ -125,6 +129,7 @@ export function PreferenceProfileModal({
   historyLength,
   saving,
   saveQueued,
+  saveError,
   sourceAnalyzing,
   sourceError,
   sourceSummary,
@@ -150,12 +155,16 @@ export function PreferenceProfileModal({
   onCreatePromptCard,
   onUpdatePromptDeck,
   onBlendPromptCards,
+  onWriteCustomPromptCard,
   onUpdateGameRules,
+  onSupplementalDirtyChange,
   onFieldChange,
   onFreedomChange,
 }: PreferenceProfileModalProps) {
   const sourceInputRef = useRef<HTMLInputElement | null>(null);
   const [presetName, setPresetName] = useState("");
+  const [promptDeckDirty, setPromptDeckDirty] = useState(false);
+  const [gameRulesDirty, setGameRulesDirty] = useState(false);
   const busy =
     saving ||
     sourceAnalyzing ||
@@ -171,6 +180,14 @@ export function PreferenceProfileModal({
   const adaptationProgress = preferenceAdaptationProgress(
     profile,
     historyLength,
+  );
+
+  useEffect(
+    () =>
+      onSupplementalDirtyChange?.(
+        promptDeckDirty || gameRulesDirty || presetName.trim().length > 0,
+      ),
+    [gameRulesDirty, onSupplementalDirtyChange, presetName, promptDeckDirty],
   );
 
   const analyzeSelectedImage = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -272,12 +289,15 @@ export function PreferenceProfileModal({
           onCreate={onCreatePromptCard}
           onUpdate={onUpdatePromptDeck}
           onBlend={onBlendPromptCards}
+          onWrite={onWriteCustomPromptCard}
+          onDirtyChange={setPromptDeckDirty}
         />
         <GameRulesEditor
           rules={gameRules}
           busy={busy}
           error={gameRulesError}
           onSave={onUpdateGameRules}
+          onDirtyChange={setGameRulesDirty}
         />
         <details className={styles.presets}>
           <summary>
@@ -587,6 +607,11 @@ export function PreferenceProfileModal({
         ) : sourceSummary ? (
           <p className={styles.sourceSummary} role="status">
             Profile populated for review. {sourceSummary}
+          </p>
+        ) : null}
+        {saveError ? (
+          <p className={styles.sourceError} role="alert">
+            {saveError}
           </p>
         ) : null}
         {saving ? (

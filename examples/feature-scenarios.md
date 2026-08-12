@@ -203,3 +203,29 @@ Generate one candidate and export one save. Compute SHA-256 for each file and
 confirm its filename matches the digest under `.local-data/assets/` or
 `output/artifacts/`. Repeated publication of identical bytes must reuse the same
 path without overwriting different content.
+
+## DP-033 — Imported challenger pool
+
+Choose New game → Import images and select five still PNG, JPEG, or WebP files.
+Approve each separately, using both Crop and Fit on at least one image. Confirm
+Escape, backdrop, Close, and Pause cannot discard unresolved browser files.
+After sealing, confirm automatic annotation activates a clean round 1, the
+remaining imports are served before ordinary refill or pool candidates, Queue
+shows imported supply, and a failed annotation offers Retry, manual annotation,
+and Remove without exposing mailbox details.
+
+## DP-034 — Prompt card from seed images or text
+
+Open Preferences → Prompt deck → Draft a card from sources. Submit text alone,
+then submit one to five private PNG, JPEG, or WebP seed images with optional
+guidance. Confirm each request produces exactly one reviewable suggestion,
+never adds a playable image, and records candidate/image/text digest provenance
+only after the suggestion is accepted as an immutable card.
+
+## DP-035 — Explicit startup choice
+
+Reload with an existing game and confirm the app offers Resume, Load,
+Initialize, and Import before displaying candidates. Resume and confirm the
+same round appears. Reload after clearing durable game state and confirm Resume
+is disabled while Load, Initialize, and Import remain available. With an
+unfinished image import, confirm Import is labeled as continuing that work.

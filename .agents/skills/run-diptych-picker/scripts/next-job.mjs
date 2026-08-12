@@ -100,6 +100,13 @@ async function findNextJob() {
     if (activeAnnotations.length > 0) {
       return presentImportAnnotationBatch(activeAnnotations);
     }
+    const activeInitialImportFill = await prepareRecoverableEntries(
+      unterminatedActive.filter(({ job }) => isInitialImportFill(job)),
+      maxRefills,
+    );
+    if (activeInitialImportFill.length > 0) {
+      return presentInitialImportFillBatch(activeInitialImportFill);
+    }
     const activeCachedAnalysis = unterminatedActive.find(({ job }) =>
       isCachedAnalysis(job),
     );
@@ -144,6 +151,13 @@ async function findNextJob() {
     if (expiredAnnotations.length > 0) {
       return presentImportAnnotationBatch(expiredAnnotations);
     }
+    const expiredInitialImportFill = await prepareRecoverableEntries(
+      expiredActive.filter(({ job }) => isInitialImportFill(job)),
+      maxRefills,
+    );
+    if (expiredInitialImportFill.length > 0) {
+      return presentInitialImportFillBatch(expiredInitialImportFill);
+    }
     const expiredCachedAnalysis = expiredActive.find(({ job }) =>
       isCachedAnalysis(job),
     );
@@ -180,6 +194,10 @@ async function findNextJob() {
     orderedPending.filter(({ job }) => isImportAnnotation(job)),
   );
   if (annotations) return annotations;
+  const initialImportFill = await claimInitialImportFillBatch(
+    orderedPending.filter(({ job }) => isInitialImportFill(job)),
+  );
+  if (initialImportFill) return initialImportFill;
   for (const entry of orderedPending.filter(({ job }) =>
     isCachedAnalysis(job),
   )) {
@@ -207,6 +225,16 @@ async function claimRefillBatch(entries) {
     if (refill) claimed.push(refill);
   }
   return claimed.length > 0 ? presentRefillBatch(claimed) : null;
+}
+
+async function claimInitialImportFillBatch(entries) {
+  const claimed = [];
+  for (const entry of entries) {
+    if (claimed.length === maxRefills) break;
+    const fill = await claim(entry);
+    if (fill) claimed.push(fill);
+  }
+  return claimed.length > 0 ? presentInitialImportFillBatch(claimed) : null;
 }
 
 async function findBatchPartner(
@@ -406,17 +434,27 @@ function priorityRank(job) {
   if (job.kind === "prompt-card-blender") return 3;
   if (job.kind === "prompt-card-writer") return 3;
   if (job.kind === "import-annotation") return 4;
-  if (job.kind === "leaderboard-profile") return 5;
-  if (job.kind === "refill") return 6;
+  if (job.kind === "initial-import-fill") return 5;
+  if (job.kind === "leaderboard-profile") return 6;
+  if (job.kind === "refill") return 7;
   return 2;
 }
 
 function isInteractiveSingle(job) {
-  return !isImportAnnotation(job) && !isCachedAnalysis(job) && !isRefill(job);
+  return (
+    !isImportAnnotation(job) &&
+    !isInitialImportFill(job) &&
+    !isCachedAnalysis(job) &&
+    !isRefill(job)
+  );
 }
 
 function isImportAnnotation(job) {
   return job.kind === "import-annotation";
+}
+
+function isInitialImportFill(job) {
+  return job.kind === "initial-import-fill";
 }
 
 function isCachedAnalysis(job) {
@@ -450,6 +488,13 @@ function presentRefillBatch(entries) {
 function presentImportAnnotationBatch(entries) {
   return {
     kind: "import-annotation-batch",
+    jobs: entries.map((entry) => present(entry)),
+  };
+}
+
+function presentInitialImportFillBatch(entries) {
+  return {
+    kind: "initial-import-fill-batch",
     jobs: entries.map((entry) => present(entry)),
   };
 }

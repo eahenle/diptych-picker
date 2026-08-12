@@ -8,6 +8,7 @@ import type {
   SelectionHistory,
   Side,
 } from "./game";
+import type { ImportSupplySnapshot } from "./import-session";
 
 const DEFAULT_POOL_MAXIMUM = 50;
 const DEFAULT_READY_TARGET = 5;
@@ -138,8 +139,23 @@ export interface BothLoseComparisonReceipt {
 export type PendingComparisonReceipt =
   WinningComparisonReceipt | TieComparisonReceipt | BothLoseComparisonReceipt;
 
+export interface PreparedCandidateDequeue {
+  dequeueOperationId: string;
+  importSessionId: string | null;
+  originalReceipt: PendingComparisonReceipt;
+  replacementSlot: "single" | "pair-left" | "pair-right";
+  reason: "selection" | "retirement" | "tie" | "both-lose";
+  roundNumber: number;
+  excludedCandidateIds: string[];
+  candidate: Candidate;
+  provenance: "imported" | "ready" | "pool-fallback";
+  importItemId: string | null;
+  importSupply: ImportSupplySnapshot;
+}
+
 export interface PendingSelectionBaseline {
   ready: BufferedCandidate[];
+  importQueue?: BufferedCandidate[];
   ratings: CandidateRating[];
   generationTurnaroundEmaMs: number;
   consecutiveFallbackDraws: number;
@@ -156,6 +172,7 @@ export interface ChallengerState {
   leaderboardVisualProfile?: LeaderboardVisualProfile | null;
   leaderboardProfileAttemptedFingerprint?: string | null;
   pendingComparison: PendingComparisonReceipt | null;
+  preparedDequeues?: PreparedCandidateDequeue[];
   pendingSelectionBaseline?: PendingSelectionBaseline | null;
   ratings: CandidateRating[];
   generationTurnaroundEmaMs: number;
@@ -615,18 +632,39 @@ export function admitGeneratedCandidate(
   candidateId: string,
   poolMaximum = DEFAULT_POOL_MAXIMUM,
 ): ChallengerState {
+  const candidate = state.ratings.find(
+    (item) => item.candidate.id === candidateId,
+  );
+  if (candidate?.source !== "generated") {
+    return resizeCandidatePool(state, poolMaximum);
+  }
+  return admitEligibleCandidates(state, [candidateId], poolMaximum);
+}
+
+export function admitEligibleCandidates(
+  state: ChallengerState,
+  candidateIds: readonly string[],
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): ChallengerState {
+  return candidateIds.reduce(
+    (current, candidateId) =>
+      admitEligibleCandidate(current, candidateId, poolMaximum),
+    state,
+  );
+}
+
+function admitEligibleCandidate(
+  state: ChallengerState,
+  candidateId: string,
+  poolMaximum = DEFAULT_POOL_MAXIMUM,
+): ChallengerState {
   const effectiveMaximum = effectivePoolMaximum(poolMaximum);
   const repairedState = resizeCandidatePool(state, poolMaximum);
   const repairedRatings = repairedState.ratings;
   const candidate = repairedRatings.find(
     (item) => item.candidate.id === candidateId,
   );
-  if (
-    !candidate ||
-    candidate.source !== "generated" ||
-    candidate.poolMember ||
-    candidate.poolEligible === false
-  ) {
+  if (!candidate || candidate.poolMember || candidate.poolEligible === false) {
     return repairedState;
   }
 

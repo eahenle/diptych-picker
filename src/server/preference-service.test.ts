@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChallengerState } from "@/domain/challenger-state";
 import {
+  composePreferenceSeed,
   preferenceProfileFromSeed,
   type Candidate,
   type GameState,
@@ -266,5 +267,37 @@ describe("PreferenceService", () => {
         generating.preferenceProfile!,
       ),
     ).rejects.toBeInstanceOf(SelectionConflictError);
+  });
+
+  it("persists profile edits while a buffered selection is in flight", async () => {
+    const current = game({
+      round: { ...game().round, status: "generating" },
+      pendingSelection: {
+        kind: "buffer",
+        winnerSide: "left",
+        selectedAt: NOW,
+      },
+    });
+    const context = fixture(current);
+    const profile = {
+      ...current.preferenceProfile!,
+      inspiration: "Copper light across a monumental interior",
+    };
+    const nextSeed = composePreferenceSeed(profile);
+
+    const updated = await context.service.update(
+      nextSeed,
+      profile,
+      current.preferenceProfile,
+    );
+
+    expect(updated.preferenceSeed).toBe(nextSeed);
+    expect(updated.preferenceProfile).toEqual(profile);
+    expect(updated.pendingSelection).toEqual(current.pendingSelection);
+    expect(context.addRefillCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ ready: [] }),
+      expect.objectContaining({ game: updated, winnerSide: "left" }),
+    );
+    await expect(context.gameRepository.load()).resolves.toEqual(updated);
   });
 });

@@ -1,7 +1,12 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { migrateGameState, type GameState } from "@/domain/game";
+import {
+  GENERATION_JOB_ID_PATTERN,
+  migrateGameState,
+  type GameState,
+} from "@/domain/game";
 import { z } from "zod";
 import {
   persistedPreferenceProfileSchema as preferenceProfileSchema,
@@ -10,9 +15,17 @@ import {
 
 export interface GameRepository {
   load(): Promise<GameState | null>;
+  loadEnvelope?(): Promise<GameRepositoryEnvelope | null>;
   save(state: GameState): Promise<void>;
+  saveEnvelope?(envelope: GameRepositoryEnvelope): Promise<void>;
   clear(): Promise<void>;
   withLock<T>(operation: () => Promise<T>): Promise<T>;
+}
+
+export interface GameRepositoryEnvelope {
+  version: 1;
+  revisionId: string;
+  state: GameState;
 }
 
 interface RepositoryLockOptions {
@@ -197,6 +210,15 @@ const gameStateSchema: z.ZodType<GameState> = z
                   .min(3)
                   .max(5)
                   .optional(),
+                sourceImageDigests: z
+                  .array(z.string().regex(/^[a-f0-9]{64}$/))
+                  .min(1)
+                  .max(5)
+                  .optional(),
+                sourceTextDigest: z
+                  .string()
+                  .regex(/^[a-f0-9]{64}$/)
+                  .optional(),
                 active: z.boolean(),
                 createdAt: z.string().trim().min(1),
                 stats: z
@@ -310,8 +332,15 @@ const gameStateSchema: z.ZodType<GameState> = z
             jobId: z.string().trim().min(1),
             sourceCandidateIds: z
               .array(z.string().trim().min(1).max(200))
-              .min(3)
               .max(5),
+            sourceImageDigests: z
+              .array(z.string().regex(/^[a-f0-9]{64}$/))
+              .max(5)
+              .optional(),
+            sourceTextDigest: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
             enqueuedAt: z.string().trim().min(1),
             expectedJob: z
               .object({
@@ -322,7 +351,12 @@ const gameStateSchema: z.ZodType<GameState> = z
                   .array(
                     z
                       .object({
-                        candidateId: z.string().trim().min(1).max(200),
+                        candidateId: z
+                          .string()
+                          .trim()
+                          .min(1)
+                          .max(200)
+                          .optional(),
                         concept: z.string().trim().min(1).max(240),
                         style: z.array(z.string().trim().min(1).max(80)).max(4),
                         sourceImage: z
@@ -340,8 +374,13 @@ const gameStateSchema: z.ZodType<GameState> = z
                       })
                       .strict(),
                   )
-                  .min(3)
+                  .min(0)
                   .max(5),
+                guidance: z.string().trim().min(1).max(2_000).optional(),
+                sourceTextDigest: z
+                  .string()
+                  .regex(/^[a-f0-9]{64}$/)
+                  .optional(),
               })
               .strict(),
           })
@@ -363,6 +402,15 @@ const gameStateSchema: z.ZodType<GameState> = z
                   .array(z.string().trim().min(1).max(200))
                   .min(3)
                   .max(5)
+                  .optional(),
+                sourceImageDigests: z
+                  .array(z.string().regex(/^[a-f0-9]{64}$/))
+                  .min(1)
+                  .max(5)
+                  .optional(),
+                sourceTextDigest: z
+                  .string()
+                  .regex(/^[a-f0-9]{64}$/)
                   .optional(),
                 title: z.string().trim().min(1).max(80),
                 prompt: z.string().trim().min(20).max(1_000),
@@ -406,6 +454,17 @@ const gameStateSchema: z.ZodType<GameState> = z
               code: "custom",
               path: ["cards", index, "sourceCandidateIds"],
               message: "Prompt card source candidates must be unique",
+            });
+          }
+          if (
+            card.sourceImageDigests &&
+            new Set(card.sourceImageDigests).size !==
+              card.sourceImageDigests.length
+          ) {
+            context.addIssue({
+              code: "custom",
+              path: ["cards", index, "sourceImageDigests"],
+              message: "Prompt card source image digests must be unique",
             });
           }
           ids.add(card.id);
@@ -460,13 +519,37 @@ const gameStateSchema: z.ZodType<GameState> = z
           deck.writerJob &&
           (deck.writerJob.expectedJob.id !== deck.writerJob.jobId ||
             !isDeepStrictEqual(
-              deck.writerJob.expectedJob.sources.map(
-                ({ candidateId }) => candidateId,
+              deck.writerJob.expectedJob.sources.flatMap(({ candidateId }) =>
+                candidateId ? [candidateId] : [],
               ),
               deck.writerJob.sourceCandidateIds,
             ) ||
             new Set(deck.writerJob.sourceCandidateIds).size !==
               deck.writerJob.sourceCandidateIds.length ||
+            (deck.writerJob.sourceImageDigests !== undefined &&
+              (!isDeepStrictEqual(
+                [
+                  ...new Set(
+                    deck.writerJob.expectedJob.sources.map(({ sourceImage }) =>
+                      sourceImage.filename.slice(0, -4),
+                    ),
+                  ),
+                ],
+                deck.writerJob.sourceImageDigests,
+              ) ||
+                new Set(deck.writerJob.sourceImageDigests).size !==
+                  deck.writerJob.sourceImageDigests.length)) ||
+            deck.writerJob.expectedJob.sourceTextDigest !==
+              deck.writerJob.sourceTextDigest ||
+            Boolean(deck.writerJob.expectedJob.guidance) !==
+              Boolean(deck.writerJob.expectedJob.sourceTextDigest) ||
+            (deck.writerJob.expectedJob.guidance &&
+              createHash("sha256")
+                .update(deck.writerJob.expectedJob.guidance.trim())
+                .digest("hex") !==
+                deck.writerJob.expectedJob.sourceTextDigest) ||
+            (deck.writerJob.expectedJob.sources.length === 0 &&
+              !deck.writerJob.expectedJob.guidance) ||
             deck.writerJob.expectedJob.sources.some(
               ({ sourceImage }) =>
                 sourceImage.path !== `profile-sources/${sourceImage.filename}`,
@@ -476,7 +559,7 @@ const gameStateSchema: z.ZodType<GameState> = z
             code: "custom",
             path: ["writerJob"],
             message:
-              "Prompt card writer job must reference unique matching candidates",
+              "Prompt card writer job must preserve unique matching source lineage",
           });
         }
         const suggestionIds = new Set<string>();
@@ -493,6 +576,11 @@ const gameStateSchema: z.ZodType<GameState> = z
             suggestion.parentCardIds ??
             (suggestion.parentCardId ? [suggestion.parentCardId] : []);
           const sourceIds = suggestion.sourceCandidateIds ?? [];
+          const sourceImageDigests = suggestion.sourceImageDigests ?? [];
+          const hasWriterLineage =
+            sourceIds.length > 0 ||
+            sourceImageDigests.length > 0 ||
+            Boolean(suggestion.sourceTextDigest);
           const invalidParentLineage =
             parentIds.length > 0 &&
             (!suggestion.parentCardId ||
@@ -501,18 +589,20 @@ const gameStateSchema: z.ZodType<GameState> = z
               new Set(parentIds).size !== parentIds.length ||
               parentIds[0] !== suggestion.parentCardId);
           const invalidSourceLineage =
-            sourceIds.length > 0 &&
-            new Set(sourceIds).size !== sourceIds.length;
+            (sourceIds.length > 0 &&
+              new Set(sourceIds).size !== sourceIds.length) ||
+            (sourceImageDigests.length > 0 &&
+              new Set(sourceImageDigests).size !== sourceImageDigests.length);
           if (
             invalidParentLineage ||
             invalidSourceLineage ||
-            parentIds.length > 0 === sourceIds.length > 0
+            parentIds.length > 0 === hasWriterLineage
           ) {
             context.addIssue({
               code: "custom",
               path: ["suggestions", index],
               message:
-                "Prompt card suggestions must reference either deck parents or source candidates",
+                "Prompt card suggestions must reference either deck parents or writer sources",
             });
           }
         }
@@ -544,6 +634,42 @@ export function parseGameState(value: unknown): GameState {
   return migrateGameState(gameStateSchema.parse(value));
 }
 
+const gameRepositoryEnvelopeSchema = z
+  .object({
+    version: z.literal(1),
+    revisionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
+    state: z.unknown(),
+  })
+  .strict();
+
+export function parseGameRepositoryEnvelope(
+  value: unknown,
+): GameRepositoryEnvelope {
+  const parsed = gameRepositoryEnvelopeSchema.parse(value);
+  return { ...parsed, state: migrateGameState(parsed.state as GameState) };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function legacyEnvelope(state: GameState): GameRepositoryEnvelope {
+  return {
+    version: 1,
+    revisionId: `game-revision-${createHash("sha256")
+      .update(canonicalJson(state))
+      .digest("hex")}`,
+    state,
+  };
+}
+
 export class JsonGameRepository implements GameRepository {
   private readonly lockTimeoutMs: number;
   private readonly staleLockMs: number;
@@ -559,11 +685,22 @@ export class JsonGameRepository implements GameRepository {
   }
 
   async load(): Promise<GameState | null> {
+    return (await this.loadEnvelope())?.state ?? null;
+  }
+
+  async loadEnvelope(): Promise<GameRepositoryEnvelope | null> {
     try {
-      const state = JSON.parse(
-        await readFile(this.filePath, "utf8"),
-      ) as GameState | null;
-      return state ? migrateGameState(state) : null;
+      const value: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
+      if (value === null) return null;
+      if (
+        value &&
+        typeof value === "object" &&
+        "revisionId" in value &&
+        "state" in value
+      ) {
+        return parseGameRepositoryEnvelope(value);
+      }
+      return legacyEnvelope(migrateGameState(value as GameState));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -571,11 +708,20 @@ export class JsonGameRepository implements GameRepository {
   }
 
   async save(state: GameState): Promise<void> {
+    await this.saveEnvelope({
+      version: 1,
+      revisionId: `game-revision-${crypto.randomUUID()}`,
+      state,
+    });
+  }
+
+  async saveEnvelope(envelope: GameRepositoryEnvelope): Promise<void> {
+    const validated = parseGameRepositoryEnvelope(envelope);
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
     await writeFile(
       temporaryPath,
-      `${JSON.stringify(state, null, 2)}\n`,
+      `${JSON.stringify(validated, null, 2)}\n`,
       "utf8",
     );
     await rename(temporaryPath, this.filePath);
@@ -690,21 +836,41 @@ export class JsonGameRepository implements GameRepository {
 
 export class MemoryGameRepository implements GameRepository {
   private lockTail: Promise<void> = Promise.resolve();
+  private envelope: GameRepositoryEnvelope | null;
 
-  constructor(private state: GameState | null = null) {}
+  constructor(state: GameState | null = null, revisionId?: string) {
+    this.envelope = state
+      ? {
+          version: 1,
+          revisionId: revisionId ?? `game-revision-${crypto.randomUUID()}`,
+          state: migrateGameState(state),
+        }
+      : null;
+  }
 
   async load(): Promise<GameState | null> {
-    if (!this.state) return null;
-    this.state = migrateGameState(this.state);
-    return this.state;
+    return (await this.loadEnvelope())?.state ?? null;
+  }
+
+  async loadEnvelope(): Promise<GameRepositoryEnvelope | null> {
+    return this.envelope;
   }
 
   async save(state: GameState): Promise<void> {
-    this.state = state;
+    await this.saveEnvelope({
+      version: 1,
+      revisionId: `game-revision-${crypto.randomUUID()}`,
+      state,
+    });
+  }
+
+  async saveEnvelope(envelope: GameRepositoryEnvelope): Promise<void> {
+    gameRepositoryEnvelopeSchema.parse(envelope);
+    this.envelope = { ...envelope, state: migrateGameState(envelope.state) };
   }
 
   async clear(): Promise<void> {
-    this.state = null;
+    this.envelope = null;
   }
 
   async withLock<T>(operation: () => Promise<T>): Promise<T> {

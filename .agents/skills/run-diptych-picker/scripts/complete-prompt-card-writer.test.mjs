@@ -24,12 +24,18 @@ const activeJob = {
   id: "writer-1",
   kind: "prompt-card-writer",
   createdAt: "2026-07-21T20:00:00.000Z",
-  sources: ["favorite-1", "favorite-2", "favorite-3"].map((candidateId) => ({
-    candidateId,
-    concept: `${candidateId} concept`,
-    style: ["editorial"],
-    sourceImage,
-  })),
+  sources: ["favorite-1", "favorite-2", "favorite-3"].map(
+    (candidateId, index) => ({
+      candidateId,
+      concept: `${candidateId} concept`,
+      style: ["editorial"],
+      sourceImage: {
+        ...sourceImage,
+        filename: `${String(index + 1).repeat(64)}.png`,
+        path: `profile-sources/${String(index + 1).repeat(64)}.png`,
+      },
+    }),
+  ),
 };
 const proposal = {
   title: "Favorite synthesis",
@@ -69,5 +75,47 @@ test("publishes one strict prompt-card writer proposal", async () => {
     "favorite-2",
     "favorite-3",
   ]);
+  assert.deepEqual(result.sourceImageDigests, [
+    "1".repeat(64),
+    "2".repeat(64),
+    "3".repeat(64),
+  ]);
   assert.deepEqual(result.proposal, proposal);
+});
+
+test("preserves text-only prompt-card writer lineage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "diptych-card-writer-text-"));
+  const active = join(root, "agent-mailbox", "active");
+  await mkdir(active, { recursive: true });
+  const textJob = {
+    id: "writer-text-1",
+    kind: "prompt-card-writer",
+    createdAt: "2026-08-11T01:00:00.000Z",
+    sources: [],
+    guidance: "A quiet ultraviolet architectural nocturne.",
+    sourceTextDigest:
+      "754548edd47f62ef35b5aece43e6394f34ec4cba060743b9f37d80abe0f78ed5",
+  };
+  await writeFile(
+    join(active, `${textJob.id}.json`),
+    `${JSON.stringify(textJob, null, 2)}\n`,
+  );
+  const suggestionPath = join(root, "suggestion.json");
+  await writeFile(suggestionPath, `${JSON.stringify({ proposal }, null, 2)}\n`);
+
+  await execFileAsync(
+    process.execPath,
+    [script, "--job", textJob.id, "--suggestion-file", suggestionPath],
+    { cwd: process.cwd(), env: { ...process.env, LOCAL_DATA_DIR: root } },
+  );
+
+  const result = JSON.parse(
+    await readFile(
+      join(root, "agent-mailbox", "completed", `${textJob.id}.json`),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(result.sourceCandidateIds, []);
+  assert.deepEqual(result.sourceImageDigests, []);
+  assert.equal(result.sourceTextDigest, textJob.sourceTextDigest);
 });

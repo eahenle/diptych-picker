@@ -21,22 +21,25 @@ npm run demo
 Open <http://127.0.0.1:3000>. Use `PORT=3001 npm run demo` if port 3000 is
 already occupied. Demo state is isolated under `.local-data/demo`.
 
-## Run with Codex
+## Run with multi-cli
 
-Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), authenticate,
-and launch the repository's interactive generation workflow:
+Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli) and
+[multi-cli](https://github.com/Spielewoy/multi-codex), create the personal
+profile if it does not exist yet, authenticate through that profile, and launch
+the repository's interactive generation workflow:
 
 ```bash
 npm install --global @openai/codex
-codex login
+multi-cli new codex/personal
+multi-cli codex/personal login
 npm run codex:play
 ```
 
-The launcher uses the stock `codex` command, changes into this repository, and
+The launcher uses `multi-cli codex/personal`, changes into this repository, and
 sends the `$run-diptych-picker` startup prompt. It requests eight total threads:
 one root supervisor, one persistent mailbox monitor, and up to three concurrent
 fresh image workers, with spare capacity for bounded supporting work. It does
-not require a named profile or modify global Codex configuration.
+not modify global Codex configuration.
 
 Pass a different total thread count after `--`, or set
 `DIPTYCH_CODEX_THREADS`. Five is the minimum that can fit the root, monitor, and
@@ -57,13 +60,13 @@ Normal play runs the app as an optimized production server, not through Next's d
 npm run run:production
 ```
 
-The root-level `run-only` launcher builds into the gitignored `.next-run` directory, preserves the tracked Next TypeScript configuration, forces `GENERATION_PROVIDER=agent`, and then starts the production server. `dev-and-play` instructs the runner skill to use this same launcher so both entrypoints share one startup path.
+The root-level `run-only` launcher builds into the gitignored `.next-run` directory, preserves the tracked Next TypeScript configuration, stamps the browser and server with the same git revision, forces `GENERATION_PROVIDER=agent`, and then starts the production server. `dev-and-play` instructs the runner skill to use this same launcher so both entrypoints share one startup path. A tab that observes a later server revision shows a **New version available** banner with a reload action.
 
 To inspect commands without launching anything, run
 `./dev-and-play --print-command [thread-count]`,
 `./demo-only --print-command`, or `./run-only --print-command`.
 
-The web server never launches `codex`, calls an OpenAI API, or receives an API key. Model choice, authentication, permissions, and subagent execution belong to the interactive CLI session.
+The web server never launches a CLI or model process, calls an OpenAI API, or receives an API key. Model choice, authentication, permissions, and subagent execution belong to the interactive `multi-cli` session.
 
 ## Release status
 
@@ -193,16 +196,18 @@ The buffer and pool defaults can be changed in `.env.local` with `CHALLENGER_BUF
 - Read each established candidate's rounded Elo score from its lower-left overlay. `✦` marks a first appearance; `⊖` warns that losing the current comparison would remove that candidate from the reusable pool.
 - Select the **Round** metric to review up to fifty recent decisions, newest first, with winner and rejected-candidate thumbnails and no generation prompts. Select an available thumbnail to inspect the immutable image at full size. Favorite exceptional candidates from history or the pool; favorites persist independently of Elo and pool membership. The header's **Favorites** control opens every saved candidate in deterministic Elo order, including images that have left the reusable pool, with inspection, removal, and variation-exploration actions.
 - In **Favorites**, select three to five generated images to draft a prompt card from their shared transferable qualities. Curated seeds and private uploads are ineligible. The writer preserves every source image and returns a review-only proposal; accepting it in Preferences creates an immutable card with all source candidate IDs recorded.
+- In **Preferences → Prompt deck**, draft a card from text guidance, one to five private PNG/JPEG/WebP seed images, or both. Inputs are normalized for read-only analysis and never become playable assets; the writer returns one review-only proposal, and acceptance records source-image and text digests on the immutable card.
 - Every expanded image offers **Explore variations**. The app privately runs that candidate through the same source-analysis path, opens the resulting profile as an editable draft, and saves no change until you confirm it. Generated descendants retain the canonical parent plus a fingerprint of the exact preference profile used.
 - Press `A` or `1` for the left image.
 - Press `B` or `2` for the right image.
 - Press `C` or `3` to declare a neutral tie and replace both images.
 - Press `D` or `4` for **Both lose**. Both candidates receive a loss without an Elo change, leave the reusable pool, and count as negative adaptive evidence when generated.
-- Shape future challengers through **Preferences**, with separate guidance for themes, inspiration, media, visual style, palette, content range, and things to avoid. **Analyze image** accepts a private PNG, JPEG, or WebP source and fills those fields with transferable content, composition, medium, style, palette, and constraint guidance; the result remains an unsaved draft for review and never requests a depicted person's identity or exact likeness. The title-row freedom slider applies to the entire profile: **Frozen** prevents model edits, **Guided** permits restrained leaderboard-driven revisions every 15 completed rounds, and **Unfettered** permits broad revisions every 5 rounds. A cadence meter shows progress and explains when the next winning generated candidate is eligible to update the profile. Both adaptive levels remain winner-gated and base revisions primarily on bounded, display-safe leaderboard evidence—aggregate rank, Elo, repeated wins/losses, favorites, and a cached visual synthesis of the current top four pool images—while recent decisions remain secondary novelty context. Pool leaders reuse the same content-addressed normalization and strict profile-analysis machinery as uploaded sources; analysis reruns only when the ordered leading cohort changes, never modifies a source image, and never directly overwrites user-entered preferences. Separate bounded provenance lists record winning and rejected generated outcomes. Saving or adopting changed profile fields clears candidates buffered under the earlier brief, replaces their capacity with jobs carrying the new seed, and discards any earlier-brief result after its already-running worker exits; provenance-only updates leave buffered work stable. Image workers must treat the current composed preference seed as authoritative. The modal stays openable while a selection waits; Save queues the edited profile with animated feedback and applies it automatically when the challenger arrives. Its optional **Prompt deck** stores immutable archetype/style cards and draws future jobs by positive weight; card-backed winners gain 10% weight and all card-backed wins/rejections remain attributable. Four new rejects inside the latest twelve deck verdicts automatically request two editor alternatives, which remain review-only until accepted as immutable child cards or discarded. Two active cards can also be selected for a balanced model-assisted blend; the returned direction remains review-only and records both immutable parents when accepted.
+- Shape future challengers through **Preferences**, with separate guidance for themes, inspiration, media, visual style, palette, content range, and things to avoid. **Analyze image** accepts a private PNG, JPEG, or WebP source and fills those fields with transferable content, composition, medium, style, palette, and constraint guidance; the result remains an unsaved draft for review and never requests a depicted person's identity or exact likeness. The title-row freedom slider applies to the entire profile: **Frozen** prevents model edits, **Guided** permits restrained leaderboard-driven revisions every 15 completed rounds, and **Unfettered** permits broad revisions every 5 rounds. A cadence meter shows progress and explains when the next winning generated candidate is eligible to update the profile. Both adaptive levels remain winner-gated and base revisions primarily on bounded, display-safe leaderboard evidence—aggregate rank, Elo, repeated wins/losses, favorites, and a cached visual synthesis of the current top four pool images—while recent decisions remain secondary novelty context. Pool leaders reuse the same content-addressed normalization and strict profile-analysis machinery as uploaded sources; analysis reruns only when the ordered leading cohort changes, never modifies a source image, and never directly overwrites user-entered preferences. Separate bounded provenance lists record winning and rejected generated outcomes. Saving or adopting changed profile fields clears candidates buffered under the earlier brief, replaces their capacity with jobs carrying the new seed, and discards any earlier-brief result after its already-running worker exits; provenance-only updates leave buffered work stable. Image workers must treat the current composed preference seed as authoritative. The modal stays openable while a comparison loads: buffered rounds save immediately, while the legacy direct-generation path safely defers the save until its bound challenger arrives. Cancel, Escape, backdrop dismissal, and browser navigation warn before discarding an edited profile draft. Its optional **Prompt deck** stores immutable archetype/style cards and draws future jobs by positive weight; card-backed winners gain 10% weight and all card-backed wins/rejections remain attributable. Four new rejects inside the latest twelve deck verdicts automatically request two editor alternatives, which remain review-only until accepted as immutable child cards or discarded. Two active cards can also be selected for a balanced model-assisted blend; the returned direction remains review-only and records both immutable parents when accepted.
 - Expand **Game rules** in Preferences to tune the current game's ready queue (1–10), reusable pool (2–50), champion retirement streak (2–50), and consecutive fallback limit (1–50). Applying changes is independent from saving the preference profile: pool reductions trim the weakest members immediately, queue growth schedules available refill capacity, and the next comparison uses the new streak and fallback limits.
 - Preferences keeps a bounded revision timeline for confirmed manual saves, variation branches, and model-authored rewrites. Expand it to review when each revision occurred and which fields changed, then restore any entry as an editable or Frozen draft without changing the game until Save is confirmed. Named presets capture the current draft for later reuse; applying one is also draft-only, and same-name saves replace the prior preset.
 - The quiet **Queue** readout shows ready challengers and total in-flight refill work. Select it to distinguish jobs actively generating from jobs waiting for a worker and to see whether old-profile work is draining. Ready plus in-flight refill jobs stays within the configured queue target. Select **Pool** to open the reusable-image leaderboard, ranked by Elo with each candidate's thumbnail, concept, style, win–loss record, and curated/generated provenance; prompts and mailbox details remain private.
 - Background moderation blocks are classified separately from operational failures. The app keeps replacing blocked refill work, while a persistent notice explains what happened and offers **Adjust preferences** or **Dismiss** instead of failing silently.
+- Every page load first offers **Resume**, **Load**, **Initialize**, or **Import**. The availability probe is read-only, Resume is disabled when no durable game exists, and unfinished image-pool work is identified before the user chooses a path.
 - **New game** opens a save/restore dialog. Export the exact current game, load a prior JSON save, or start fresh; starting fresh clears the round, history, and preference profile while retaining learned pool ratings and immutable images.
 
 ## Verification
@@ -216,7 +221,7 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, preference revisions and presets, editable persisted game rules, weighted prompt cards, two-card blending, favorite-set card writing, three guaranteed initial FIFO swaps, generated refill capacity, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, deferred Preferences save, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
+Playwright starts the app in deterministic mock mode with isolated `.local-data/test` state. Its suite covers game export/restore, source analysis, preference revisions and presets, editable persisted game rules, weighted prompt cards, two-card blending, favorite-set card writing, three guaranteed initial FIFO swaps, generated refill capacity, stale work after a winner change, refresh persistence, double-click suppression, fallback pacing and its hard stop, Preferences saving during challenger loading, two independent images, narrow stacked layout without horizontal overflow, expanded-image controls, and winner-node preservation.
 
 ## Architecture
 
@@ -236,8 +241,8 @@ Playwright starts the app in deterministic mock mode with isolated `.local-data/
 - `src/server/preference-service.ts`: manual preference saves, stale-editor protection, variation lineage, and replacement-capacity refresh.
 - `src/server/generation-job-publisher.ts`: idempotent durable mailbox publication with lost-acknowledgement recovery.
 - `src/server/refill-capacity-service.ts`: locked refill-deficit planning, intent persistence, and job publication.
-- `src/server/prompt-deck-service.ts`: card creation, weighted-deck edits, suggestion decisions, blend requests, and favorite-set writer requests.
-- `src/server/prompt-card-reconciler.ts`: durable editor, blender, and favorite-set writer recovery, terminal reconciliation, and suggestion creation.
+- `src/server/prompt-deck-service.ts`: card creation, weighted-deck edits, suggestion decisions, blend requests, and favorite/source-driven writer requests.
+- `src/server/prompt-card-reconciler.ts`: durable editor, blender, and source-driven writer recovery, terminal reconciliation, and suggestion creation.
 - `src/server/leaderboard-profile-reconciler.ts`: adaptive leaderboard analysis scheduling, durable result recovery, and current-cohort cache selection.
 - `src/server/game-comparison.ts` and `game-refill.ts`: comparison rating/receipt rules and deterministic refill context, planning, and work validation.
 - `src/server/game-snapshot.ts`: versioned save validation, asset verification, fresh-session restore, and stale-job exclusion.

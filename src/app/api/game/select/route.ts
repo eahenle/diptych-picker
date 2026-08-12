@@ -4,7 +4,7 @@ import {
   MissingGameError,
   SelectionConflictError,
 } from "@/server/game-service";
-import { gameService, getDisplayedEloRatings } from "@/server/runtime";
+import { getDisplayedEloRatings, selectGameRound } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -38,15 +38,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid selection." }, { status: 400 });
 
   try {
-    const game =
-      "outcome" in parsed.data
-        ? parsed.data.outcome === "tie"
-          ? await gameService.tie(parsed.data.roundNumber)
-          : await gameService.bothLose(parsed.data.roundNumber)
-        : await gameService.select(
-            parsed.data.winnerSide,
-            parsed.data.roundNumber,
-          );
+    const game = await selectGameRound(parsed.data);
     return NextResponse.json(
       { ...game, eloRatings: await getDisplayedEloRatings(game) },
       {

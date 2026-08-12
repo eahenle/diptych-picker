@@ -1,5 +1,5 @@
 import {
-  admitGeneratedCandidate,
+  admitEligibleCandidates,
   updateElo,
   type CandidateRating,
   type ChallengerState,
@@ -20,11 +20,6 @@ export interface ComparisonRatingConfig {
   poolMaximum: number;
 }
 
-const reusableCandidateSources = new Set<ReusableCandidateSource>([
-  "curated",
-  "generated",
-]);
-
 export function candidateSource(candidate: Candidate): ReusableCandidateSource {
   return candidate.imageUrl.startsWith("/seed-assets/")
     ? "curated"
@@ -33,12 +28,16 @@ export function candidateSource(candidate: Candidate): ReusableCandidateSource {
 
 export function createCandidateRating(
   candidate: Candidate,
-  source: ReusableCandidateSource,
+  source: CandidateRating["source"],
   poolMember: boolean,
   initialRating: number,
+  importItemId: string | null = null,
 ): CandidateRating {
-  if (!reusableCandidateSources.has(source)) {
+  if (source === "imported" && !importItemId) {
     throw new Error("Imported ratings require an import item ID");
+  }
+  if (source !== "imported" && importItemId) {
+    throw new Error("Reusable ratings cannot carry an import item ID");
   }
   return {
     candidate,
@@ -46,7 +45,7 @@ export function createCandidateRating(
     wins: 0,
     losses: 0,
     source,
-    importItemId: null,
+    importItemId,
     poolMember,
     poolEligible: true,
     lastServedAt: null,
@@ -115,12 +114,11 @@ export function recordComparison(
       return item;
     }),
   };
-  const withLoser = admitGeneratedCandidate(
+  return admitEligibleCandidates(
     updated,
-    loser.id,
+    [loser.id, winner.id],
     config.poolMaximum,
   );
-  return admitGeneratedCandidate(withLoser, winner.id, config.poolMaximum);
 }
 
 export function recordTie(
@@ -157,12 +155,11 @@ export function recordTie(
       item === lower ? { ...item, rating: lowerRating! } : item,
     ),
   };
-  const withLeft = admitGeneratedCandidate(
+  return admitEligibleCandidates(
     updated,
-    left.id,
+    [left.id, right.id],
     config.poolMaximum,
   );
-  return admitGeneratedCandidate(withLeft, right.id, config.poolMaximum);
 }
 
 export function recordBothLose(
@@ -175,7 +172,7 @@ export function recordBothLose(
   let ratings = ensureRated(state.ratings, left, initialRating);
   ratings = ensureRated(ratings, right, initialRating);
   const rejectedIds = new Set([left.id, right.id]);
-  return {
+  const updated = {
     ...state,
     pendingComparison: receipt,
     ratings: ratings.map((item) =>
@@ -189,6 +186,7 @@ export function recordBothLose(
         : item,
     ),
   };
+  return admitEligibleCandidates(updated, [left.id, right.id]);
 }
 
 export function tieReferenceSide(

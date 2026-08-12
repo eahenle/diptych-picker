@@ -59,6 +59,7 @@ const challengers: ChallengerState = {
   leaderboardVisualProfile: null,
   leaderboardProfileAttemptedFingerprint: null,
   pendingComparison: null,
+  preparedDequeues: [],
   pendingSelectionBaseline: null,
   ratings: [],
   generationTurnaroundEmaMs: 0,
