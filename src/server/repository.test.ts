@@ -1,9 +1,14 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as filesystem from "node:fs/promises";
 import { JsonGameRepository, MemoryGameRepository } from "./repository";
 import { preferenceProfileFromSeed, type GameState } from "@/domain/game";
+
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs/promises")>()),
+}));
 
 const state: GameState = {
   round: {
@@ -154,9 +159,59 @@ describe("JsonGameRepository", () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-picker-clear-"));
     const file = join(directory, "game.json");
     const repository = new JsonGameRepository(file);
+    await repository.save(state);
     await repository.clear();
 
     await expect(repository.load()).resolves.toBeNull();
+    expect(await readdir(directory)).toEqual(["game.json"]);
+  });
+
+  it("preserves the last saved game when clearing fails during a partial write", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "diptych-picker-clear-failure-"),
+    );
+    const file = join(directory, "game.json");
+    const repository = new JsonGameRepository(file);
+    await repository.save(state);
+    const before = await readFile(file, "utf8");
+    const actualWrite = filesystem.writeFile;
+    const write = vi
+      .spyOn(filesystem, "writeFile")
+      .mockImplementationOnce(async (path) => {
+        await actualWrite(path, "nu", "utf8");
+        throw new Error("simulated disk full");
+      });
+    try {
+      await expect(repository.clear()).rejects.toThrow("simulated disk full");
+    } finally {
+      write.mockRestore();
+    }
+    expect(await readFile(file, "utf8")).toBe(before);
+    await expect(repository.load()).resolves.toMatchObject(state);
+    expect(await readdir(directory)).toEqual(["game.json"]);
+  });
+
+  it("preserves the last saved game when the clear replacement fails", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "diptych-picker-clear-rename-"),
+    );
+    const file = join(directory, "game.json");
+    const repository = new JsonGameRepository(file);
+    await repository.save(state);
+    const before = await readFile(file, "utf8");
+    const rename = vi
+      .spyOn(filesystem, "rename")
+      .mockRejectedValueOnce(new Error("simulated replace failure"));
+    try {
+      await expect(repository.clear()).rejects.toThrow(
+        "simulated replace failure",
+      );
+    } finally {
+      rename.mockRestore();
+    }
+    expect(await readFile(file, "utf8")).toBe(before);
+    await expect(repository.load()).resolves.toMatchObject(state);
+    expect(await readdir(directory)).toEqual(["game.json"]);
   });
 
   it("serializes transactions across repository instances for the same file", async () => {
