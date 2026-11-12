@@ -729,7 +729,13 @@ export class JsonGameRepository implements GameRepository {
 
   async clear(): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, "null\n", "utf8");
+    const temporaryPath = `${this.filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, "null\n", "utf8");
+      await rename(temporaryPath, this.filePath);
+    } finally {
+      await rm(temporaryPath, { force: true });
+    }
   }
 
   async withLock<T>(operation: () => Promise<T>): Promise<T> {
