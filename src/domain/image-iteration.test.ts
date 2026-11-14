@@ -206,6 +206,10 @@ describe("planImageIteration", () => {
   it.each([
     ["a missing subject anchor", { ...far, retainedAnchors: ["bent mast"] }],
     [
+      "a required anchor declared removed",
+      { ...far, removedAnchors: ["  RED Signal Lamp "] },
+    ],
+    [
       "a missing command anchor",
       { ...far, retainedAnchors: ["Red signal lamp"] },
     ],
@@ -281,6 +285,75 @@ describe("planImageIteration", () => {
     });
   });
 
+  it.each([
+    [".499", ["brass rivets", "frosted glass", "wide brim"]],
+    [".5", ["brass rivets", "frosted glass"]],
+    ["hot", ["brass rivets", "frosted glass"]],
+    ["wild", ["brass rivets", "frosted glass"]],
+  ])(
+    "uses the optional lineage budget at %s after reserving all required anchors",
+    (temperature, optionalAnchors) => {
+      const required = ["Red signal lamp", "copper badge", "bent mast"];
+      expect(
+        plan({
+          command: `iterate ${temperature}, preserve [bent mast]`,
+          subject: { mandatoryAnchors: required.slice(0, 2) },
+          proposals: [
+            {
+              ...framing,
+              retainedAnchors: [
+                ...required,
+                "brass rivets",
+                "Brass  Rivets",
+                "frosted glass",
+                "wide brim",
+                "patina",
+              ],
+            },
+          ],
+        }),
+      ).toMatchObject({ mandatoryAnchors: required, optionalAnchors });
+    },
+  );
+
+  it("reports a preserve/exclude conflict before evaluating proposals", () => {
+    expect(
+      planImageIteration({
+        ...baseInput,
+        command: "iterate hot, preserve [Bent mast]",
+        subject: { ...subject, exclusions: [" BENT  MAST "] },
+        proposals: [],
+      }),
+    ).toEqual({
+      status: "blocked",
+      reason: "anchor-conflict",
+      conflictingAnchors: ["Bent mast"],
+    });
+  });
+
+  it("blocks a zero-temperature motif change past the stored fingerprint limit", () => {
+    const mandatoryAnchors = Array.from({ length: 8 }, (_, i) => `anchor ${i}`);
+    expect(
+      planImageIteration({
+        ...baseInput,
+        command: "iterate 0",
+        subject: { mandatoryAnchors },
+        source: {
+          ...source,
+          visualAnchors: [...mandatoryAnchors, "brass rivets"],
+        },
+        proposals: [
+          {
+            ...framing,
+            changes: {},
+            retainedAnchors: mandatoryAnchors,
+            visualAnchors: [...mandatoryAnchors, "red enamel dots"],
+          },
+        ],
+      }),
+    ).toEqual({ status: "blocked", reason: "no-proposal-in-range" });
+  });
+
   it("scores scene differences independently of extra optional labels", () => {
     const tagged = { ...balanced, visualAnchors: ["spiral railing"] };
     const untagged = { ...balanced, visualAnchors: [] };
@@ -321,6 +394,28 @@ describe("planImageIteration", () => {
       status: "blocked",
       reason: "no-eligible-proposal",
     });
+  });
+
+  it("checks inherited exclusions before trimming source observations", () => {
+    const overLimit = [
+      ...Array.from({ length: 8 }, (_, index) => `shape ${index}`),
+      "Explosions",
+    ];
+    const inherited = { ...framing, visualAnchors: undefined };
+    const input = {
+      ...baseInput,
+      source: { ...source, visualAnchors: overLimit },
+    };
+    expect(planImageIteration({ ...input, proposals: [inherited] })).toEqual({
+      status: "blocked",
+      reason: "no-eligible-proposal",
+    });
+    expect(
+      planImageIteration({
+        ...input,
+        proposals: [{ ...inherited, removedAnchors: ["explosions"] }],
+      }).status,
+    ).toBe("planned");
   });
 
   it("requires source annotation for an explicitly preserved axis", () => {

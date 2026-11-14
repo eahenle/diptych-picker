@@ -1,6 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -533,6 +540,129 @@ describe("agent mailbox scripts", () => {
         byteLength: image.bytes.byteLength,
       },
     });
+  });
+
+  it("requires an independent exact-image anchor review before publishing an iteration job", async () => {
+    const root = await createDataDirectory();
+    const id = "iteration-retry";
+    const iterationPlan = {
+      temperature: 0.95,
+      mandatoryAnchors: ["red scarf", "copper badge"],
+      optionalAnchors: ["striped sleeves"],
+      exclusions: ["fireworks"],
+    };
+    const active = {
+      ...job(id),
+      variationSource: { candidateId: "left", concept: "forest observatory" },
+      iterationPlan,
+    };
+    await putJob(root, "active", active);
+    const image = await squareImage(root, id);
+    const imageSha256 = createHash("sha256").update(image.bytes).digest("hex");
+    const proposalPath = await proposalFile(root, id);
+    const args = [
+      "--job",
+      id,
+      "--proposal-file",
+      proposalPath,
+      "--image",
+      image.path,
+    ];
+    const complete = (...extraArgs: string[]) =>
+      runScript("complete-job.mjs", [...args, ...extraArgs], root);
+
+    await expect(complete()).rejects.toThrow(/anchor-review-file/);
+    const validReview = {
+      jobId: id,
+      imageSha256,
+      presentAnchors: iterationPlan.mandatoryAnchors,
+      absentExclusions: iterationPlan.exclusions,
+    };
+    const reviewPath = join(root, "monitor-review.json");
+    const setReview = (value: typeof validReview) =>
+      writeFile(reviewPath, JSON.stringify(value));
+    const completeWithReview = () =>
+      complete("--anchor-review-file", reviewPath);
+
+    await setReview({ ...validReview, presentAnchors: ["copper badge"] });
+    await expect(completeWithReview()).rejects.toThrow(/red scarf/);
+    await setReview({ ...validReview, absentExclusions: [] });
+    await expect(completeWithReview()).rejects.toThrow(/fireworks/);
+    await setReview({ ...validReview, imageSha256: "a".repeat(64) });
+    await expect(completeWithReview()).rejects.toThrow(/exact image/i);
+    await expectNoCompletionArtifacts(root, id);
+
+    const resumed = await runScript(
+      "next-job.mjs",
+      ["--resume", "--wait-ms", "0"],
+      root,
+    );
+    expect(JSON.parse(resumed.stdout)).toMatchObject(active);
+    await setReview(validReview);
+    const blockedExport = join(root, "exports");
+    await writeFile(blockedExport, "simulate interruption after reservation");
+    await expect(completeWithReview()).rejects.toThrow(/EEXIST|ENOTDIR/);
+    await rm(blockedExport);
+
+    const recovered = JSON.parse(
+      (await runScript("next-job.mjs", ["--resume", "--wait-ms", "0"], root))
+        .stdout,
+    );
+    expect(recovered).toMatchObject({
+      ...active,
+      reviewedOutput: {
+        imageSha256,
+        imagePath: image.path,
+        proposalPath,
+        anchorReviewPath: reviewPath,
+      },
+    });
+    const result = JSON.parse(
+      (
+        await runScript(
+          "complete-job.mjs",
+          [
+            "--job",
+            recovered.id,
+            "--proposal-file",
+            recovered.reviewedOutput.proposalPath,
+            "--image",
+            recovered.reviewedOutput.imagePath,
+            "--anchor-review-file",
+            recovered.reviewedOutput.anchorReviewPath,
+          ],
+          root,
+        )
+      ).stdout,
+    );
+    expect(result).toMatchObject({
+      status: "completed",
+      anchorReview: validReview,
+      asset: {
+        filename: `${imageSha256}.png`,
+        candidateId: `challenger-${id}`,
+      },
+    });
+    expect(JSON.parse((await completeWithReview()).stdout)).toEqual(result);
+
+    const alternate = await sharp({
+      create: { width: 32, height: 32, channels: 4, background: "#151515" },
+    })
+      .png()
+      .toBuffer();
+    await writeFile(image.path, alternate);
+    await setReview({
+      ...validReview,
+      imageSha256: createHash("sha256").update(alternate).digest("hex"),
+    });
+    await expect(completeWithReview()).rejects.toThrow(/reserved.*image/i);
+    expect(await readdir(join(root, "agent-mailbox", "completed"))).toEqual([
+      `${id}.json`,
+    ]);
+    expect(await readdir(join(root, "assets"))).toEqual([`${imageSha256}.png`]);
+    expect(await readFile(join(root, "assets", `${imageSha256}.png`))).toEqual(
+      image.bytes,
+    );
   });
 
   it("publishes a source-image analysis without generating or exporting an image", async () => {

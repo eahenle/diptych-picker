@@ -117,23 +117,28 @@ can also contribute a similarity penalty. Ties resolve by proposal ID.
 Fingerprints carry fixed visual axes and up to eight salient labels, each at
 most 80 characters. Required anchors and exclusions are limited to sixteen
 labels each and 200 characters per label. The planner rejects oversized
-constraints rather than dropping them. Historical evidence comes from visual
+constraints rather than dropping them. It checks inherited exclusions and
+calculates source distance before capping the stored fingerprint. Required
+motifs are removed before selecting the eight motifs for repetition scoring.
+Historical evidence comes from visual
 analysis or manual observation. Missing observations contribute no penalty.
 Temperature does not enter the preference adaptation cadence, content
 classification or provider safety decisions.
 
-The browser and mailbox currently use the existing Explore variations flow.
-The integration points for a later change are:
+The browser currently uses the existing Explore variations flow. To connect
+that flow to the planner:
 
 1. Resolve the canonical parent in the existing source-profile flow and
    translate visual observations and user constraints into planner inputs.
-2. Attach optional plan and parent provenance when constructing a single
-   challenger or refill job. Treat older jobs and saves without that metadata
-   as the existing generation flow.
-3. Use the worker's existing exact-image inspection to annotate the immutable
-   output. Persist the observed fingerprint only after validation and feed
-   the latest comparison outcomes back into the planner. Keep the retained
-   winner's asset, identity and side in place throughout normal play.
+2. Carry the canonical parent through existing variation provenance. Attach
+   `iterationPlan` with the temperature, mandatory and optional anchors, and
+   exclusions to a challenger or refill job. Older jobs and saves keep the
+   existing generation flow.
+3. Use the monitor's exact-image inspection to produce the required anchor
+   review for `iterationPlan` jobs. The completion command checks the review
+   before publication. For the history feed, record observations of validated
+   output and the later comparison outcome. Preserve the retained winner's
+   asset, identity, and side during normal play.
 
 Run `npm exec -- vitest run src/domain/image-iteration.test.ts` to exercise
 the planner without starting the app.

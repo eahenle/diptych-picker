@@ -83,6 +83,22 @@ async function findNextJob() {
 
   if (resume) {
     const activeJobs = await withTerminalResults(await listJobs(active));
+    const reviewed = activeJobs
+      .sort(compareJobs)
+      .find(
+        ({ job, leaseState, outcomeReservation }) =>
+          job.iterationPlan &&
+          leaseState === "unleased" &&
+          outcomeReservation?.outcome === "completed" &&
+          !outcomeReservation.leaseToken &&
+          outcomeReservation.reviewedOutput,
+      );
+    if (reviewed) {
+      return {
+        ...present(reviewed),
+        reviewedOutput: reviewed.outcomeReservation.reviewedOutput,
+      };
+    }
     const unterminatedActive = recoverableEntries(activeJobs, true).sort(
       compareJobs,
     );

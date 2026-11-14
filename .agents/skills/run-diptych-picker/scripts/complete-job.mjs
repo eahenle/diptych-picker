@@ -2,9 +2,14 @@
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { z } from "zod";
+import { generationIterationPlanSchema } from "../../../../src/domain/image-iteration.ts";
+import {
+  iterationAnchorReviewSchema,
+  verifyIterationAnchorReview,
+} from "../../../../src/server/image-iteration-review.ts";
 import {
   atomicCreateFile,
   assertActiveJob,
@@ -50,10 +55,11 @@ const leaseToken = args["lease-token"];
 if (leaseToken !== undefined && !LEASE_TOKEN.test(leaseToken)) {
   throw new Error("Invalid lease token");
 }
+const proposalPath = resolve(required(args, "proposal-file"));
 const proposal = proposalSchema.parse(
-  JSON.parse(await readFile(required(args, "proposal-file"), "utf8")),
+  JSON.parse(await readFile(proposalPath, "utf8")),
 );
-const imagePath = required(args, "image");
+const imagePath = resolve(required(args, "image"));
 const root = dataDirectory();
 const mailbox = join(root, "agent-mailbox");
 
@@ -125,10 +131,29 @@ if (
   throw new Error("Decoded PNG dimensions do not match its metadata");
 }
 
-await reserveOutcome(mailbox, jobId, "completed", leaseToken);
+const imageSha256 = createHash("sha256").update(source).digest("hex");
+let anchorReview;
+let reviewedOutput;
+if (Object.hasOwn(activeJob, "iterationPlan")) {
+  const kind = activeJob.kind ?? "challenger";
+  if (kind !== "challenger" && kind !== "refill") {
+    throw new Error("Iteration plans require a challenger or refill job");
+  }
+  const plan = generationIterationPlanSchema.parse(activeJob.iterationPlan);
+  const anchorReviewPath = resolve(required(args, "anchor-review-file"));
+  anchorReview = iterationAnchorReviewSchema.parse(
+    JSON.parse(await readFile(anchorReviewPath, "utf8")),
+  );
+  verifyIterationAnchorReview(plan, anchorReview, jobId, imageSha256);
+  reviewedOutput = { imageSha256, imagePath, proposalPath, anchorReviewPath };
+} else if (Object.hasOwn(args, "anchor-review-file")) {
+  throw new Error("--anchor-review-file requires an iteration job");
+}
+
+await reserveOutcome(mailbox, jobId, "completed", leaseToken, reviewedOutput);
 
 const candidateId = `challenger-${jobId}`;
-const filename = `${createHash("sha256").update(source).digest("hex")}.png`;
+const filename = `${imageSha256}.png`;
 const assets = join(root, "assets");
 const assetPath = join(assets, filename);
 await mkdir(assets, { recursive: true });
@@ -151,6 +176,7 @@ const published = await publishTerminal(mailbox, jobId, "completed", {
   status: "completed",
   completedAt: new Date().toISOString(),
   proposal,
+  ...(anchorReview ? { anchorReview } : {}),
   asset: {
     candidateId,
     filename,

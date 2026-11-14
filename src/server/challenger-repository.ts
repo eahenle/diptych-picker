@@ -10,6 +10,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import type { ChallengerState } from "@/domain/challenger-state";
 import { GENERATION_JOB_ID_PATTERN } from "@/domain/game";
+import { generationIterationPlanSchema } from "@/domain/image-iteration";
 import { z } from "zod";
 import {
   preferenceProfileSchema,
@@ -264,6 +265,7 @@ const refillGenerationJobSnapshotSchema = z
     preferenceProfile: preferenceProfileSchema.optional(),
     promptCard: generationPromptCardSchema.optional(),
     variationSource: variationSourceSchema.optional(),
+    iterationPlan: generationIterationPlanSchema.optional(),
     sessionId: z.string().regex(GENERATION_JOB_ID_PATTERN),
     pinnedWinnerId: z.string().min(1),
     comparisonOutcome: z.enum(["tie", "both-lose"]).optional(),

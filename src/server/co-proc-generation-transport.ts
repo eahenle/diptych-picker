@@ -748,6 +748,8 @@ export class TransportNotifyingGenerationMailbox implements GenerationMailbox {
   async enqueue(job: GenerationJob): Promise<void> {
     const validatedJob = generationJobSchema.parse(job);
     await this.durableMailbox.enqueue(validatedJob);
+    // The mailbox monitor independently reviews these images before publication.
+    if ("iterationPlan" in validatedJob && validatedJob.iterationPlan) return;
     try {
       await this.transport.notify(
         validatedJob,

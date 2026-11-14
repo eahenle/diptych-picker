@@ -41,9 +41,11 @@ are accepted. The default is `warm`.
    palette for small changes. Consider activity, pose, composition, aesthetic
    and wardrobe logic for scene-level changes. Use setting, viewer relationship,
    role, narrative and tension engine for broader reinterpretations. Name the
-   visual source of tension when present. State which required anchors each
-   proposal retains and tag any applicable exclusions so the planner can
-   reject that proposal.
+   visual source of tension when present. List required anchors and then
+   optional lineage anchors in preference order in `retainedAnchors`. Use
+   `removedAnchors` for explicit removals. Provide `visualAnchors` for the
+   full projected motif list or omit it to carry forward source motifs minus
+   explicit removals. Tag any applicable exclusions.
    The trusted caller independently vets safety and content range for each
    proposal. Labels match after case and whitespace normalization, so use
    consistent vocabulary across observations, exclusions and proposals.
@@ -55,17 +57,23 @@ are accepted. The default is `warm`.
 ## Read the plan
 
 The planner chooses one eligible proposal and reports the requested temperature,
-mandatory anchors, preserved axes, concrete axis changes, tension engine,
-exclusions, projected fingerprint and separate selected and rejected repetition
-penalties. A projected fingerprint describes the proposal. Inspect the actual
-output before recording a fingerprint as visual history.
+mandatory and optional anchors, preserved axes, concrete axis changes, tension
+engine, exclusions, projected fingerprint and separate selected and rejected
+repetition penalties. The optional preservation budget is eight through 0.2,
+five through 0.4, three below 0.5, and two from 0.5 onward. Mandatory anchors
+are outside that budget. The projected fingerprint records salient motifs,
+including incidental details. Inspect the actual output before recording a
+fingerprint as visual history.
 
-On `insufficient-source`, obtain observations for the source and every locked
+On `anchor-conflict`, resolve each listed preserve/exclude collision with the
+user before drafting alternatives. On `insufficient-source`, obtain
+observations for the source and every locked
 axis. On `no-eligible-proposal`, draft alternatives that satisfy the brief and
 its safety decisions. On `no-proposal-in-range`, draft alternatives closer to
 the source. Retain the original constraints through each retry.
 
-Run this planning-only example from the repository root with Node.js 24.
+After installing the repository dependencies, run this planning-only example
+from the repository root with Node.js 24.
 
 ```bash
 node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --input-type=module <<'NODE'
