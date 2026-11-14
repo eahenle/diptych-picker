@@ -102,6 +102,42 @@ For a recoverable stop:
 Pending and safely interrupted active jobs remain recoverable at the next
 launch.
 
+## Image iteration planning
+
+The repository includes a [planning skill](../.agents/skills/image-freshness-iterator/SKILL.md)
+and a pure [TypeScript planner](../src/domain/image-iteration.ts) for issue
+[#93](https://github.com/eahenle/diptych-picker/issues/93). It ranks vetted
+proposals using weighted source distance and recent visual repetition. Zero
+preserves all tracked features. Other temperatures allow a distance up to
+the requested value plus 0.125, capped at one, to accommodate discrete edits.
+The latest twelve outcomes contribute linearly decaying penalties, with
+rejected matches carrying twice the weight of selected matches. A paired image
+can also contribute a similarity penalty. Ties resolve by proposal ID.
+
+Fingerprints carry fixed visual axes and up to eight salient labels, each at
+most 80 characters. Required anchors and exclusions are limited to sixteen
+labels each and 200 characters per label. The planner rejects oversized
+constraints rather than dropping them. Historical evidence comes from visual
+analysis or manual observation. Missing observations contribute no penalty.
+Temperature does not enter the preference adaptation cadence, content
+classification or provider safety decisions.
+
+The browser and mailbox currently use the existing Explore variations flow.
+The integration points for a later change are:
+
+1. Resolve the canonical parent in the existing source-profile flow and
+   translate visual observations and user constraints into planner inputs.
+2. Attach optional plan and parent provenance when constructing a single
+   challenger or refill job. Treat older jobs and saves without that metadata
+   as the existing generation flow.
+3. Use the worker's existing exact-image inspection to annotate the immutable
+   output. Persist the observed fingerprint only after validation and feed
+   the latest comparison outcomes back into the planner. Keep the retained
+   winner's asset, identity and side in place throughout normal play.
+
+Run `npm exec -- vitest run src/domain/image-iteration.test.ts` to exercise
+the planner without starting the app.
+
 ## Optional co-proc notification transport
 
 `CO_PROC_GENERATION_CHANNELS` enables an experimental acknowledged
