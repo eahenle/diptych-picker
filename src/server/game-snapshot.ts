@@ -433,6 +433,17 @@ function validateRestorableState(
       invalid(`Candidate ${rating.candidate.id} has duplicate rating records`);
     }
     ratings.set(rating.candidate.id, rating);
+    const iteration = rating.candidate.lineage?.iteration;
+    if (
+      iteration &&
+      (rating.candidate.id !== `challenger-${iteration.reviewedJobId}` ||
+        rating.candidate.imageUrl !==
+          `/api/assets/${iteration.imageSha256}.png`)
+    ) {
+      invalid(
+        `Candidate ${rating.candidate.id} does not match its iteration review`,
+      );
+    }
     const expectedPrefix =
       rating.source === "curated" ? "/seed-assets/" : "/api/assets/";
     if (!rating.candidate.imageUrl.startsWith(expectedPrefix)) {
@@ -584,11 +595,15 @@ export class GameSnapshotService {
       let stableChallengers = challengers;
       if (game.round.status !== "idle") {
         const baseline = challengers.pendingSelectionBaseline;
+        const iteration =
+          game.pendingSelection?.kind === "generation" &&
+          game.pendingSelection.iteration;
         if (
-          game.round.status !== "generating" ||
-          (game.pendingSelection?.kind !== "buffer" &&
-            game.pendingSelection?.kind !== "retirement") ||
-          !baseline
+          !iteration &&
+          (game.round.status !== "generating" ||
+            (game.pendingSelection?.kind !== "buffer" &&
+              game.pendingSelection?.kind !== "retirement") ||
+            !baseline)
         ) {
           throw new GameSnapshotUnavailableError(
             "The last stable comparison is not available for export",
@@ -608,7 +623,7 @@ export class GameSnapshotService {
         stableChallengers = {
           ...challengers,
           ...baseline,
-          importQueue: baseline.importQueue ?? challengers.importQueue,
+          importQueue: baseline?.importQueue ?? challengers.importQueue,
           pendingComparison: null,
           preparedDequeues: [],
           pendingSelectionBaseline: null,

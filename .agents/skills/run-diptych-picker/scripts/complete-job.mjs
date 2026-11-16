@@ -5,11 +5,13 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { z } from "zod";
-import { generationIterationPlanSchema } from "../../../../src/domain/image-iteration.ts";
 import {
+  generationIterationPlanSchema,
   iterationAnchorReviewSchema,
-  verifyIterationAnchorReview,
-} from "../../../../src/server/image-iteration-review.ts";
+  iterationDirectionSchema,
+  iterationJobContextSchema,
+} from "../../../../src/domain/image-iteration.ts";
+import { verifyIterationCompletion } from "../../../../src/server/image-iteration-review.ts";
 import {
   atomicCreateFile,
   assertActiveJob,
@@ -45,6 +47,7 @@ const proposalSchema = z
     styleTags: z.array(nonBlankStringSchema),
     reasoningSummary: nonBlankStringSchema,
     preferenceRevision: preferenceRevisionSchema.optional(),
+    iterationDirection: iterationDirectionSchema.optional(),
   })
   .strict();
 
@@ -144,7 +147,16 @@ if (Object.hasOwn(activeJob, "iterationPlan")) {
   anchorReview = iterationAnchorReviewSchema.parse(
     JSON.parse(await readFile(anchorReviewPath, "utf8")),
   );
-  verifyIterationAnchorReview(plan, anchorReview, jobId, imageSha256);
+  verifyIterationCompletion(
+    plan,
+    anchorReview,
+    jobId,
+    imageSha256,
+    activeJob.iterationContext === undefined
+      ? undefined
+      : iterationJobContextSchema.parse(activeJob.iterationContext),
+    proposal.iterationDirection,
+  );
   reviewedOutput = { imageSha256, imagePath, proposalPath, anchorReviewPath };
 } else if (Object.hasOwn(args, "anchor-review-file")) {
   throw new Error("--anchor-review-file requires an iteration job");

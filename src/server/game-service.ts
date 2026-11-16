@@ -1,11 +1,13 @@
 import { drawFallback, type ChallengerState } from "@/domain/challenger-state";
 import {
   preferenceProfileFromSeed,
+  type Candidate,
   type GameRules,
   type GameState,
   type PreferenceProfile,
   type Side,
 } from "@/domain/game";
+import type { IterationSelection } from "@/domain/image-iteration";
 import type { CreatePromptCardInput } from "@/domain/prompt-deck";
 import type {
   GenerationMailbox,
@@ -22,6 +24,7 @@ import { GameSettingsService } from "./game-settings-service";
 import { effectiveGameRules } from "./game-rules";
 import { GenerationJobPublisher } from "./generation-job-publisher";
 import { GenerationSelectionReconciler } from "./generation-selection-reconciler";
+import { IterationSelectionService } from "./iteration-selection-service";
 import { LeaderboardProfileReconciler } from "./leaderboard-profile-reconciler";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import { PromptCardReconciler } from "./prompt-card-reconciler";
@@ -43,6 +46,7 @@ import { StateLockCoordinator } from "./state-lock-coordinator";
 
 export {
   GameRulesError,
+  IterationSelectionError,
   MissingGameError,
   PreferencePresetLimitError,
   PromptDeckError,
@@ -61,13 +65,15 @@ export interface GameServiceConfig {
 }
 
 export interface GameServiceCandidateStream {
-  importSessionRepository: ImportSessionRepository;
-  stateLockCoordinator: StateLockCoordinator;
+  importSessionRepository?: ImportSessionRepository;
+  stateLockCoordinator?: StateLockCoordinator;
+  readIterationImageDigest?: (candidate: Candidate) => Promise<string>;
 }
 
 export class GameService {
   private readonly generationJobPublisher: GenerationJobPublisher;
   private readonly generationSelectionReconciler: GenerationSelectionReconciler;
+  private readonly iterationSelectionService: IterationSelectionService;
   private readonly leaderboardProfileReconciler: LeaderboardProfileReconciler;
   private readonly promptCardReconciler: PromptCardReconciler;
   private readonly promptDeckService: PromptDeckService;
@@ -115,6 +121,21 @@ export class GameService {
       now: this.now,
     });
     this.generationJobPublisher = new GenerationJobPublisher(this.mailbox);
+    this.iterationSelectionService = new IterationSelectionService({
+      gameRepository: this.gameRepository,
+      challengerRepository: this.challengerRepository,
+      stateLocks: stateLockCoordinator,
+      mailbox: this.mailbox,
+      publisher: this.generationJobPublisher,
+      assetVerifier: this.assetVerifier,
+      baseline: (state) => this.preparedSelectionReconciler.baseline(state),
+      cleanup: (game) => this.generationSelectionReconciler.cleanup(game),
+      readImageDigest: candidateStream?.readIterationImageDigest,
+      config: this.config,
+      rulesFor: (game) => this.rulesFor(game),
+      now: this.now,
+      createId: this.createId,
+    });
     this.generationSelectionReconciler = new GenerationSelectionReconciler({
       repository: this.gameRepository,
       mailbox: this.mailbox,
@@ -212,6 +233,7 @@ export class GameService {
       importSessionRepository,
       stateLockCoordinator,
       generationSelectionReconciler: this.generationSelectionReconciler,
+      iterationSelectionService: this.iterationSelectionService,
       promptCardReconciler: this.promptCardReconciler,
       leaderboardProfileReconciler: this.leaderboardProfileReconciler,
       preparedSelectionReconciler: this.preparedSelectionReconciler,
@@ -318,7 +340,14 @@ export class GameService {
   async select(
     winnerSide: Side,
     expectedRoundNumber: number,
+    iteration?: IterationSelection,
   ): Promise<GameState> {
+    if (iteration)
+      return this.iterationSelectionService.select(
+        winnerSide,
+        expectedRoundNumber,
+        iteration,
+      );
     return this.gameSelectionService.select(winnerSide, expectedRoundNumber);
   }
 

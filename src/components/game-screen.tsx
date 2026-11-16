@@ -13,6 +13,7 @@ import {
   type DisplayedEloRatings,
   type GameStartState,
   type GameState,
+  type Round,
 } from "@/domain/game";
 import type { ImportProgress } from "@/domain/import-progress";
 import { CandidateCard } from "./candidate-card";
@@ -22,7 +23,8 @@ import { readJson } from "./game-api";
 import { GameTransferModal } from "./game-transfer-modal";
 import { GameStartupModal, type GameStartupStatus } from "./game-startup-modal";
 import { ImageImportModal } from "./image-import-modal";
-import { ImageInspector } from "./image-inspector";
+import { ImageInspector, type InspectableCandidate } from "./image-inspector";
+import { IterationDialog } from "./iteration-dialog";
 import { PoolLeaderboard } from "./pool-leaderboard";
 import { QueueDetails } from "./queue-details";
 import { PreferenceProfileModal } from "./preference-profile-modal";
@@ -227,6 +229,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     bothLose,
     retrySelection,
     select,
+    selectVariation,
     tie,
   } = useSelectionController({
     game,
@@ -361,6 +364,20 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
     setLocalError,
   });
 
+  const [iterationDraft, setIterationDraft] = useState<{
+    source: InspectableCandidate;
+    round: Round;
+  } | null>(null);
+  const openIteration = (source: InspectableCandidate) => {
+    const current = gameRef.current;
+    if (!current || current.round.status === "generating") {
+      void exploreCandidateVariations(source);
+      return;
+    }
+    dismissImageInspector();
+    setIterationDraft({ source, round: current.round });
+  };
+
   useGameplayShortcuts({
     suspended:
       startupOpen ||
@@ -372,6 +389,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
       leaderboardOpen ||
       queueDetailsOpen ||
       historyOpen ||
+      Boolean(iterationDraft) ||
       Boolean(imageInspector),
     onSelect: select,
     onTie: tie,
@@ -772,7 +790,23 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
           state={imageInspector}
           onClose={closeImageInspector}
           onNavigate={navigateImageInspector}
-          onExplore={(candidate) => void exploreCandidateVariations(candidate)}
+          onExplore={openIteration}
+        />
+      ) : null}
+
+      {iterationDraft ? (
+        <IterationDialog
+          source={iterationDraft.source}
+          round={iterationDraft.round}
+          onClose={() => setIterationDraft(null)}
+          onEditPreferences={() => {
+            setIterationDraft(null);
+            void exploreCandidateVariations(iterationDraft.source);
+          }}
+          onSubmit={(side, roundNumber, iteration) => {
+            setIterationDraft(null);
+            selectVariation(side, roundNumber, iteration);
+          }}
         />
       ) : null}
 
@@ -821,7 +855,7 @@ export function GameScreen({ promptForStartup = false }: GameScreenProps) {
           onInspect={inspectFavoriteCandidate}
           onExplore={(candidate) => {
             closeFavoritesGallery();
-            void exploreCandidateVariations(candidate);
+            openIteration(candidate);
           }}
           onRemoveFavorite={(candidateId) =>
             void updateFavorite(candidateId, false)

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import type { IterationJobContext } from "@/domain/image-iteration";
 import {
   recordGenerationTurnaround,
   refillJobMatchesGenerationPreferences,
@@ -281,10 +282,22 @@ export function candidateFromGenerationResult(
   expectedJob?: Pick<
     GenerationJob,
     "preferenceSeed" | "promptCard" | "variationSource"
-  >,
+  > & { iterationContext?: IterationJobContext },
 ): Candidate | null {
   const expectedCandidateId = `challenger-${result.jobId}`;
   if (result.asset.candidateId !== expectedCandidateId) return null;
+  const direction = result.proposal.iterationDirection;
+  const review = result.anchorReview;
+  const iteration =
+    expectedJob?.iterationContext && direction && review?.observedFingerprint
+      ? {
+          temperature: direction.plan.temperature,
+          changedAxes: direction.changedAxes,
+          reviewedJobId: result.jobId,
+          imageSha256: review.imageSha256,
+          observedFingerprint: review.observedFingerprint,
+        }
+      : undefined;
   return {
     id: result.asset.candidateId,
     imageUrl: result.asset.imageUrl,
@@ -305,6 +318,7 @@ export function candidateFromGenerationResult(
             preferenceFingerprint: createHash("sha256")
               .update(expectedJob.preferenceSeed)
               .digest("hex"),
+            ...(iteration ? { iteration } : {}),
           },
         }
       : {}),

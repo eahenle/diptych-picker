@@ -14,6 +14,7 @@ import {
   beginBothLose,
   beginSelection,
   beginTie,
+  candidateAt,
   mergeServerResult,
   willRetireChampion,
   type DisplayedEloRatings,
@@ -21,6 +22,7 @@ import {
   type GameState,
   type Side,
 } from "@/domain/game";
+import type { IterationSelection } from "@/domain/image-iteration";
 import { readJson } from "./game-api";
 import { preloadChangedAssets, preloadImage } from "./image-preload";
 
@@ -34,6 +36,7 @@ interface ActiveSelection {
   winnerSide: Side;
   expectedRound: number;
   generationJobId: string | null;
+  iteration?: IterationSelection;
   retirement: boolean;
   tie: boolean;
   bothLose: boolean;
@@ -82,6 +85,17 @@ function matchingPendingSelection(
     return false;
   }
   if (pending.kind === "generation") {
+    if (
+      selection.iteration &&
+      selection.generationJobId === null &&
+      pending.iteration?.source.candidateId ===
+        selection.iteration.sourceCandidateId &&
+      pending.iteration.context.command === selection.iteration.command &&
+      candidateAt(server.round, selection.winnerSide).id ===
+        selection.iteration.winnerCandidateId
+    ) {
+      selection.generationJobId = pending.generationJobId;
+    }
     return (
       selection.generationJobId !== null &&
       pending.generationJobId === selection.generationJobId
@@ -335,8 +349,12 @@ export function useSelectionController({
   }, [game, startPolling]);
 
   const submitSelection = useCallback(
-    async (current: GameState, winnerSide: Side) => {
-      const retirement = willRetireChampion(current, winnerSide);
+    async (
+      current: GameState,
+      winnerSide: Side,
+      iteration?: IterationSelection,
+    ) => {
+      const retirement = !iteration && willRetireChampion(current, winnerSide);
       const selectedAt = new Date().toISOString();
       const optimistic = retirement
         ? beginChampionRetirement(current, winnerSide, selectedAt)
@@ -357,6 +375,7 @@ export function useSelectionController({
         winnerSide,
         expectedRound: current.round.roundNumber,
         generationJobId: null,
+        iteration,
         retirement,
         tie: false,
         bothLose: false,
@@ -374,9 +393,36 @@ export function useSelectionController({
           body: JSON.stringify({
             winnerSide,
             roundNumber: current.round.roundNumber,
+            ...(iteration ? { iteration } : {}),
           }),
           signal: selection.controller.signal,
         });
+        if (iteration && response.status >= 400 && response.status < 500) {
+          const error = (await response.json()) as { error?: string };
+          const authoritative =
+            response.status === 409
+              ? await readJson<GameStartState>(
+                  await fetch("/api/game", {
+                    cache: "no-store",
+                    signal: selection.controller.signal,
+                  }),
+                )
+              : null;
+          if (authoritative?.status === "ready") {
+            await preloadChangedAssets(
+              current,
+              authoritative.game,
+              selection.controller.signal,
+            );
+          }
+          if (activeSelectionRef.current?.token !== selection.token) return;
+          activeSelectionRef.current = null;
+          selectionLockedRef.current = false;
+          if (authoritative) commitStartState(authoritative);
+          else commitGame(current);
+          setLocalError(error.error ?? "Could not request a variation");
+          return;
+        }
         const server = await readJson<RatedGameState>(response);
         if (activeSelectionRef.current?.token !== selection.token) return;
         setEloRatings(server.eloRatings ?? null);
@@ -426,6 +472,7 @@ export function useSelectionController({
     },
     [
       commitGame,
+      commitStartState,
       setConnectionStatus,
       setEloRatings,
       setLocalError,
@@ -517,6 +564,27 @@ export function useSelectionController({
       void submitSelection(current, winnerSide);
     },
     [gameRef, submitSelection],
+  );
+
+  const selectVariation = useCallback(
+    (winnerSide: Side, roundNumber: number, iteration: IterationSelection) => {
+      const current = gameRef.current;
+      if (
+        !current ||
+        selectionLockedRef.current ||
+        current.round.status === "generating" ||
+        current.round.roundNumber !== roundNumber ||
+        candidateAt(current.round, winnerSide).id !==
+          iteration.winnerCandidateId
+      ) {
+        setLocalError(
+          "The comparison changed before this variation was requested",
+        );
+        return;
+      }
+      void submitSelection(current, winnerSide, iteration);
+    },
+    [gameRef, setLocalError, submitSelection],
   );
 
   const tie = useCallback(() => {
@@ -628,9 +696,20 @@ export function useSelectionController({
             server.pendingSelection.kind === "both-lose"
           ) {
             void submitPairDecision(server, server.pendingSelection.kind);
-          } else if (server.pendingSelection.kind === "generation")
-            void submitSelection(server, server.pendingSelection.winnerSide);
-          else selectionLockedRef.current = false;
+          } else if (server.pendingSelection.kind === "generation") {
+            const { winnerSide, iteration } = server.pendingSelection;
+            void submitSelection(
+              server,
+              winnerSide,
+              iteration
+                ? {
+                    command: iteration.context.command,
+                    sourceCandidateId: iteration.source.candidateId,
+                    winnerCandidateId: candidateAt(server.round, winnerSide).id,
+                  }
+                : undefined,
+            );
+          } else selectionLockedRef.current = false;
           return;
         }
 
@@ -673,6 +752,7 @@ export function useSelectionController({
     bothLose,
     retrySelection,
     select,
+    selectVariation,
     tie,
   };
 }

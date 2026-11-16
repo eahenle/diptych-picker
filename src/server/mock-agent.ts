@@ -180,7 +180,26 @@ export class MockAgentWorker {
       preferenceProfile:
         job.preferenceProfile ?? preferenceProfileFromSeed(job.preferenceSeed),
     });
-    const image = await this.imageProvider.generate(proposal.visualPrompt);
+    const iterationPlan =
+      job.kind === "challenger" && job.iterationContext
+        ? job.iterationPlan
+        : undefined;
+    // The mock image fixture consists of geometric shapes and rings.
+    const fixtureAnchors = ["geometric shapes", "rings"];
+    if (
+      iterationPlan?.mandatoryAnchors.some(
+        (anchor) => !fixtureAnchors.includes(anchor.toLowerCase()),
+      )
+    ) {
+      throw new Error(
+        "The mock image fixture can only preserve rings or geometric shapes",
+      );
+    }
+    const image = await this.imageProvider.generate(
+      iterationPlan
+        ? `${proposal.visualPrompt} (variation ${job.id})`
+        : proposal.visualPrompt,
+    );
     if (
       image.extension !== "png" ||
       image.contentType !== "image/png" ||
@@ -198,7 +217,35 @@ export class MockAgentWorker {
       jobId: job.id,
       status: "completed",
       completedAt: this.now(),
-      proposal,
+      proposal: iterationPlan
+        ? {
+            ...proposal,
+            iterationDirection: {
+              plan: iterationPlan,
+              changedAxes: iterationPlan.temperature === 0 ? [] : ["palette"],
+            },
+          }
+        : proposal,
+      ...(iterationPlan
+        ? {
+            anchorReview: {
+              jobId: job.id,
+              imageSha256: createHash("sha256")
+                .update(image.bytes)
+                .digest("hex"),
+              presentAnchors: iterationPlan.mandatoryAnchors,
+              absentExclusions: iterationPlan.exclusions.filter(
+                (exclusion) =>
+                  !fixtureAnchors.includes(exclusion.toLowerCase()),
+              ),
+              observedFingerprint: {
+                origin: "visual-analysis",
+                axes: { composition: "geometric shapes" },
+                visualAnchors: ["rings"],
+              },
+            },
+          }
+        : {}),
       asset: {
         candidateId,
         filename: stored.filename,

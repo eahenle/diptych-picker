@@ -33,6 +33,7 @@ import {
 } from "./challenger-repository";
 import { challengerConfig } from "./challenger-config";
 import { GameService, SelectionConflictError } from "./game-service";
+import { MemoryImportSessionRepository } from "./import-session-repository";
 import type { LeaderboardProfileCoordinator } from "./leaderboard-profile-service";
 import type { PromptCardWriterCoordinator } from "./prompt-card-writer-service";
 import type { AssetStore } from "./providers";
@@ -402,6 +403,8 @@ function serviceFor(options: {
   promptCardEditor?: ReturnType<typeof promptCardEditor>;
   promptCardBlender?: ReturnType<typeof promptCardBlender>;
   promptCardWriter?: ReturnType<typeof promptCardWriter>;
+  importSessionRepository?: MemoryImportSessionRepository;
+  readIterationImageDigest?: (candidate: Candidate) => Promise<string>;
 }) {
   const game = options.game ?? gameState();
   const gameRepository =
@@ -431,6 +434,10 @@ function serviceFor(options: {
     options.promptCardEditor?.mailbox,
     options.promptCardBlender?.mailbox,
     options.promptCardWriter?.coordinator,
+    {
+      importSessionRepository: options.importSessionRepository,
+      readIterationImageDigest: options.readIterationImageDigest,
+    },
   );
   return {
     service,
@@ -442,6 +449,241 @@ function serviceFor(options: {
 }
 
 describe("GameService challenger buffer", () => {
+  it("replays a reviewed variation selection without consuming either queue or voting twice", async () => {
+    const winnerDigest = "a".repeat(64);
+    const importDigest = "b".repeat(64);
+    const challengerDigest = "c".repeat(64);
+    const game = gameState();
+    game.round.leftCandidate.imageUrl = `/api/assets/${winnerDigest}.png`;
+    const imported = {
+      ...candidate("imported-source"),
+      imageUrl: `/api/assets/${importDigest}.png`,
+    };
+    const importSessionRepository = new MemoryImportSessionRepository({
+      version: 1,
+      id: "import-session",
+      status: "active",
+      createdAt: NOW,
+      sealedAt: NOW,
+      activatedAt: NOW,
+      items: [
+        {
+          id: "import-item",
+          normalizedDigest: importDigest,
+          status: "ready",
+          asset: {
+            digest: importDigest,
+            filename: `${importDigest}.png`,
+            url: imported.imageUrl,
+            contentType: "image/png",
+            width: 1024,
+            height: 1024,
+            byteLength: 1024,
+          },
+          annotationJob: null,
+          annotation: {
+            concept: imported.concept,
+            prompt: imported.prompt,
+            style: imported.style,
+            reasoningSummary: imported.reasoningSummary!,
+            source: "automated",
+          },
+          candidateId: imported.id,
+          failureMessage: null,
+          approvedAt: NOW,
+          servedAt: null,
+        },
+      ],
+      initialFillJobs: [],
+      initialFillRetry: null,
+      servedReceipts: [],
+    });
+    const challengers = challengerState(game, {
+      importQueue: [
+        {
+          candidate: imported,
+          source: "imported",
+          importItemId: "import-item",
+          pinnedWinnerId: null,
+          enqueuedAt: NOW,
+        },
+      ],
+    });
+    const readIterationImageDigest = async ({ id }: Candidate) =>
+      id === imported.id ? importDigest : winnerDigest;
+    const first = serviceFor({
+      game,
+      challengers,
+      importSessionRepository,
+      readIterationImageDigest,
+      createId: ids("variation-1"),
+    });
+    const request = {
+      command: "iterate hot, preserve [red scarf]",
+      sourceCandidateId: imported.id,
+      winnerCandidateId: game.round.leftCandidate.id,
+    };
+
+    const pending = await first.service.select("left", 3, request);
+    expect(pending.round).toMatchObject({
+      status: "generating",
+      replacingSide: "right",
+    });
+    expect(pending.round.leftCandidate).toEqual(game.round.leftCandidate);
+    expect(pending.round.rightCandidate).toEqual(game.round.rightCandidate);
+    expect(await first.queue.readWork("variation-1")).toMatchObject({
+      kind: "challenger",
+      variationSource: { candidateId: imported.id, concept: imported.concept },
+      iterationPlan: { temperature: 0.75, mandatoryAnchors: ["red scarf"] },
+    });
+
+    const restarted = serviceFor({
+      gameRepository: first.gameRepository,
+      challengerRepository: first.challengerRepository,
+      queue: first.queue,
+      importSessionRepository,
+      readIterationImageDigest,
+    });
+    await expect(restarted.service.select("left", 3, request)).resolves.toEqual(
+      pending,
+    );
+    const fixture = completedResult("variation-1");
+    if (fixture.status !== "completed") throw new Error("Invalid fixture");
+    first.queue.setResult({
+      ...fixture,
+      proposal: {
+        ...fixture.proposal,
+        iterationDirection: {
+          plan: {
+            temperature: 0.75,
+            mandatoryAnchors: ["red scarf"],
+            optionalAnchors: [],
+            exclusions: [],
+          },
+          changedAxes: ["setting"],
+        },
+      },
+      asset: {
+        ...fixture.asset,
+        filename: `${challengerDigest}.png`,
+        imageUrl: `/api/assets/${challengerDigest}.png`,
+      },
+      anchorReview: {
+        jobId: "variation-1",
+        imageSha256: challengerDigest,
+        presentAnchors: ["red scarf"],
+        absentExclusions: [],
+        observedFingerprint: {
+          origin: "visual-analysis",
+          axes: { setting: "mountain observatory" },
+        },
+      },
+    });
+    const finished = await restarted.service.reconcile();
+    expect(await first.challengerRepository.load()).toMatchObject({
+      pendingComparison: null,
+      pendingSelectionBaseline: null,
+    });
+    expect(finished?.round).toMatchObject({
+      leftCandidate: game.round.leftCandidate,
+      rightCandidate: {
+        id: "challenger-variation-1",
+        imageUrl: `/api/assets/${challengerDigest}.png`,
+        lineage: {
+          parentCandidateId: imported.id,
+          iteration: {
+            temperature: 0.75,
+            changedAxes: ["setting"],
+            reviewedJobId: "variation-1",
+            imageSha256: challengerDigest,
+            observedFingerprint: {
+              origin: "visual-analysis",
+              axes: { setting: "mountain observatory" },
+            },
+          },
+        },
+      },
+      retainedCandidateId: game.round.leftCandidate.id,
+      roundNumber: 4,
+    });
+    expect(finished?.history).toHaveLength(game.history.length + 1);
+    await expect(restarted.service.reconcile()).resolves.toEqual(finished);
+    expect(first.queue.enqueue).toHaveBeenCalledTimes(1);
+    expect(await importSessionRepository.load()).toMatchObject({
+      servedReceipts: [],
+    });
+    const state = await first.challengerRepository.load();
+    expect(state?.ready).toEqual(challengers.ready);
+    expect(state?.importQueue).toEqual(challengers.importQueue);
+    expect(
+      state?.ratings.find(
+        ({ candidate }) => candidate.id === game.round.leftCandidate.id,
+      )?.wins,
+    ).toBe(1);
+  });
+
+  it("keeps the comparison and vote intact when a variation review fails verification", async () => {
+    const game = gameState();
+    const winner = game.round.rightCandidate;
+    const { service, queue, challengerRepository } = serviceFor({
+      game,
+      readIterationImageDigest: async () => "a".repeat(64),
+      createId: ids("bad-review"),
+    });
+    await service.select("right", 3, {
+      sourceCandidateId: winner.id,
+      winnerCandidateId: winner.id,
+      command: "iterate .5, preserve [red scarf]",
+    });
+    const fixture = completedResult("bad-review");
+    if (fixture.status !== "completed") throw new Error("Invalid fixture");
+    const digest = "b".repeat(64);
+    queue.setResult({
+      ...fixture,
+      proposal: {
+        ...fixture.proposal,
+        iterationDirection: {
+          plan: {
+            temperature: 0.5,
+            mandatoryAnchors: ["red scarf"],
+            optionalAnchors: [],
+            exclusions: [],
+          },
+          changedAxes: ["setting"],
+        },
+      },
+      asset: {
+        ...fixture.asset,
+        filename: `${digest}.png`,
+        imageUrl: `/api/assets/${digest}.png`,
+      },
+      anchorReview: {
+        jobId: "elsewhere",
+        imageSha256: digest,
+        presentAnchors: ["red scarf"],
+        absentExclusions: [],
+        observedFingerprint: {
+          origin: "visual-analysis",
+          axes: { setting: "garden" },
+        },
+      },
+    });
+    const failed = await service.reconcile();
+    expect(failed?.round).toMatchObject({
+      status: "error",
+      leftCandidate: game.round.leftCandidate,
+      rightCandidate: winner,
+      roundNumber: 3,
+    });
+    expect(failed?.history).toEqual(game.history);
+    expect(queue.archive).toHaveBeenCalledWith("bad-review");
+    expect(
+      (await challengerRepository.load())?.ratings.some(
+        ({ candidate }) => candidate.id === "challenger-bad-review",
+      ),
+    ).toBe(false);
+  });
+
   it("persists live rule changes, trims the pool, and expands refill capacity", async () => {
     const game = gameState();
     game.round.retainedCandidateId = game.round.leftCandidate.id;

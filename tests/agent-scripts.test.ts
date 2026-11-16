@@ -542,6 +542,80 @@ describe("agent mailbox scripts", () => {
     });
   });
 
+  it("plans an Explore challenger from observed source pixels and the bound command", async () => {
+    const root = await createDataDirectory();
+    const id = "planned-explore";
+    const image = await squareImage(root, id);
+    const sourceDigest = createHash("sha256").update(image.bytes).digest("hex");
+    await mkdir(join(root, "assets"));
+    await writeFile(join(root, "assets", "left.png"), image.bytes);
+    await putJob(root, "active", {
+      ...job(id),
+      iterationPlan: {
+        temperature: 0.75,
+        mandatoryAnchors: ["red scarf"],
+        optionalAnchors: [],
+        exclusions: [],
+      },
+      iterationContext: {
+        command: "iterate hot, preserve [red scarf]",
+        sessionId: "session-1",
+        sourceImageUrl: "/api/assets/left.png",
+        sourceImageSha256: sourceDigest,
+        winnerImageSha256: sourceDigest,
+        history: [],
+      },
+    });
+    const evidence = await writeWorkFile(
+      root,
+      id,
+      "observations.json",
+      JSON.stringify({
+        source: {
+          origin: "visual-analysis",
+          axes: { setting: "woodland", palette: "green" },
+        },
+        subject: { mandatoryAnchors: [], exclusions: ["fireworks"] },
+        proposals: [
+          {
+            id: "near",
+            changes: { palette: "blue" },
+            retainedAnchors: ["red scarf"],
+            safety: "allowed",
+            contentLevel: "family-friendly",
+          },
+          {
+            id: "reframe",
+            changes: { setting: "observatory interior" },
+            retainedAnchors: ["red scarf"],
+            safety: "allowed",
+            contentLevel: "family-friendly",
+          },
+        ],
+      }),
+    );
+    const plan = () =>
+      runScript(
+        "plan-iteration.mjs",
+        ["--job", id, "--observations-file", evidence],
+        root,
+      );
+    const { stdout } = await plan();
+    expect(JSON.parse(stdout)).toMatchObject({
+      plan: { proposalId: "reframe", sourceDistance: 0.75 },
+      iterationDirection: {
+        plan: {
+          temperature: 0.75,
+          mandatoryAnchors: ["red scarf"],
+          exclusions: ["fireworks"],
+        },
+        changedAxes: ["setting"],
+      },
+    });
+    await writeFile(join(root, "assets", "left.png"), "changed source");
+    await expect(plan()).rejects.toThrow(/source image changed/i);
+  });
+
   it("requires an independent exact-image anchor review before publishing an iteration job", async () => {
     const root = await createDataDirectory();
     const id = "iteration-retry";
