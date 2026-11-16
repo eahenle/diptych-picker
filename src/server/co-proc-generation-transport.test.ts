@@ -215,6 +215,30 @@ describe("TransportNotifyingGenerationMailbox", () => {
     expect(onTransportError).toHaveBeenCalledWith(expect.any(Error), job());
   });
 
+  it("leaves iteration work for the independently reviewing monitor", async () => {
+    const mailbox = new MemoryMailbox();
+    const notify = vi.fn(async () => {});
+    const adapter = new TransportNotifyingGenerationMailbox(
+      mailbox,
+      { notify },
+      {
+        durableJobPath: (value) => `/mailbox/pending/${value.id}.json`,
+      },
+    );
+    const iterationJob = {
+      ...job(),
+      iterationPlan: {
+        temperature: 0.5,
+        mandatoryAnchors: ["red scarf"],
+        optionalAnchors: [],
+        exclusions: [],
+      },
+    };
+    await adapter.enqueue(iterationJob);
+    expect(mailbox.enqueued).toEqual([iterationJob]);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it("eagerly ingests a matching live terminal signal from durable storage", async () => {
     const mailbox = new MemoryMailbox();
     mailbox.result = {

@@ -304,7 +304,13 @@ function isExactObject(value, keys) {
   );
 }
 
-export async function reserveOutcome(mailbox, jobId, outcome, leaseToken) {
+export async function reserveOutcome(
+  mailbox,
+  jobId,
+  outcome,
+  leaseToken,
+  reviewedOutput,
+) {
   return withJobLeaseLock(mailbox, jobId, async () => {
     const opposite = outcome === "completed" ? "failed" : "completed";
     const oppositeResult = await readJsonIfExists(
@@ -317,7 +323,13 @@ export async function reserveOutcome(mailbox, jobId, outcome, leaseToken) {
     const path = join(mailbox, "outcomes", `${jobId}.json`);
     const existing = await readJsonIfExists(path);
     if (existing) {
-      assertOutcomeReservation(existing, jobId, outcome, leaseToken);
+      assertOutcomeReservation(
+        existing,
+        jobId,
+        outcome,
+        leaseToken,
+        reviewedOutput?.imageSha256,
+      );
       return existing;
     }
 
@@ -328,15 +340,28 @@ export async function reserveOutcome(mailbox, jobId, outcome, leaseToken) {
       outcome,
       reservedAt: new Date().toISOString(),
       ...(leaseToken ? { leaseToken } : {}),
+      ...(reviewedOutput ? { reviewedOutput } : {}),
     };
     const created = await atomicCreateJson(path, reservation);
     const recorded = created ? reservation : await readJson(path);
-    assertOutcomeReservation(recorded, jobId, outcome, leaseToken);
+    assertOutcomeReservation(
+      recorded,
+      jobId,
+      outcome,
+      leaseToken,
+      reviewedOutput?.imageSha256,
+    );
     return recorded;
   });
 }
 
-function assertOutcomeReservation(recorded, jobId, outcome, leaseToken) {
+function assertOutcomeReservation(
+  recorded,
+  jobId,
+  outcome,
+  leaseToken,
+  imageSha256,
+) {
   if (
     recorded.jobId !== jobId ||
     (recorded.outcome !== "completed" && recorded.outcome !== "failed")
@@ -350,6 +375,12 @@ function assertOutcomeReservation(recorded, jobId, outcome, leaseToken) {
   }
   if ((recorded.leaseToken ?? undefined) !== (leaseToken ?? undefined)) {
     throw new Error(`Job ${jobId} outcome is owned by another lease`);
+  }
+  if (
+    imageSha256 !== undefined &&
+    recorded.reviewedOutput?.imageSha256 !== imageSha256
+  ) {
+    throw new Error(`Job ${jobId} reserved completion for another image`);
   }
 }
 

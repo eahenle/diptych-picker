@@ -495,6 +495,31 @@ The four base proposal fields are always required. `preferenceRevision` must be 
 
 ## Completed result
 
+Challenger and refill jobs may carry `iterationPlan` with `temperature`,
+`mandatoryAnchors`, `optionalAnchors`, and `exclusions` from the image iteration
+planner. These jobs use the durable mailbox monitor. It inspects the saved image and
+passes an observation file with `--anchor-review-file <path>`. Use the job's
+exact labels and the SHA-256 of the inspected PNG. Include a required anchor in
+`presentAnchors` only when visible and an exclusion in `absentExclusions` only
+when confidently absent. Retry or fail the job if any constraint remains
+unverified.
+
+```json
+{
+  "jobId": "job-id",
+  "imageSha256": "40a1d0f85de9e551d947d291c1e623bd56746fc6931c269bbefe6d23aeec1ac4",
+  "presentAnchors": ["red scarf"],
+  "absentExclusions": ["fireworks"]
+}
+```
+
+The helper validates the review before reserving success and binds the
+reservation to the reviewed bytes. During restart, `agent:next --resume`
+returns incomplete reviewed reservations with `reviewedOutput` containing the
+original proposal, image, and review paths. The monitor reruns completion with
+those files. An iteration job's completed result includes that review as
+`anchorReview` for validation against the job when the app reads the mailbox.
+
 `npm run agent:complete -- --job <id> --proposal-file "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/proposal.json" --image "${LOCAL_DATA_DIR:-.local-data}/agent-work/<id>/image.png" [--lease-token <token>]` requires the matching active job. A persistent peer must supply its lease token; mailbox-monitor work is unleased and omits it. The helper rejects inputs over 50 MB or 4096 by 4096 pixels, then uses Sharp to identify and fully decode exactly one square PNG. It reserves the `completed` outcome, hashes the exact PNG bytes with SHA-256, creates `assets/<sha256>.png` and `output/artifacts/<sha256>.png` without overwriting, and atomically publishes:
 
 ```json

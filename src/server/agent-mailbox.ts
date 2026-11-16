@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { GENERATION_JOB_ID_PATTERN } from "@/domain/game";
+import { generationIterationPlanSchema } from "@/domain/image-iteration";
 import type { LeaderboardPreferenceEvidence } from "@/domain/challenger-state";
 import type {
   ImportedAssetMetadata,
@@ -17,6 +18,10 @@ import type {
 } from "@/domain/import-session";
 import { importedCandidateAnnotationSchema } from "@/domain/import-session";
 import { z } from "zod";
+import {
+  iterationAnchorReviewSchema,
+  verifyIterationAnchorReview,
+} from "./image-iteration-review";
 import {
   preferenceProfileSchema,
   preferenceRevisionSchema,
@@ -172,6 +177,7 @@ const challengerGenerationJobSchema = z
   .object({
     ...generationJobFields,
     kind: z.literal("challenger"),
+    iterationPlan: generationIterationPlanSchema.optional(),
   })
   .strict();
 
@@ -188,6 +194,7 @@ const refillGenerationJobSchema = z
   .object({
     ...generationJobFields,
     kind: z.literal("refill"),
+    iterationPlan: generationIterationPlanSchema.optional(),
     sessionId: jobIdSchema,
     pinnedWinnerId: nonBlankStringSchema,
     comparisonOutcome: z.enum(["tie", "both-lose"]).optional(),
@@ -521,6 +528,7 @@ const completedGenerationResultSchema = z
     completedAt: timestampSchema,
     proposal: proposedChallengerSchema,
     asset: completedAssetSchema,
+    anchorReview: iterationAnchorReviewSchema.optional(),
   })
   .strict()
   .refine((result) => result.asset.width === result.asset.height, {
@@ -1036,8 +1044,27 @@ export class FileGenerationMailbox
   }
 
   async readResult(jobId: string): Promise<GenerationResult | null> {
-    const result = await this.readMailboxResult(jobId);
-    return result ? generationResultSchema.parse(result) : null;
+    const rawResult = await this.readMailboxResult(jobId);
+    if (!rawResult) return null;
+    const result = generationResultSchema.parse(rawResult);
+    if (result.status === "completed") {
+      const record = await this.readValidated(
+        join(this.rootDirectory, "ids", `${jobId}.json`),
+        generationJobRecordSchema,
+      );
+      const job = record?.job;
+      if (job && "iterationPlan" in job && job.iterationPlan) {
+        verifyIterationAnchorReview(
+          job.iterationPlan,
+          result.anchorReview,
+          jobId,
+          result.asset.filename.slice(0, -".png".length),
+        );
+      } else if (result.anchorReview) {
+        throw new Error("Anchor review requires a matching iteration job");
+      }
+    }
+    return result;
   }
 
   async readSourceProfileWork(jobId: string): Promise<SourceProfileJob | null> {

@@ -9,6 +9,7 @@ import type {
   Side,
 } from "./game";
 import type { ImportSupplySnapshot } from "./import-session";
+import type { GenerationIterationPlan } from "./image-iteration";
 
 const DEFAULT_POOL_MAXIMUM = 50;
 const DEFAULT_READY_TARGET = 5;
@@ -61,6 +62,7 @@ export interface RefillGenerationJobSnapshot {
   preferenceProfile?: PreferenceProfile;
   promptCard?: import("./game").GenerationPromptCard;
   variationSource?: import("./game").VariationSource;
+  iterationPlan?: GenerationIterationPlan;
   sessionId: string;
   pinnedWinnerId: string;
   comparisonOutcome?: "tie" | "both-lose";

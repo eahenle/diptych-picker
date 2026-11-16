@@ -236,6 +236,28 @@ describe("JsonChallengerRepository", () => {
     });
   });
 
+  it("retains planned anchors when restoring pending refill intent", () => {
+    const iterationPlan = {
+      temperature: 0.95,
+      mandatoryAnchors: ["red scarf"],
+      optionalAnchors: ["copper badge"],
+      exclusions: ["fireworks"],
+    };
+    const state = {
+      ...populatedState,
+      refillJobs: [
+        {
+          ...populatedState.refillJobs[0],
+          expectedJob: { ...expectedRefillJob, iterationPlan },
+        },
+      ],
+    };
+    expect(
+      parseChallengerState(JSON.parse(JSON.stringify(state))).refillJobs[0]
+        .expectedJob,
+    ).toEqual(state.refillJobs[0].expectedJob);
+  });
+
   it("strictly persists the complete expected refill job snapshot", async () => {
     const directory = await mkdtemp(join(tmpdir(), "diptych-refill-intent-"));
     const file = join(directory, "challenger-state.json");

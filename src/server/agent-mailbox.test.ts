@@ -102,6 +102,31 @@ describe("generationJobSchema", () => {
     expect(generationJobSchema.parse(legacy)).toEqual(job());
   });
 
+  it.each([
+    {
+      mandatoryAnchors: ["RED  SCARF"],
+      optionalAnchors: [],
+      exclusions: ["red scarf"],
+    },
+    {
+      mandatoryAnchors: ["red scarf"],
+      optionalAnchors: ["RED SCARF"],
+      exclusions: [],
+    },
+    {
+      mandatoryAnchors: [],
+      optionalAnchors: ["rim lighting", "copper badge", "overhead angle"],
+      exclusions: [],
+    },
+  ])("rejects an inconsistent iteration plan: %j", (anchors) => {
+    expect(
+      generationJobSchema.safeParse({
+        ...job(),
+        iterationPlan: { temperature: 0.5, ...anchors },
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts bounded display-safe leaderboard evidence", () => {
     const withEvidence: GenerationJob = {
       ...job(),
@@ -740,6 +765,50 @@ describe("FileGenerationMailbox", () => {
     await expect(
       new FileGenerationMailbox(failedRoot).readResult("job-1"),
     ).resolves.toEqual(failure());
+  });
+
+  it("requires verified anchor evidence when ingesting a completed iteration job", async () => {
+    const root = await mailboxRoot();
+    const mailbox = new FileGenerationMailbox(root);
+    const work = {
+      ...job(),
+      iterationPlan: {
+        temperature: 0.75,
+        mandatoryAnchors: ["red scarf"],
+        optionalAnchors: [],
+        exclusions: ["fireworks"],
+      },
+    };
+    await mailbox.enqueue(work);
+    await mkdir(join(root, "active"));
+    await rename(
+      join(root, "pending", "job-1.json"),
+      join(root, "active", "job-1.json"),
+    );
+    const imageSha256 = "b".repeat(64);
+    const completed = {
+      ...success(),
+      asset: {
+        ...success().asset,
+        filename: `${imageSha256}.png`,
+        imageUrl: `/api/assets/${imageSha256}.png`,
+      },
+    };
+    await writeResult(root, completed);
+    await expect(mailbox.readResult("job-1")).rejects.toThrow(/anchor review/i);
+
+    const reviewed = {
+      ...completed,
+      anchorReview: {
+        jobId: "job-1",
+        imageSha256,
+        presentAnchors: ["red scarf"],
+        absentExclusions: ["fireworks"],
+      },
+    };
+    await writeRawResult(root, "completed", "job-1", reviewed);
+    await expect(mailbox.readResult("job-1")).resolves.toEqual(reviewed);
+    await expect(mailbox.readWork("job-1")).resolves.toEqual(work);
   });
 
   it("rejects malformed result JSON", async () => {
