@@ -10,7 +10,10 @@ import {
 import { dirname, join, resolve } from "node:path";
 import type { ChallengerState } from "@/domain/challenger-state";
 import { GENERATION_JOB_ID_PATTERN } from "@/domain/game";
-import { generationIterationPlanSchema } from "@/domain/image-iteration";
+import {
+  generationIterationPlanSchema,
+  iterationProvenanceSchema,
+} from "@/domain/image-iteration";
 import { z } from "zod";
 import {
   preferenceProfileSchema,
@@ -49,6 +52,7 @@ const candidateLineageSchema = z
     parentCandidateId: z.string().min(1),
     parentConcept: z.string().min(1),
     preferenceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    iteration: iterationProvenanceSchema.optional(),
   })
   .strict();
 

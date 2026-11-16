@@ -1264,6 +1264,73 @@ test("exports the current game and restores it after later play", async ({
   );
 });
 
+test("Explore keeps the winner node and bytes and restores reviewed provenance", async ({
+  page,
+  request,
+}) => {
+  const winner = page.getByTestId("candidate-image").nth(1);
+  const winnerUrl = (await winner.getAttribute("src"))!;
+  const winnerBytes = await (await request.get(winnerUrl)).body();
+  const winnerId = await page
+    .getByTestId("candidate-card-right")
+    .getAttribute("data-candidate-id");
+  const oldLeft = await page
+    .getByTestId("candidate-image")
+    .nth(0)
+    .getAttribute("src");
+  const initialQueue = (await challengerState()).ready;
+  const winnerNode = await winner.elementHandle();
+  await page.getByRole("button", { name: "View image B larger" }).click();
+  await page.getByRole("button", { name: "Explore variations" }).click();
+  const dialog = page.getByRole("dialog", { name: "Explore variations" });
+  await dialog
+    .getByLabel("Iteration command")
+    .fill("iterate hot, preserve [rings]");
+  const requestStarted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/game/select") &&
+      response.request().method() === "POST",
+  );
+  await dialog
+    .getByRole("button", { name: "Keep this image and generate a variation" })
+    .click();
+  expect((await requestStarted).status()).toBe(202);
+  await expect(page.getByText("Round 2", { exact: true })).toBeVisible();
+  await expect(winner).toHaveAttribute("src", winnerUrl);
+  await expect(page.getByTestId("candidate-card-right")).toHaveAttribute(
+    "data-candidate-id",
+    winnerId!,
+  );
+  expect(
+    await winner.evaluate((node, first) => node === first, winnerNode),
+  ).toBe(true);
+  expect(await (await request.get(winnerUrl)).body()).toEqual(winnerBytes);
+  await expect(page.getByTestId("candidate-image").nth(0)).not.toHaveAttribute(
+    "src",
+    oldLeft!,
+  );
+  expect((await challengerState()).ready.slice(0, initialQueue.length)).toEqual(
+    initialQueue,
+  );
+
+  const snapshotResponse = await request.get("/api/game/snapshot");
+  expect(snapshotResponse.ok()).toBe(true);
+  const snapshot = await snapshotResponse.json();
+  expect(snapshot.game.round.leftCandidate.lineage).toMatchObject({
+    parentCandidateId: winnerId,
+    iteration: {
+      temperature: 0.75,
+      observedFingerprint: { origin: "visual-analysis" },
+    },
+  });
+  const restored = await request.put("/api/game/snapshot", { data: snapshot });
+  expect(restored.ok()).toBe(true);
+  await page.reload();
+  await resumeFromStartup(page);
+  await page.getByRole("button", { name: "View image A larger" }).click();
+  await expect(page.getByText(/Temperature 0\.75 · Reviewed/)).toBeVisible();
+});
+
 test("serves three instant FIFO swaps while preserving the winner node and URL", async ({
   page,
 }) => {

@@ -1,3 +1,8 @@
+import type {
+  IterationProvenance,
+  PendingImageIteration,
+} from "./image-iteration";
+
 export type Side = "left" | "right";
 export type RoundStatus = "idle" | "generating" | "error";
 export type PreferenceContentLevel = "family-friendly" | "adult-allowed";
@@ -202,6 +207,7 @@ export interface CandidateLineage {
   parentCandidateId: string;
   parentConcept: string;
   preferenceFingerprint: string;
+  iteration?: IterationProvenance;
 }
 
 export interface Candidate {
@@ -270,6 +276,7 @@ export type PendingSelection =
       winnerSide: Side;
       selectedAt: string;
       generationJobId: string;
+      iteration?: PendingImageIteration;
     }
   | { kind: "buffer"; winnerSide: Side; selectedAt: string }
   | { kind: "retirement"; winnerSide: Side; selectedAt: string }

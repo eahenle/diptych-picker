@@ -7,6 +7,10 @@ import {
   migrateGameState,
   type GameState,
 } from "@/domain/game";
+import {
+  iterationProvenanceSchema,
+  pendingImageIterationSchema,
+} from "@/domain/image-iteration";
 import { z } from "zod";
 import {
   persistedPreferenceProfileSchema as preferenceProfileSchema,
@@ -48,6 +52,7 @@ const candidateLineageSchema = z
     parentCandidateId: z.string().trim().min(1),
     parentConcept: z.string().trim().min(1),
     preferenceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    iteration: iterationProvenanceSchema.optional(),
   })
   .strict();
 
@@ -74,6 +79,7 @@ const pendingSelectionSchema = z.discriminatedUnion("kind", [
       winnerSide: z.enum(["left", "right"]),
       selectedAt: z.string().trim().min(1),
       generationJobId: z.string().trim().min(1),
+      iteration: pendingImageIterationSchema.optional(),
     })
     .strict(),
   z

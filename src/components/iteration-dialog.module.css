@@ -1,0 +1,44 @@
+.dialog {
+  width: min(540px, 100%);
+}
+
+.form,
+.form label {
+  display: grid;
+  gap: 8px;
+}
+
+.form {
+  gap: 14px;
+}
+
+.form input,
+.form select {
+  min-width: 0;
+  background: #090b0d;
+  color: inherit;
+  border: 1px solid #514443;
+  padding: 8px;
+}
+
+.form input[type="range"] {
+  accent-color: var(--copper-bright);
+  padding: 0;
+}
+
+.form .help {
+  margin: -6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions button[type="submit"] {
+  color: var(--copper-bright);
+  border-color: currentColor;
+}

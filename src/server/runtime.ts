@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
@@ -11,6 +12,7 @@ import type {
   Side,
 } from "@/domain/game";
 import type { ImportProgress } from "@/domain/import-progress";
+import type { IterationSelection } from "@/domain/image-iteration";
 import {
   refillJobMatchesGenerationPreferences,
   summarizeBufferHealth,
@@ -358,6 +360,32 @@ export const gameService = new GameService(
   {
     importSessionRepository,
     stateLockCoordinator,
+    readIterationImageDigest: async (candidate) => {
+      const match = /^\/(api\/assets|seed-assets)\/([a-zA-Z0-9-]+\.png)$/.exec(
+        candidate.imageUrl,
+      );
+      if (!match) throw new Error("The candidate does not have a local PNG");
+      const [, location, filename] = match;
+      const bytes =
+        location === "api/assets"
+          ? await assetStore.read(filename)
+          : await readFile(
+              join(
+                /* turbopackIgnore: true */ process.cwd(),
+                "public",
+                location,
+                filename,
+              ),
+            );
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      if (
+        /^[a-f0-9]{64}\.png$/.test(filename) &&
+        filename !== `${digest}.png`
+      ) {
+        throw new Error("The image bytes do not match the asset URL");
+      }
+      return digest;
+    },
   },
 );
 const forceGeneratedInitial =
@@ -469,7 +497,7 @@ export async function getGameStartupStatus(): Promise<{
 
 export async function selectGameRound(
   selection:
-    | { winnerSide: Side; roundNumber: number }
+    | { winnerSide: Side; roundNumber: number; iteration?: IterationSelection }
     | { outcome: "tie" | "both-lose"; roundNumber: number },
 ): Promise<GameState> {
   await reconcileImportPipeline();
@@ -477,7 +505,11 @@ export async function selectGameRound(
     ? selection.outcome === "tie"
       ? gameService.tie(selection.roundNumber)
       : gameService.bothLose(selection.roundNumber)
-    : gameService.select(selection.winnerSide, selection.roundNumber);
+    : gameService.select(
+        selection.winnerSide,
+        selection.roundNumber,
+        selection.iteration,
+      );
 }
 
 export async function getBufferHealth(): Promise<BufferHealth> {

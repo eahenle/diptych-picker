@@ -10,7 +10,13 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { GENERATION_JOB_ID_PATTERN } from "@/domain/game";
-import { generationIterationPlanSchema } from "@/domain/image-iteration";
+import {
+  generationIterationPlanSchema,
+  iterationAnchorReviewSchema,
+  iterationDirectionSchema,
+  iterationJobContextSchema,
+  iterationProvenanceSchema,
+} from "@/domain/image-iteration";
 import type { LeaderboardPreferenceEvidence } from "@/domain/challenger-state";
 import type {
   ImportedAssetMetadata,
@@ -18,10 +24,7 @@ import type {
 } from "@/domain/import-session";
 import { importedCandidateAnnotationSchema } from "@/domain/import-session";
 import { z } from "zod";
-import {
-  iterationAnchorReviewSchema,
-  verifyIterationAnchorReview,
-} from "./image-iteration-review";
+import { verifyIterationCompletion } from "./image-iteration-review";
 import {
   preferenceProfileSchema,
   preferenceRevisionSchema,
@@ -47,6 +50,7 @@ const candidateLineageSchema = z
     parentCandidateId: nonBlankStringSchema,
     parentConcept: nonBlankStringSchema,
     preferenceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    iteration: iterationProvenanceSchema.optional(),
   })
   .strict();
 
@@ -178,6 +182,7 @@ const challengerGenerationJobSchema = z
     ...generationJobFields,
     kind: z.literal("challenger"),
     iterationPlan: generationIterationPlanSchema.optional(),
+    iterationContext: iterationJobContextSchema.optional(),
   })
   .strict();
 
@@ -481,6 +486,7 @@ const proposedChallengerSchema = z
     styleTags: z.array(nonBlankStringSchema),
     reasoningSummary: nonBlankStringSchema,
     preferenceRevision: preferenceRevisionSchema.optional(),
+    iterationDirection: iterationDirectionSchema.optional(),
   })
   .strict();
 
@@ -1054,11 +1060,13 @@ export class FileGenerationMailbox
       );
       const job = record?.job;
       if (job && "iterationPlan" in job && job.iterationPlan) {
-        verifyIterationAnchorReview(
+        verifyIterationCompletion(
           job.iterationPlan,
           result.anchorReview,
           jobId,
           result.asset.filename.slice(0, -".png".length),
+          job.kind === "challenger" ? job.iterationContext : undefined,
+          result.proposal.iterationDirection,
         );
       } else if (result.anchorReview) {
         throw new Error("Anchor review requires a matching iteration job");

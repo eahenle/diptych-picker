@@ -143,6 +143,163 @@ export type GenerationIterationPlan = z.infer<
   typeof generationIterationPlanSchema
 >;
 
+export const iterationSelectionSchema = z
+  .object({
+    command: z.string().trim().min(1).max(4_000),
+    sourceCandidateId: z.string().trim().min(1),
+    winnerCandidateId: z.string().trim().min(1),
+  })
+  .strict();
+
+export type IterationSelection = z.infer<typeof iterationSelectionSchema>;
+
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const jobIdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/);
+const visualAxisSchema = z.enum(axes);
+const visualLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(featureLabelLimit)
+  .refine(
+    (label) => !/https?:|(?:^|\s)(?:\/|[a-z]:\\)|[a-f0-9]{64}/i.test(label),
+    "Use a short visual label without paths or IDs",
+  );
+const visualAxesSchema = z.partialRecord(visualAxisSchema, visualLabelSchema);
+const visualAnchorLabelsSchema = z
+  .array(visualLabelSchema)
+  .max(visualAnchorLimit);
+const axisListSchema = z
+  .array(visualAxisSchema)
+  .max(axes.length)
+  .refine(
+    (values) => new Set(values).size === values.length,
+    "Visual axes must be unique",
+  );
+
+export const observedIterationFingerprintSchema = z
+  .object({
+    origin: z.enum(["visual-analysis", "manual-observation"]),
+    axes: visualAxesSchema,
+    visualAnchors: visualAnchorLabelsSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (value) => Object.keys(value.axes).length > 0,
+    "Observe at least one visual axis",
+  );
+
+export const iterationAnchorReviewSchema = z
+  .object({
+    jobId: jobIdSchema,
+    imageSha256: sha256Schema,
+    presentAnchors: z.array(anchorLabelSchema).max(constraintCountLimit),
+    absentExclusions: z.array(anchorLabelSchema).max(constraintCountLimit),
+    observedFingerprint: observedIterationFingerprintSchema.optional(),
+  })
+  .strict();
+
+export type IterationAnchorReview = z.infer<typeof iterationAnchorReviewSchema>;
+
+export const iterationDirectionSchema = z
+  .object({
+    plan: generationIterationPlanSchema,
+    changedAxes: axisListSchema,
+  })
+  .strict();
+
+export type IterationDirection = z.infer<typeof iterationDirectionSchema>;
+
+export const iterationProvenanceSchema = z
+  .object({
+    temperature: generationIterationPlanSchema.shape.temperature,
+    changedAxes: axisListSchema,
+    reviewedJobId: jobIdSchema,
+    imageSha256: sha256Schema,
+    observedFingerprint: observedIterationFingerprintSchema,
+  })
+  .strict();
+
+export type IterationProvenance = z.infer<typeof iterationProvenanceSchema>;
+
+export const iterationJobContextSchema = z
+  .object({
+    command: iterationSelectionSchema.shape.command,
+    sessionId: jobIdSchema,
+    sourceImageUrl: z
+      .string()
+      .regex(/^\/(?:api\/assets|seed-assets)\/[a-zA-Z0-9-]+\.png$/),
+    sourceImageSha256: sha256Schema,
+    winnerImageSha256: sha256Schema,
+    history: z
+      .array(
+        z
+          .object({
+            outcome: z.enum(["selected", "rejected"]),
+            fingerprint: observedIterationFingerprintSchema.optional(),
+          })
+          .strict(),
+      )
+      .max(ITERATION_HISTORY_LIMIT),
+  })
+  .strict();
+
+export type IterationJobContext = z.infer<typeof iterationJobContextSchema>;
+
+export const pendingImageIterationSchema = z
+  .object({
+    context: iterationJobContextSchema,
+    source: z
+      .object({ candidateId: z.string().min(1), concept: z.string().min(1) })
+      .strict(),
+    plan: generationIterationPlanSchema,
+  })
+  .strict();
+
+export type PendingImageIteration = z.infer<typeof pendingImageIterationSchema>;
+
+export const iterationPlanningEvidenceSchema = z
+  .object({
+    source: observedIterationFingerprintSchema,
+    pairedCandidate: observedIterationFingerprintSchema.optional(),
+    subject: z
+      .object({
+        mandatoryAnchors: z.array(anchorLabelSchema).max(constraintCountLimit),
+        preservedAxes: axisListSchema.optional(),
+        exclusions: z
+          .array(anchorLabelSchema)
+          .max(constraintCountLimit)
+          .optional(),
+      })
+      .strict(),
+    proposals: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1).max(proposalIdLimit),
+            changes: visualAxesSchema,
+            retainedAnchors: z
+              .array(anchorLabelSchema)
+              .max(constraintCountLimit + visualAnchorLimit),
+            removedAnchors: z
+              .array(anchorLabelSchema)
+              .max(constraintCountLimit)
+              .optional(),
+            visualAnchors: visualAnchorLabelsSchema.optional(),
+            tags: z
+              .array(anchorLabelSchema)
+              .max(constraintCountLimit)
+              .optional(),
+            safety: z.enum(["allowed", "blocked"]),
+            contentLevel: z.enum(["family-friendly", "adult-allowed"]),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(12),
+  })
+  .strict();
+
 export type IterationPlanResult =
   | { status: "planned"; plan: IterationPlan }
   | {

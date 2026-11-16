@@ -493,6 +493,14 @@ Write this strict JSON object to `<data-root>/agent-work/<jobId>/proposal.json`:
 
 The four base proposal fields are always required. `preferenceRevision` must be omitted for Frozen and initial-import-fill jobs and is required for Guided and Unfettered jobs; it must contain every preference field except adaptation metadata and positive/negative source IDs. Every proposal string, including each `styleTags` entry, is trimmed and must contain at least one non-whitespace character. Revision fields are trimmed model output, themes must contain at least 20 characters, and the same field limits as the UI apply. `reasoningSummary` must explain how the image proposal follows the authoritative preference seed and stays distinct from recent work; ordinary adaptive generation also explains its response to aggregate numeric and visual leaderboard evidence at the selected freedom level. Invalid proposals fail before any outcome, result, or asset is published.
 
+## Explore variation planning
+
+An explicit Explore selection carries `iterationContext`, `variationSource`, and an `iterationPlan` with the user's constraints. `variationSource` names the image to reinterpret. `retainedWinner` identifies the image that will stay in the comparison. Read `iterationContext.sourceImageUrl` from `public/seed-assets/` for `/seed-assets/` URLs or from `<data-root>/assets/` for `/api/assets/` URLs. The planning helper checks the source bytes against `sourceImageSha256`.
+
+Write `observations.json` in the worker directory. Include `source` with `origin`, `axes`, and optional `visualAnchors`. Include `subject` with `mandatoryAnchors`, optional `preservedAxes`, and optional `exclusions`. Include a `proposals` array as defined in the [planner inputs](../../image-freshness-iterator/SKILL.md#prepare-the-inputs). Supply `pairedCandidate` if the other displayed image was visually observed. Use transferable continuity anchors and retain the user's explicit preserve clauses. The helper uses the saved content level and the job's bounded observed history.
+
+Run `npm run agent:plan-iteration -- --job <id> --observations-file <path>`. Generate from the returned `plan` and copy `iterationDirection` into `proposal.json`. Apply the saved Preferences, including avoidance guidance. Translate unambiguous avoided visual motifs into `subject.exclusions` for independent verification. The monitor reviews the effective anchors and exclusions in `iterationDirection.plan` and writes a separate `observedFingerprint` with `origin: "visual-analysis"`, bounded `axes`, and optional `visualAnchors` from the finished image. Omit private text, names, paths, and image bytes from these labels.
+
 ## Completed result
 
 Challenger and refill jobs may carry `iterationPlan` with `temperature`,

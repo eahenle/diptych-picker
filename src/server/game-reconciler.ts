@@ -6,6 +6,7 @@ import type { ChallengerRepository } from "./challenger-repository";
 import { refillContext } from "./game-refill";
 import type { GenerationJobPublisher } from "./generation-job-publisher";
 import type { GenerationSelectionReconciler } from "./generation-selection-reconciler";
+import type { IterationSelectionService } from "./iteration-selection-service";
 import type { LeaderboardProfileReconciler } from "./leaderboard-profile-reconciler";
 import type { PreparedSelectionReconciler } from "./prepared-selection-reconciler";
 import type { PromptCardReconciler } from "./prompt-card-reconciler";
@@ -27,6 +28,7 @@ interface GameReconcilerOptions {
     GenerationSelectionReconciler,
     "cleanup" | "reconcile"
   >;
+  iterationSelectionService?: Pick<IterationSelectionService, "reconcile">;
   promptCardReconciler: Pick<PromptCardReconciler, "reconcile">;
   leaderboardProfileReconciler: Pick<LeaderboardProfileReconciler, "reconcile">;
   preparedSelectionReconciler: Pick<
@@ -75,6 +77,12 @@ export class GameReconciler {
       game.round.status === "generating" &&
       game.pendingSelection?.kind === "generation"
     ) {
+      if (
+        game.pendingSelection.iteration &&
+        this.options.iterationSelectionService
+      ) {
+        return this.options.iterationSelectionService.reconcile(game);
+      }
       return this.options.generationSelectionReconciler.reconcile(game);
     }
 

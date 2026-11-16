@@ -746,6 +746,54 @@ describe("GameSnapshotService", () => {
     },
   );
 
+  it("exports the stable pair while an Explore challenger is being generated", async () => {
+    const original = gameState();
+    const context = service({
+      game: {
+        ...original,
+        round: {
+          ...original.round,
+          status: "generating",
+          replacingSide: "right",
+        },
+        pendingSelection: {
+          kind: "generation",
+          winnerSide: "left",
+          selectedAt: NOW,
+          generationJobId: "variation-1",
+          iteration: {
+            context: {
+              command: "iterate hot",
+              sessionId: "source-session",
+              sourceImageUrl: original.round.leftCandidate.imageUrl,
+              sourceImageSha256: "a".repeat(64),
+              winnerImageSha256: "a".repeat(64),
+              history: [],
+            },
+            source: {
+              candidateId: original.round.leftCandidate.id,
+              concept: original.round.leftCandidate.concept,
+            },
+            plan: {
+              temperature: 0.75,
+              mandatoryAnchors: [],
+              optionalAnchors: [],
+              exclusions: [],
+            },
+          },
+        },
+      },
+      challengers: challengerState(),
+    });
+
+    const snapshot = await context.snapshotService.export();
+    expect(snapshot.game).toEqual(original);
+    expect(snapshot.challengers.refillJobs).toEqual([]);
+    expect((await context.gameRepository.load())?.round.status).toBe(
+      "generating",
+    );
+  });
+
   it("refuses to export legacy in-progress work without a stable baseline", async () => {
     const game = gameState();
     game.round.status = "generating";

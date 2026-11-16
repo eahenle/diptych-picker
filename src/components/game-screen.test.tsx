@@ -1003,7 +1003,65 @@ describe("GameScreen challenger reconciliation", () => {
     ).toBe(false);
   });
 
-  it("explores variations by analyzing an inspected candidate into an editable profile", async () => {
+  it("submits Explore as one explicit variation selection", async () => {
+    const game = cloneGame();
+    let authoritative = game;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/game/select" && init?.method === "POST") {
+          authoritative = {
+            ...game,
+            round: { ...game.round, roundNumber: game.round.roundNumber + 1 },
+          };
+          return json({ error: "The comparison changed" }, 409);
+        }
+        return json({ status: "ready", game: authoritative });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GameScreen />);
+
+    const [, winner] = await screen.findAllByTestId("candidate-image");
+    fireEvent.click(
+      screen.getByRole("button", { name: "View image B larger" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Explore variations" }));
+    const dialog = screen.getByRole("dialog", { name: "Explore variations" });
+    fireEvent.change(within(dialog).getByLabelText("Iteration command"), {
+      target: { value: "iterate hot, preserve [red scarf]" },
+    });
+    expect(within(dialog).getByRole("slider")).toHaveValue("0.75");
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Keep this image and generate a variation",
+      }),
+    );
+
+    await screen.findByText("The comparison changed");
+    expect(
+      screen.getByRole("button", { name: /View comparison history/ }),
+    ).toHaveTextContent(`Round ${game.round.roundNumber + 1}`);
+    const requests = fetchMock.mock.calls.filter(
+      ([, init]) => init?.method === "POST",
+    );
+    expect(requests).toHaveLength(1);
+    expect(String(requests[0][0])).toBe("/api/game/select");
+    expect(JSON.parse(String(requests[0][1]?.body))).toEqual({
+      winnerSide: "right",
+      roundNumber: game.round.roundNumber,
+      iteration: {
+        command: "iterate hot, preserve [red scarf]",
+        sourceCandidateId: game.round.rightCandidate.id,
+        winnerCandidateId: game.round.rightCandidate.id,
+      },
+    });
+    expect(screen.getAllByTestId("candidate-image")[1]).toBe(winner);
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
+  });
+
+  it("can still analyze an inspected candidate into an editable preference profile", async () => {
     const game = cloneGame();
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1059,6 +1117,9 @@ describe("GameScreen challenger reconciliation", () => {
       screen.getByRole("button", { name: "View image A larger" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Explore variations" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit variation preferences" }),
+    );
 
     expect(
       await screen.findByRole("dialog", { name: "Preference profile" }),

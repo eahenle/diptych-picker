@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { GENERATION_JOB_ID_PATTERN, type Candidate } from "./game";
+import { iterationProvenanceSchema } from "./image-iteration";
 import type { PendingComparisonReceipt } from "./challenger-state";
 import { z } from "zod";
 
@@ -323,6 +324,7 @@ const candidateSchema = z
         parentCandidateId: nonBlank,
         parentConcept: nonBlank,
         preferenceFingerprint: digestSchema,
+        iteration: iterationProvenanceSchema.optional(),
       })
       .strict()
       .optional(),

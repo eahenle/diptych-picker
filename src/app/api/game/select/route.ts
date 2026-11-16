@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { iterationSelectionSchema } from "@/domain/image-iteration";
 import {
+  IterationSelectionError,
   MissingGameError,
   SelectionConflictError,
 } from "@/server/game-service";
@@ -13,6 +15,7 @@ const selectionSchema = z.union([
     .object({
       winnerSide: z.enum(["left", "right"]),
       roundNumber: z.number().int().positive(),
+      iteration: iterationSelectionSchema.optional(),
     })
     .strict(),
   z
@@ -46,6 +49,9 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
+    if (error instanceof IterationSelectionError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof SelectionConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

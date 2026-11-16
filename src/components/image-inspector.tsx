@@ -95,6 +95,14 @@ export function ImageInspector({
             {candidate.lineage ? (
               <small>Variation of {candidate.lineage.parentConcept}</small>
             ) : null}
+            {candidate.lineage?.iteration ? (
+              <small>
+                Temperature {candidate.lineage.iteration.temperature} · Reviewed
+                {candidate.lineage.iteration.changedAxes.length > 0
+                  ? ` · Planned changes ${candidate.lineage.iteration.changedAxes.map((axis) => axis.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`)).join(", ")}`
+                  : ""}
+              </small>
+            ) : null}
             {candidate.promptCardId ? (
               <small>
                 Prompt card:{" "}
